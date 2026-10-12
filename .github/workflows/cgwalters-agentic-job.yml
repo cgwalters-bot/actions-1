@@ -7,7 +7,7 @@
 #
 # The policy, check and apply workflows and the prepare, secure-host and run
 # actions are cgwalters-forge/agentic-job's at
-# 1a96301e22f4a496bdd7a25d952204eaa4e729eb (its docs/workflow.md, "The pieces,
+# 4b0b75f1b24b6fead5c1815b15437451239fe386 (its docs/workflow.md, "The pieces,
 # and an agent job of your own"); the agent job is this file's so that the
 # join can be a step of it. To move the pin, change the commit in the three
 # calls and in the agent job's source check together: check, apply, prepare
@@ -88,7 +88,9 @@ on:
         type: string
         default: ""
     secrets:
-      # Read by the apply job alone. Named by the caller, never inherited.
+      # The caller's apply token, named by the caller and never inherited.
+      # Read by the apply job, and by policy's notify job for a status
+      # comment on an item of another repository.
       SAFE_OUTPUTS_PAT:
         required: false
     outputs:
@@ -159,7 +161,7 @@ jobs:
             const instructions = profile === 'review'
               ? 'Review the pinned head supplied by the runner. Return one add_comment with VERDICT: APPROVE, CHANGES or REJECT on its first line and REASON: on its second line (at most 200 characters), or noop. A verdict is not merge authority.'
               : profile === 'fix'
-              ? "Fix works in a checkout of the pull request's branch at its pinned head; the change is pushed to that branch as one commit. Use noop, missing_tool or missing_data when needed."
+              ? "Fix works in a checkout of the pull request's branch at its pinned head; the change is pushed to that branch as one commit, or as the whole series again when the brief offers a replacement. Use noop, missing_tool or missing_data when needed."
               : 'Implement proposes one draft pull request. Triage and research leave the tree clean and return one add_comment. Use noop, missing_tool or missing_data when needed.';
             const text = JSON.stringify({ repository: repo, number: data.number, title: data.title, body: data.body })
               .replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
@@ -171,9 +173,17 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@1a96301e22f4a496bdd7a25d952204eaa4e729eb
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@4b0b75f1b24b6fead5c1815b15437451239fe386
+    # The write scopes are for the notify job alone, which posts the one
+    # status comment; the policy job itself downscopes to read. The apply
+    # token lets notify post it on an item of another repository, which the
+    # job token cannot write to.
+    secrets:
+      SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
       contents: read
+      issues: write
+      pull-requests: write
     with:
       id: ${{ inputs.repo }}#${{ inputs.item }}
       repo: ${{ inputs.repo }}
@@ -201,7 +211,10 @@ jobs:
       comment-target: ${{ inputs.item }}
       apply-environment: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
       apply-partial: false
-      notify: none
+      # One status comment, edited as the run goes, on the item in the
+      # target repository; a review stays silent, as in agentic-job's
+      # dispatch.
+      notify: ${{ inputs.kind == 'review' && 'none' || 'comment' }}
       artifact-prefix: dispatch-${{ inputs.kind }}-
       branch-prefix: dispatch/${{ inputs.kind }}/
 
@@ -236,7 +249,7 @@ jobs:
           SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
           SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
           PINNED_REPOSITORY: cgwalters-forge/agentic-job
-          PINNED_SHA: 1a96301e22f4a496bdd7a25d952204eaa4e729eb
+          PINNED_SHA: 4b0b75f1b24b6fead5c1815b15437451239fe386
         run: |
           echo "$SOURCE_REPOSITORY at $SOURCE_SHA"
           [[ "$SOURCE_REPOSITORY" == "$PINNED_REPOSITORY" && "$SOURCE_SHA" == "$PINNED_SHA" ]] ||
@@ -280,7 +293,7 @@ jobs:
     permissions:
       contents: read
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@1a96301e22f4a496bdd7a25d952204eaa4e729eb
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@4b0b75f1b24b6fead5c1815b15437451239fe386
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -288,11 +301,11 @@ jobs:
   apply:
     needs: [policy, agent, check]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@1a96301e22f4a496bdd7a25d952204eaa4e729eb
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@4b0b75f1b24b6fead5c1815b15437451239fe386
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # APPLY_ENVIRONMENT names. Named, never inherited. No secret reaches
-    # target, policy, the agent job or check.
+    # target, the policy job, the agent job or check.
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     # For the scripted agent's comment and a refusal's, which use the job
