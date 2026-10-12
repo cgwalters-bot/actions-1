@@ -3,7 +3,7 @@
 # tailnet join, the inference proxy and its audience, the runner, the agent
 # and its model. Every repository of ours calls this one file, so the
 # inference broker and the tailnet have one `job_workflow_ref` to admit, at
-# the commit the callers pin.
+# the commit the callers pin. The README has a caller to copy.
 #
 # The policy, check and apply workflows and the prepare, secure-host and run
 # actions are cgwalters-forge/agentic-job's at
@@ -14,11 +14,24 @@
 # and run refuse a mismatch. Callers then repin this file, and the admissions
 # follow its new commit.
 #
-# A caller grants the call `contents: read`, `issues: write`,
-# `pull-requests: write`, `actions: read` and `id-token: write`, passes its
-# apply token as SAFE_OUTPUTS_PAT, and keeps its own trigger, run name,
-# concurrency, bounds (`allow`, `fix-allow`) and runner configuration
-# (`config`). `vars` here are the calling repository's.
+# Nesting: the caller, this file, then policy.yml, check.yml or apply.yml,
+# none of which calls another workflow: three of the four levels GitHub
+# allows. The secret and the permissions only narrow on the way down.
+#
+# What is the deployment's is decided in the target job and nowhere else:
+# an input, else the calling repository's variable of the name the input's
+# description gives, else the default written there. A new repository
+# therefore sets nothing; a variable is for trying a model without
+# repinning.
+#
+# What is the calling repository's stays the caller's: its trigger, run
+# name and concurrency, its bounds (`allow`, `fix-allow`) and runner
+# configuration (`config`), the environment that gates apply
+# (`apply-environment`) and the token, passed as SAFE_OUTPUTS_PAT. The
+# caller grants the call `contents: read`, `issues: write`,
+# `pull-requests: write`, `actions: read` and `id-token: write`, which is
+# the union of the jobs here; each job takes only its own part. `vars` here
+# are the calling repository's.
 name: cgwalters-agentic-job
 
 on:
@@ -52,39 +65,37 @@ on:
         description: "The caller's runner configuration file; empty: the variable AGENT_CONFIG, else .github/agentic-job/hosted.toml"
         type: string
         default: ""
-      # Deployment settings. Empty takes the calling repository's (or its
-      # organization's) variable of the name given, which is where they are
-      # set today; an input is for a caller that must differ.
+      apply-environment:
+        description: "The caller's environment whose token applies the outputs; empty: the variable APPLY_ENVIRONMENT. Needed by every agent but fake"
+        type: string
+        default: ""
+      # Deployment settings, for a caller that must differ; see the header.
       agent:
-        description: "fake, opencode or claude; empty: the variable AGENT, else fake"
+        description: "fake, opencode or claude; empty: the variable AGENT, else opencode"
         type: string
         default: ""
       model:
-        description: "The model, as the proxy serves it; empty: the variable AGENT_MODEL"
+        description: "The model, as the proxy serves it; empty: the variable AGENT_MODEL, else our default"
         type: string
         default: ""
       runner:
-        description: "The agent job's runner label, as JSON; empty: the variable AGENT_RUNNER"
+        description: "The agent job's runner label, as JSON; empty: the variable AGENT_RUNNER, else our default"
         type: string
         default: ""
       inference-url:
-        description: "The inference proxy; empty: the variable INFERENCE_URL"
+        description: "The inference proxy; empty: the variable INFERENCE_URL, else ours"
         type: string
         default: ""
       inference-audience:
-        description: "Audience of the run's identity token at the proxy; empty: the variable INFERENCE_AUDIENCE"
-        type: string
-        default: ""
-      apply-environment:
-        description: "The environment whose token applies the outputs; empty: the variable APPLY_ENVIRONMENT"
+        description: "Audience of the run's identity token at the proxy; empty: the variable INFERENCE_AUDIENCE, else ours"
         type: string
         default: ""
       agent-config-repo:
-        description: "Where opencode's configuration is; empty: the variable AGENT_CONFIG_REPO"
+        description: "Where opencode's configuration is; empty: the variable AGENT_CONFIG_REPO, else ours"
         type: string
         default: ""
       agent-config-path:
-        description: "Path of opencode's configuration there; empty: the variable AGENT_CONFIG_PATH"
+        description: "Path of opencode's configuration there; empty: the variable AGENT_CONFIG_PATH, else ours"
         type: string
         default: ""
     secrets:
@@ -111,6 +122,12 @@ jobs:
     outputs:
       task: ${{ steps.target.outputs.task }}
       agent: ${{ steps.target.outputs.agent }}
+      runner: ${{ steps.target.outputs.runner }}
+      model: ${{ steps.target.outputs.model }}
+      inference-url: ${{ steps.target.outputs.inference-url }}
+      inference-audience: ${{ steps.target.outputs.inference-audience }}
+      agent-config-repo: ${{ steps.target.outputs.agent-config-repo }}
+      agent-config-path: ${{ steps.target.outputs.agent-config-path }}
     steps:
       # Trusted pinned code only; no target checkout and no write token.
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -120,11 +137,14 @@ jobs:
           TARGET_ITEM: ${{ inputs.item }}
           PROFILE: ${{ inputs.kind }}
           TASK: ${{ inputs.task }}
-          AGENT: ${{ inputs.agent || vars.AGENT || 'fake' }}
-          AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL }}
-          AGENT_RUNNER: ${{ inputs.runner || vars.AGENT_RUNNER }}
-          INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL }}
-          INFERENCE_AUDIENCE: ${{ inputs.inference-audience || vars.INFERENCE_AUDIENCE }}
+          # The deployment's defaults: the one place they are written.
+          AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
+          AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
+          AGENT_RUNNER: ${{ inputs.runner || vars.AGENT_RUNNER || '"ubuntu-26.04"' }}
+          INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL || 'http://100.121.0.115:18080' }}
+          INFERENCE_AUDIENCE: ${{ inputs.inference-audience || vars.INFERENCE_AUDIENCE || 'praxis-credential-broker' }}
+          AGENT_CONFIG_REPO: ${{ inputs.agent-config-repo || vars.AGENT_CONFIG_REPO || 'cgwalters-bot/homegit' }}
+          AGENT_CONFIG_PATH: ${{ inputs.agent-config-path || vars.AGENT_CONFIG_PATH || 'dotfiles/.config/opencode' }}
           APPLY_ENVIRONMENT: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
         with:
           script: |
@@ -138,9 +158,8 @@ jobs:
             }
             const agent = process.env.AGENT;
             if (!['fake', 'opencode', 'claude'].includes(agent)) throw new Error('AGENT must be fake, opencode or claude');
-            const missing = agent === 'fake' ? [] :
-              ['AGENT_MODEL', 'AGENT_RUNNER', 'INFERENCE_URL', 'INFERENCE_AUDIENCE']
-                .filter(key => !process.env[key]?.trim());
+            const runner = process.env.AGENT_RUNNER;
+            try { JSON.parse(runner); } catch { throw new Error('The runner label must be JSON, such as "ubuntu-26.04"'); }
             const repo = process.env.TARGET_REPO;
             const item = process.env.TARGET_ITEM;
             if (repo.trim() !== repo || item.trim() !== item ||
@@ -148,10 +167,20 @@ jobs:
                 !/^[1-9][0-9]*$/.test(item) || !Number.isSafeInteger(Number(item))) {
               throw new Error('Expected OWNER/NAME and a positive safe issue number');
             }
-            if (agent !== 'fake' &&
-                !process.env.APPLY_ENVIRONMENT?.trim()) missing.push('APPLY_ENVIRONMENT');
-            if (missing.length) throw new Error('Missing inputs or repository variables: ' + missing.join(', '));
+            if (agent !== 'fake' && !process.env.APPLY_ENVIRONMENT?.trim()) {
+              throw new Error('Missing the apply-environment input (or the variable APPLY_ENVIRONMENT)');
+            }
+            // The scripted agent has no model and reaches no proxy, and only
+            // opencode has a configuration to fetch: policy is given nothing
+            // it would not use.
+            const real = agent !== 'fake';
             core.setOutput('agent', agent);
+            core.setOutput('runner', runner);
+            core.setOutput('model', real ? process.env.AGENT_MODEL : '');
+            core.setOutput('inference-url', real ? process.env.INFERENCE_URL : '');
+            core.setOutput('inference-audience', real ? process.env.INFERENCE_AUDIENCE : '');
+            core.setOutput('agent-config-repo', agent === 'opencode' ? process.env.AGENT_CONFIG_REPO : '');
+            core.setOutput('agent-config-path', agent === 'opencode' ? process.env.AGENT_CONFIG_PATH : '');
             const [owner, name] = repo.split('/');
             const { data } = await github.rest.issues.get({ owner, repo: name, issue_number: Number(item) });
             const onPull = ['review', 'fix'].includes(profile);
@@ -195,9 +224,9 @@ jobs:
       # allowed for the repositories fix.toml names and no other.
       allow: ${{ inputs.kind == 'fix' && inputs.fix-allow || inputs.allow }}
       agent: ${{ needs.target.outputs.agent }}
-      model: ${{ needs.target.outputs.agent != 'fake' && (inputs.model || vars.AGENT_MODEL) || '' }}
-      agent-config-repo: ${{ needs.target.outputs.agent == 'opencode' && (inputs.agent-config-repo || vars.AGENT_CONFIG_REPO) || '' }}
-      agent-config-path: ${{ needs.target.outputs.agent == 'opencode' && (inputs.agent-config-path || vars.AGENT_CONFIG_PATH) || '' }}
+      model: ${{ needs.target.outputs.model }}
+      agent-config-repo: ${{ needs.target.outputs.agent-config-repo }}
+      agent-config-path: ${{ needs.target.outputs.agent-config-path }}
       config: ${{ inputs.config || vars.AGENT_CONFIG || '.github/agentic-job/hosted.toml' }}
       fake-profile: ${{ needs.target.outputs.agent == 'fake' && ((inputs.kind == 'triage' || inputs.kind == 'research') && 'comment' || (inputs.kind == 'fix' && 'implement' || inputs.kind)) || '' }}
       max-requests: ${{ needs.target.outputs.agent == 'fake' && '0' || '150' }}
@@ -205,8 +234,8 @@ jobs:
       review-item: ${{ inputs.kind == 'review' && inputs.item || '' }}
       # The pull request a fix pushes to: policy reads its branch and head.
       push-item: ${{ inputs.kind == 'fix' && inputs.item || '' }}
-      inference-url: ${{ needs.target.outputs.agent != 'fake' && (inputs.inference-url || vars.INFERENCE_URL) || '' }}
-      inference-audience: ${{ needs.target.outputs.agent != 'fake' && (inputs.inference-audience || vars.INFERENCE_AUDIENCE) || '' }}
+      inference-url: ${{ needs.target.outputs.inference-url }}
+      inference-audience: ${{ needs.target.outputs.inference-audience }}
       output-repo: ${{ inputs.repo }}
       comment-target: ${{ inputs.item }}
       apply-environment: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
@@ -221,7 +250,7 @@ jobs:
   agent:
     needs: [target, policy]
     if: ${{ needs.policy.outputs.admitted == 'true' }}
-    runs-on: ${{ fromJSON(inputs.runner || vars.AGENT_RUNNER || '"ubuntu-26.04"') }}
+    runs-on: ${{ fromJSON(needs.target.outputs.runner) }}
     timeout-minutes: 360
     # Read only, and nothing more: `run` hands this job's token to the agent
     # for GitHub reads, and no check sees what it was granted. The identity
@@ -304,7 +333,7 @@ jobs:
     uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@4b0b75f1b24b6fead5c1815b15437451239fe386
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
-    # APPLY_ENVIRONMENT names. Named, never inherited. No secret reaches
+    # `apply-environment` names. Named, never inherited. No secret reaches
     # target, the policy job, the agent job or check.
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
