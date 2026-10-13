@@ -7,7 +7,7 @@
 #
 # The policy, check and apply workflows and the prepare, secure-host and run
 # actions are cgwalters-forge/agentic-job's at
-# af62d95d1c18ab445bc4064424e182c088320b1e (its docs/workflow.md, "The pieces,
+# fbb0a2708f231ecc7acd7116fc957b8b3712a41c (its docs/workflow.md, "The pieces,
 # and an agent job of your own"); the agent job is this file's so that the
 # join can be a step of it. To move the pin, change the commit in the three
 # calls and in the agent job's source check together: check, apply, prepare
@@ -214,7 +214,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@af62d95d1c18ab445bc4064424e182c088320b1e
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@fbb0a2708f231ecc7acd7116fc957b8b3712a41c
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -295,7 +295,7 @@ jobs:
           SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
           SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
           PINNED_REPOSITORY: cgwalters-forge/agentic-job
-          PINNED_SHA: af62d95d1c18ab445bc4064424e182c088320b1e
+          PINNED_SHA: fbb0a2708f231ecc7acd7116fc957b8b3712a41c
         run: |
           echo "$SOURCE_REPOSITORY at $SOURCE_SHA"
           [[ "$SOURCE_REPOSITORY" == "$PINNED_REPOSITORY" && "$SOURCE_SHA" == "$PINNED_SHA" ]] ||
@@ -339,7 +339,7 @@ jobs:
     permissions:
       contents: read
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@af62d95d1c18ab445bc4064424e182c088320b1e
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@fbb0a2708f231ecc7acd7116fc957b8b3712a41c
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -347,7 +347,7 @@ jobs:
   apply:
     needs: [policy, agent, check]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@af62d95d1c18ab445bc4064424e182c088320b1e
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@fbb0a2708f231ecc7acd7116fc957b8b3712a41c
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
