@@ -78,6 +78,10 @@ on:
         description: "The model, as the proxy serves it; empty: the variable AGENT_MODEL, else our default"
         type: string
         default: ""
+      budget:
+        description: "The run's budget in AIC, hundredths of a dollar; a pool that costs more per run needs a larger one"
+        type: string
+        default: "500"
       runner:
         description: "The agent job's runner label, as JSON; empty: the variable AGENT_RUNNER, else our default"
         type: string
@@ -239,7 +243,10 @@ jobs:
       output-repo: ${{ inputs.repo }}
       comment-target: ${{ inputs.item }}
       apply-environment: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
-      apply-partial: false
+      budget: ${{ inputs.budget }}
+      # Keep the finished work of a run that stops on its budget, except for
+      # a fix or a review, whose partial result is not worth applying.
+      apply-partial: ${{ inputs.kind == 'implement' || inputs.kind == 'research' || inputs.kind == 'triage' }}
       # One status comment, edited as the run goes, on the item in the
       # target repository; a review stays silent, as in agentic-job's
       # dispatch.
