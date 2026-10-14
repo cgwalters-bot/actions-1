@@ -4,17 +4,30 @@ import { test } from 'node:test';
 
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
 
-// check, apply, prepare and run refuse a mismatch at run time; this catches
-// a partial repin before every run fails on it.
-test('every agentic-job pin names the same full commit', () => {
-  const pins = [...workflow.matchAll(/cgwalters-forge\/agentic-job\/\.github\/workflows\/[a-z]+\.yml@(\S+)/g)]
-    .map(match => match[1]);
-  assert.equal(pins.length, 3);
-  const [pin] = pins;
-  assert.match(pin, /^[0-9a-f]{40}$/);
-  assert.deepEqual(pins, [pin, pin, pin]);
-  assert.match(workflow, new RegExp(`PINNED_SHA: ${pin}\n`));
-  assert.match(workflow, new RegExp(`^# ${pin} `, 'm'));
+// Our own workflows and actions follow main (cgwalters-forge/tracker#544):
+// a commit left behind here would keep runs on an old harness, and check,
+// apply, prepare and run refuse calls at differing refs.
+test('every reference to our own workflows and actions follows main', () => {
+  const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)/g)];
+  assert.deepEqual(refs.map(match => match[1]), [
+    'agentic-job/.github/workflows/policy.yml',
+    'actions/tailscale',
+    'agentic-job/.github/workflows/check.yml',
+    'agentic-job/.github/workflows/apply.yml',
+  ]);
+  for (const [, path, ref] of refs) assert.equal(ref, 'main', path);
+  assert.doesNotMatch(workflow, /PINNED_SHA/);
+  assert.match(workflow, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
+});
+
+// Third-party actions stay pinned by full commit; dependabot moves them.
+test('every other action is pinned by full commit', () => {
+  for (const file of ['./cgwalters-agentic-job.yml', './ci.yml', '../../tailscale/action.yml']) {
+    const text = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const others = [...text.matchAll(/uses: (?!cgwalters-forge\/|\.\/)(\S+)@(\S+)/g)];
+    assert.ok(others.length > 0, file);
+    for (const [, name, ref] of others) assert.match(ref, /^[0-9a-f]{40}$/, `${file}: ${name}`);
+  }
 });
 
 // The target job's actual script, with doubles for github-script's globals.

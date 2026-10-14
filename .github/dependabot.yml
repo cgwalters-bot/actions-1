@@ -1,0 +1,14 @@
+# Third-party actions are pinned by commit; this keeps those pins moving.
+# Our own (cgwalters-forge/*) follow main and need no updates.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # The workflows, and the composite actions' own pins.
+    directories: [/, /tailscale]
+    schedule:
+      interval: daily
+    # A release that turns out to be compromised is usually pulled within
+    # days; checking daily but taking only week-old versions avoids pinning
+    # one in the meantime.
+    cooldown:
+      default-days: 7
