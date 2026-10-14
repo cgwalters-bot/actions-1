@@ -51,5 +51,17 @@ jobs:
       SAFE_OUTPUTS_PAT: ${{ secrets.CGWALTERS_BOT_PAT }}
 ```
 
+## Review
+
+Runs may edit `.github/` here, so pull requests are reviewed by
+cgwalters-forge/agentic-job's [review workflow](.github/workflows/review.yml),
+called as in its `docs/review.md`, with this repository's bounds and task
+in [workflow/](workflow/review.toml). The ruleset on `main` is to require its
+approval, dismissed when new commits are pushed; the approval is submitted
+only with the repository variable `AGENT_REAL_REVIEWS=true`, beside the
+agent and inference variables its `docs/review.md` lists. Without
+`.github/agentic-job/merge.toml` the reviewer is told a person approves
+after it.
+
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or
 [MIT](LICENSE-MIT), at your option.

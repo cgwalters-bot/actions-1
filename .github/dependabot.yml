@@ -9,7 +9,8 @@ updates:
     schedule:
       interval: daily
     # policy, check and apply must name the same tag (the run refuses calls
-    # at differing commits), so a new tag is one pull request for all three.
+    # at differing commits), so a new tag is one pull request for all three,
+    # and for review.yml's call, kept at the same tag.
     groups:
       agentic-job:
         patterns: ["cgwalters-forge/agentic-job*"]
