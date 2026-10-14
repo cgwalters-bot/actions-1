@@ -4,10 +4,11 @@ import { test } from 'node:test';
 
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
 
-// Our own workflows and actions follow main (cgwalters-forge/tracker#544):
-// a commit left behind here would keep runs on an old harness, and check,
-// apply, prepare and run refuse calls at differing refs.
-test('every reference to our own workflows and actions follows main', () => {
+// agentic-job is called at one release tag: check, apply, prepare and run
+// refuse calls that resolved to different commits, which following main
+// produced for runs spanning an agentic-job merge (tracker#544). Our own
+// tailscale action still follows main.
+test('agentic-job is called at one release tag, our tailscale at main', () => {
   const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)/g)];
   assert.deepEqual(refs.map(match => match[1]), [
     'agentic-job/.github/workflows/policy.yml',
@@ -15,9 +16,21 @@ test('every reference to our own workflows and actions follows main', () => {
     'agentic-job/.github/workflows/check.yml',
     'agentic-job/.github/workflows/apply.yml',
   ]);
-  for (const [, path, ref] of refs) assert.equal(ref, 'main', path);
+  const tags = new Set(refs.filter(([, path]) => path.startsWith('agentic-job/')).map(match => match[2]));
+  assert.equal(tags.size, 1);
+  assert.match([...tags][0], /^v\d+\.\d+\.\d+$/);
+  assert.equal(refs.find(([, path]) => path === 'actions/tailscale')[2], 'main');
   assert.doesNotMatch(workflow, /PINNED_SHA/);
   assert.match(workflow, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
+});
+
+// Dependabot moves the tag, all three calls in one pull request, without
+// the third-party cooldown.
+test('dependabot proposes new agentic-job tags as one group', () => {
+  const config = readFileSync(new URL('../dependabot.yml', import.meta.url), 'utf8');
+  assert.match(config, /\n {6}interval: daily\n/);
+  assert.match(config, /\n {6}agentic-job:\n {8}patterns: \["cgwalters-forge\/agentic-job\*"\]\n/);
+  assert.match(config, /\n {6}exclude: \["cgwalters-forge\/agentic-job\*"\]\n/);
 });
 
 // Third-party actions stay pinned by full commit; dependabot moves them.
