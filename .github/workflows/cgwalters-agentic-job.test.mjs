@@ -59,7 +59,8 @@ async function target(env, { pull = false } = {}) {
     TARGET_REPO: 'example/repo', TARGET_ITEM: '7', PROFILE: 'implement', TASK: 'Do it.',
     SKILLS: 'false', MAX_REQUESTS: '400', AGENT: 'opencode', AGENT_MODEL: 'p/m', AGENT_RUNNER: '"ubuntu-26.04"',
     INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud', AGENT_CONFIG_REPO: 'o/c',
-    AGENT_CONFIG_PATH: 'p', APPLY_ENVIRONMENT: 'apply', ...env,
+    AGENT_CONFIG_PATH: 'p', APPLY_ENVIRONMENT: 'apply', SESSION: 'false', IDLE_MINUTES: '',
+    TAILNET_DOMAIN: '', RUN_ID: '123', RUN_ATTEMPT: '2', ...env,
   };
   await new AsyncFunction('core', 'github', 'context', 'process', script)(
     core, github, context, { env: environment });
@@ -117,4 +118,78 @@ test('policy is given max-requests only from the target job', () => {
   assert.match(workflow, /\n {10}MAX_REQUESTS: \$\{\{ inputs\.max-requests \}\}\n/);
   assert.match(workflow, /\n {6}max-requests: \$\{\{ needs\.target\.outputs\.max-requests \}\}\n/);
   assert.match(workflow, /\n {6}max-requests: \$\{\{ steps\.target\.outputs\.max-requests \}\}\n/);
+});
+
+// The text of one job, from its key to the next job's.
+function job(name) {
+  return `\n${workflow.split(`\n  ${name}:\n`)[1].split(/\n {2}[a-z-]+:\n/)[0]}`;
+}
+
+test('a run is no session unless asked, and passes policy nothing new', async () => {
+  assert.match(workflow, /\n {6}session:\n {8}description: [^\n]*\n {8}type: boolean\n {8}default: false\n/);
+  assert.match(workflow, /\n {6}idle-minutes:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
+  const outputs = await target({ TAILNET_DOMAIN: 'example.ts.net' });
+  assert.equal(outputs.session, 'false');
+  assert.equal(outputs['idle-minutes'], '');
+  assert.equal(outputs['session-endpoint'], '');
+  assert.match(workflow, /\n {6}session: \$\{\{ needs\.target\.outputs\.session == 'true' \}\}\n/);
+  assert.match(workflow, /\n {6}idle-minutes: \$\{\{ needs\.target\.outputs\.idle-minutes \}\}\n/);
+  assert.match(workflow, /\n {10}SESSION: \$\{\{ inputs\.session \}\}\n {10}IDLE_MINUTES: \$\{\{ inputs\.idle-minutes \}\}\n/);
+});
+
+test('a session names its endpoint from the join hostname and the repository variable', async () => {
+  for (const [agent, idle] of [['opencode', '60'], ['fake', '1'], ['claude', '']]) {
+    const outputs = await target({ SESSION: 'true', IDLE_MINUTES: idle, TAILNET_DOMAIN: 'tail-1.ts.net', AGENT: agent });
+    assert.equal(outputs.session, 'true');
+    assert.equal(outputs['idle-minutes'], idle);
+    assert.equal(outputs['session-host'], 'agentic-job-123-2');
+    assert.equal(outputs['session-endpoint'], 'wss://agentic-job-123-2.tail-1.ts.net/');
+  }
+  assert.equal((await target({}))['session-host'], '');
+  // The address is the node the agent job joins as, also when that job
+  // alone is re-run, on a domain only the calling repository sets.
+  assert.match(job('agent'), /\n {10}hostname: \$\{\{ needs\.target\.outputs\.session-host \|\| format\('agentic-job-\{0\}-\{1\}', github\.run_id, github\.run_attempt\) \}\}\n/);
+  assert.match(job('target'), /\n {6}session-host: \$\{\{ steps\.target\.outputs\.session-host \}\}\n/);
+  assert.match(workflow, /\n {10}TAILNET_DOMAIN: \$\{\{ vars\.TAILNET_DOMAIN \}\}\n/);
+  assert.doesNotMatch(workflow, /inputs\.tailnet/i);
+});
+
+test('a session without a usable domain, for review, or with idle-minutes out of bounds fails', async () => {
+  for (const domain of ['', 'localhost', 'Example.ts.net', 'a.ts.net/x', 'a.ts.net`', '-a.ts.net', 'a.ts.net\n']) {
+    await assert.rejects(target({ SESSION: 'true', TAILNET_DOMAIN: domain }), /TAILNET_DOMAIN/, JSON.stringify(domain));
+  }
+  await assert.rejects(target({ SESSION: 'true', TAILNET_DOMAIN: 'a.ts.net', PROFILE: 'review' }, { pull: true }), /review/);
+  for (const value of ['0', '61', '100', '01', ' 5', '5 ', '1e1', '-1']) {
+    await assert.rejects(target({ SESSION: 'true', TAILNET_DOMAIN: 'a.ts.net', IDLE_MINUTES: value }), /idle-minutes/, JSON.stringify(value));
+  }
+  // Without session it would be ignored downstream; refuse it instead.
+  await assert.rejects(target({ IDLE_MINUTES: '10' }), /idle-minutes/);
+});
+
+test('the tailnet join is for a real agent or a session', () => {
+  assert.match(job('agent'), /- name: Join the tailnet\n {8}if: \$\{\{ needs\.target\.outputs\.agent != 'fake' \|\| needs\.target\.outputs\.session == 'true' \}\}\n/);
+});
+
+test('the session job posts the endpoint before apply concludes, and only for a session', () => {
+  const session = job('session');
+  assert.match(session, /\n {4}needs: \[target, policy\]\n/);
+  assert.match(session, /\n {4}if: \$\{\{ needs\.policy\.outputs\.admitted == 'true' && needs\.target\.outputs\.session == 'true' && needs\.policy\.outputs\.notified == 'true' && needs\.policy\.outputs\.notify == 'comment' \}\}\n/);
+  assert.match(session, /\n {4}concurrency:\n {6}group: agentic-job-status-\$\{\{ needs\.policy\.outputs\.notify-repo \}\}-\$\{\{ needs\.policy\.outputs\.notify-item \}\}\n {6}cancel-in-progress: false\n/);
+  assert.match(session, /\n {4}runs-on: ubuntu-26\.04\n/);
+  assert.match(session, /\n {4}continue-on-error: true\n/);
+  assert.match(session, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
+  assert.match(session, /`\$\{\{ needs\.target\.outputs\.session-endpoint \}\}`/);
+  assert.match(session, /\n {8}run: node \.agentic-job-source\/workflow\/status\.cjs\n/);
+  // Nothing of the agent's: no artifact is downloaded here.
+  assert.doesNotMatch(session, /download-artifact|needs\.agent/);
+  assert.match(job('apply'), /\n {4}needs: \[policy, agent, check, session\]\n/);
+});
+
+// GitHub refuses a call with an input the called workflow does not declare,
+// so passing `session` to a policy.yml without it fails every run, session
+// or not. These tags predate agentic-job's listening bridge (its #588):
+// this fails until the calls move past them.
+test('agentic-job is called at a tag whose policy has the session input', () => {
+  const [, tag] = workflow.match(/agentic-job\/\.github\/workflows\/policy\.yml@(\S+)/);
+  assert.ok(!['v0.0.1', 'v0.0.2', 'v0.0.3', 'v0.1.0'].includes(tag), `${tag} has no session input`);
 });
