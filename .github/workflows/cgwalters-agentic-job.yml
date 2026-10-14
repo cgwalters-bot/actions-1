@@ -7,7 +7,7 @@
 #
 # The policy, check and apply workflows and the prepare, secure-host and run
 # actions are cgwalters-forge/agentic-job's at
-# fbb0a2708f231ecc7acd7116fc957b8b3712a41c (its docs/workflow.md, "The pieces,
+# 5a5ce5b570da9e8747974d8e80c6ec5782bfddab (its docs/workflow.md, "The pieces,
 # and an agent job of your own"); the agent job is this file's so that the
 # join can be a step of it. To move the pin, change the commit in the three
 # calls and in the agent job's source check together: check, apply, prepare
@@ -62,9 +62,13 @@ on:
         type: string
         default: .github/agentic-job/fix.toml
       config:
-        description: "The caller's runner configuration file; empty: the variable AGENT_CONFIG, else .github/agentic-job/hosted.toml"
+        description: "The caller's runner configuration file; empty: the variable AGENT_CONFIG, else .github/agentic-job/hosted.toml. .agentic-job-source/.github/agentic-job/hosted.toml is agentic-job's own at the pinned commit"
         type: string
         default: ""
+      skills:
+        description: "For implement with claude or opencode: install agentic-job's skills (its docs/skills.md) and have the agent follow its implement skill"
+        type: boolean
+        default: false
       apply-environment:
         description: "The caller's environment whose token applies the outputs; empty: the variable APPLY_ENVIRONMENT. Needed by every agent but fake"
         type: string
@@ -126,6 +130,7 @@ jobs:
     outputs:
       task: ${{ steps.target.outputs.task }}
       agent: ${{ steps.target.outputs.agent }}
+      skills: ${{ steps.target.outputs.skills }}
       runner: ${{ steps.target.outputs.runner }}
       model: ${{ steps.target.outputs.model }}
       inference-url: ${{ steps.target.outputs.inference-url }}
@@ -141,6 +146,7 @@ jobs:
           TARGET_ITEM: ${{ inputs.item }}
           PROFILE: ${{ inputs.kind }}
           TASK: ${{ inputs.task }}
+          SKILLS: ${{ inputs.skills }}
           # The deployment's defaults: the one place they are written.
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
           AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
@@ -178,8 +184,9 @@ jobs:
             // opencode has a configuration to fetch: policy is given nothing
             // it would not use. Every real agent, vibe too, is given the
             // proxy's root: agentic-job adds the route of the agent's API
-            // (/anthropic, /v1, /mistral/v1) itself, and refuses vibe a
-            // configuration repository.
+            // (/anthropic, /v1, /mistral/v1) itself. Vibe can now take its
+            // models from a configuration repository's config.toml, but our
+            // default one is opencode's directory, which has none.
             const real = agent !== 'fake';
             // The default model is opencode's, a provider/model name; the
             // proxy's Mistral route knows only bare names.
@@ -199,10 +206,18 @@ jobs:
             if (onPull !== Boolean(data.pull_request) || data.number !== Number(item)) {
               throw new Error(onPull ? `${profile} requires a pull request` : 'This profile requires an issue, not a pull request');
             }
+            // As agentic-job's dispatch: the implement procedure is a skill
+            // the run installs, so the task only names it. agentic-job
+            // refuses skills for vibe and fake, and only implement has a
+            // procedure, so the input is ignored for anything else.
+            const skills = process.env.SKILLS === 'true' && profile === 'implement' && ['claude', 'opencode'].includes(agent);
+            core.setOutput('skills', String(skills));
             const instructions = profile === 'review'
               ? 'Review the pinned head supplied by the runner. Return one add_comment with VERDICT: APPROVE, CHANGES or REJECT on its first line and REASON: on its second line (at most 200 characters), or noop. A verdict is not merge authority.'
               : profile === 'fix'
               ? "Fix works in a checkout of the pull request's branch at its pinned head; the change is pushed to that branch as one commit, or as the whole series again when the brief offers a replacement. Use noop, missing_tool or missing_data when needed."
+              : skills
+              ? 'Use the implement skill. Implement proposes one draft pull request. Use noop, missing_tool or missing_data when needed.'
               : 'Implement proposes one draft pull request. Triage and research leave the tree clean and return one add_comment. Use noop, missing_tool or missing_data when needed.';
             const text = JSON.stringify({ repository: repo, number: data.number, title: data.title, body: data.body })
               .replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
@@ -214,7 +229,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@fbb0a2708f231ecc7acd7116fc957b8b3712a41c
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@5a5ce5b570da9e8747974d8e80c6ec5782bfddab
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -233,12 +248,16 @@ jobs:
       outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || 'add_comment,noop,missing_tool,missing_data')) }}
       max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}
       # A fix has bounds of its own: pushing to a pull request's branch is
-      # allowed for the repositories fix.toml names and no other.
+      # allowed for the repositories fix.toml names and no other. Since
+      # agentic-job's #553 that branch may be outside the bot's fork, where
+      # its CI runs the agent's commit, but only where the head repository
+      # opts in (agentic-job's docs/safe-outputs.md).
       allow: ${{ inputs.kind == 'fix' && inputs.fix-allow || inputs.allow }}
       agent: ${{ needs.target.outputs.agent }}
       model: ${{ needs.target.outputs.model }}
       agent-config-repo: ${{ needs.target.outputs.agent-config-repo }}
       agent-config-path: ${{ needs.target.outputs.agent-config-path }}
+      agent-skills: ${{ needs.target.outputs.skills == 'true' }}
       config: ${{ inputs.config || vars.AGENT_CONFIG || '.github/agentic-job/hosted.toml' }}
       fake-profile: ${{ needs.target.outputs.agent == 'fake' && ((inputs.kind == 'triage' || inputs.kind == 'research') && 'comment' || (inputs.kind == 'fix' && 'implement' || inputs.kind)) || '' }}
       # Counted by the proxy for every real agent; vibe requires it, having
@@ -295,7 +314,7 @@ jobs:
           SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
           SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
           PINNED_REPOSITORY: cgwalters-forge/agentic-job
-          PINNED_SHA: fbb0a2708f231ecc7acd7116fc957b8b3712a41c
+          PINNED_SHA: 5a5ce5b570da9e8747974d8e80c6ec5782bfddab
         run: |
           echo "$SOURCE_REPOSITORY at $SOURCE_SHA"
           [[ "$SOURCE_REPOSITORY" == "$PINNED_REPOSITORY" && "$SOURCE_SHA" == "$PINNED_SHA" ]] ||
@@ -339,7 +358,7 @@ jobs:
     permissions:
       contents: read
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@fbb0a2708f231ecc7acd7116fc957b8b3712a41c
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@5a5ce5b570da9e8747974d8e80c6ec5782bfddab
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -347,7 +366,7 @@ jobs:
   apply:
     needs: [policy, agent, check]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@fbb0a2708f231ecc7acd7116fc957b8b3712a41c
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@5a5ce5b570da9e8747974d8e80c6ec5782bfddab
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
