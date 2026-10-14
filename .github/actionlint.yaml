@@ -1,0 +1,5 @@
+# actionlint 1.7.12 predates GitHub's ubuntu-26.04 label, which new jobs
+# use (lint/README.md); without this it reports the label as unknown.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

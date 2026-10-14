@@ -90,6 +90,14 @@ on:
         description: "The most inference requests the run may make, 1 to 1000 (checked for every agent; fake, which makes none, is given 0)"
         type: string
         default: "400"
+      session:
+        description: "After the task's turn, wait for the operator's prompts over the tailnet (agentic-job's specs/session.md); the dispatch issue's status names where. Needs the variable TAILNET_DOMAIN, the tailnet's DNS name, and a `[session]` table naming operators and origins in the runner configuration; the endpoint, with that DNS name, is posted on the issue. Not for review"
+        type: boolean
+        default: false
+      idle-minutes:
+        description: "With session, how long it waits for the operator's next prompt, 1 to 60; empty for agentic-job's default"
+        type: string
+        default: ""
       runner:
         description: "The agent job's runner label, as JSON; empty: the variable AGENT_RUNNER, else our default"
         type: string
@@ -112,8 +120,8 @@ on:
         default: ""
     secrets:
       # The caller's apply token, named by the caller and never inherited.
-      # Read by the apply job, and by policy's notify job for a status
-      # comment on an item of another repository.
+      # Read by the apply job, and by policy's notify job and the session
+      # job for a status comment on an item of another repository.
       SAFE_OUTPUTS_PAT:
         required: false
     outputs:
@@ -136,6 +144,10 @@ jobs:
       agent: ${{ steps.target.outputs.agent }}
       skills: ${{ steps.target.outputs.skills }}
       max-requests: ${{ steps.target.outputs.max-requests }}
+      session: ${{ steps.target.outputs.session }}
+      idle-minutes: ${{ steps.target.outputs.idle-minutes }}
+      session-host: ${{ steps.target.outputs.session-host }}
+      session-endpoint: ${{ steps.target.outputs.session-endpoint }}
       runner: ${{ steps.target.outputs.runner }}
       model: ${{ steps.target.outputs.model }}
       inference-url: ${{ steps.target.outputs.inference-url }}
@@ -153,6 +165,13 @@ jobs:
           TASK: ${{ inputs.task }}
           SKILLS: ${{ inputs.skills }}
           MAX_REQUESTS: ${{ inputs.max-requests }}
+          SESSION: ${{ inputs.session }}
+          IDLE_MINUTES: ${{ inputs.idle-minutes }}
+          # The calling repository's own setting, never an input: where the
+          # status comment tells the operator to connect.
+          TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           # The deployment's defaults: the one place they are written.
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
           AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
@@ -206,6 +225,37 @@ jobs:
             if (!/^[1-9][0-9]*$/.test(maxRequests) || Number(maxRequests) > 1000) {
               throw new Error('max-requests must be an integer from 1 to 1000');
             }
+            // A session keeps the runner up for the operator: idle-minutes
+            // bounds how long it waits, which agentic-job caps at 60 too. A
+            // review is a silent verdict with no status comment to name the
+            // endpoint in. The endpoint is the node name of the tailnet join
+            // below on the tailnet's DNS name, the address `sandbox setup`
+            // serves; the status says it before the agent job can, since
+            // that job's outputs resolve only when it ends. The name is
+            // unique to the run; the agent job joins as this host even when
+            // it alone is re-run, where the earlier attempt's node, if still
+            // there, gets the tailnet to rename it. Its summary has the
+            // address actually served.
+            const session = process.env.SESSION === 'true';
+            const idleMinutes = process.env.IDLE_MINUTES;
+            if (idleMinutes !== '' && (!session || !/^[1-9][0-9]?$/.test(idleMinutes) || Number(idleMinutes) > 60)) {
+              throw new Error('idle-minutes must be empty, or with session an integer from 1 to 60');
+            }
+            let host = '';
+            let endpoint = '';
+            if (session) {
+              if (profile === 'review') throw new Error('A review cannot be a session');
+              const domain = process.env.TAILNET_DOMAIN ?? '';
+              if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
+                throw new Error('A session needs the variable TAILNET_DOMAIN, the tailnet\'s DNS name such as example.ts.net');
+              }
+              host = `agentic-job-${process.env.RUN_ID}-${process.env.RUN_ATTEMPT}`;
+              endpoint = `wss://${host}.${domain}/`;
+            }
+            core.setOutput('session', String(session));
+            core.setOutput('idle-minutes', idleMinutes);
+            core.setOutput('session-host', host);
+            core.setOutput('session-endpoint', endpoint);
             core.setOutput('agent', agent);
             core.setOutput('max-requests', real ? maxRequests : '0');
             core.setOutput('runner', runner);
@@ -243,7 +293,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.1.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.2.0
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -277,6 +327,11 @@ jobs:
       # Counted by the proxy for every real agent; vibe requires it, having
       # no price for a model to hold a budget against. Checked in the target job.
       max-requests: ${{ needs.target.outputs.max-requests }}
+      # agentic-job's listening bridge (its #588): `sandbox setup` serves it
+      # on the runner's tailnet name with `tailscale serve` and lets in only
+      # the operators and origins of the caller's `[session]` table.
+      session: ${{ needs.target.outputs.session == 'true' }}
+      idle-minutes: ${{ needs.target.outputs.idle-minutes }}
       review: ${{ inputs.kind == 'review' }}
       review-item: ${{ inputs.kind == 'review' && inputs.item || '' }}
       # The pull request a fix pushes to: policy reads its branch and head.
@@ -346,12 +401,14 @@ jobs:
       # Our one privileged step, this repository's own action at main, before anything of the agent's is on the
       # machine. The action picks the client id and tags by organization,
       # joins with --accept-dns=false and makes tailscaled's socket root's
-      # only. Only for a real agent: the scripted one needs no proxy.
+      # only. For a real agent, and for a session, which the operator
+      # reaches on the tailnet: the scripted agent alone needs no proxy. A
+      # session's hostname is the target job's, which its endpoint names.
       - name: Join the tailnet
-        if: ${{ needs.target.outputs.agent != 'fake' }}
+        if: ${{ needs.target.outputs.agent != 'fake' || needs.target.outputs.session == 'true' }}
         uses: cgwalters-forge/actions/tailscale@main
         with:
-          hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
+          hostname: ${{ needs.target.outputs.session-host || format('agentic-job-{0}-{1}', github.run_id, github.run_attempt) }}
       # The last step with root.
       - uses: ./.agentic-job-source/secure-host
         with:
@@ -365,6 +422,49 @@ jobs:
         with:
           github-token: ${{ github.token }}
 
+  # A session's endpoint on the dispatch issue, as a line of the run's one
+  # status comment, while the agent job runs. As policy's notify job does,
+  # with agentic-job's own status script and the apply token for an item of
+  # another repository; nothing of the agent's runs here. Apply waits for
+  # this job, so its conclusion is never overwritten by this line.
+  session:
+    needs: [target, policy]
+    if: ${{ needs.policy.outputs.admitted == 'true' && needs.target.outputs.session == 'true' && needs.policy.outputs.notified == 'true' && needs.policy.outputs.notify == 'comment' }}
+    # notify's group, so that two runs on one item edit one comment.
+    concurrency:
+      group: agentic-job-status-${{ needs.policy.outputs.notify-repo }}-${{ needs.policy.outputs.notify-item }}
+      cancel-in-progress: false
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: The policy call's source repository
+        env:
+          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
+          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
+          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
+        run: |
+          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.policy.outputs.source-repository }}
+          ref: ${{ needs.policy.outputs.source-sha }}
+          path: .agentic-job-source
+          persist-credentials: false
+      - name: The session's endpoint in the status comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_TOKEN: ${{ secrets.SAFE_OUTPUTS_PAT }}
+          REPO: ${{ needs.policy.outputs.notify-repo }}
+          ITEM: ${{ needs.policy.outputs.notify-item }}
+          TEXT: "⏳ [${{ github.workflow }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) is running. Session: after the task's turn the operator attaches at `${{ needs.target.outputs.session-endpoint }}`, once the agent job's summary shows it served."
+        run: node .agentic-job-source/workflow/status.cjs
+
   check:
     needs: [policy, agent]
     # Also for a run that failed and still handed something back.
@@ -372,15 +472,15 @@ jobs:
     permissions:
       contents: read
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.1.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.2.0
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
 
   apply:
-    needs: [policy, agent, check]
+    needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.1.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.2.0
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
