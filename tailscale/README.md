@@ -15,7 +15,7 @@ and a connection made meanwhile survives that, so join before any other
 user's processes start.
 
 ```yaml
-- uses: cgwalters-forge/actions/tailscale@v1
+- uses: cgwalters-forge/actions/tailscale@main
   id: tailnet
   with:
     hostname: cgwalters-devspace-${{ github.run_id }}

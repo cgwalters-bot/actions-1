@@ -3,16 +3,17 @@
 # tailnet join, the inference proxy and its audience, the runner, the agent
 # and its model. Every repository of ours calls this one file, so the
 # inference broker and the tailnet have one `job_workflow_ref` to admit, at
-# the commit the callers pin. The README has a caller to copy.
+# main. The README has a caller to copy.
 #
 # The policy, check and apply workflows and the prepare, secure-host and run
-# actions are cgwalters-forge/agentic-job's at
-# 9456dd719bbcf731911fb3872d5fc255618783fd (its docs/workflow.md, "The pieces,
-# and an agent job of your own"); the agent job is this file's so that the
-# join can be a step of it. To move the pin, change the commit in the three
-# calls and in the agent job's source check together: check, apply, prepare
-# and run refuse a mismatch. Callers then repin this file, and the admissions
-# follow its new commit.
+# actions are cgwalters-forge/agentic-job's at main (its docs/workflow.md,
+# "The pieces, and an agent job of your own"); the agent job is this file's
+# so that the join can be a step of it. Our own repositories follow main
+# rather than a commit pin (cgwalters-forge/tracker#544), so a change there
+# reaches every run without a repin here. The three calls normally resolve
+# to one commit when the run starts; should they not (a re-run after main
+# moved), check, apply, prepare and run refuse the mismatch with the policy
+# call's commit.
 #
 # Nesting: the caller, this file, then policy.yml, check.yml or apply.yml,
 # none of which calls another workflow: three of the four levels GitHub
@@ -22,7 +23,7 @@
 # an input, else the calling repository's variable of the name the input's
 # description gives, else the default written there. A new repository
 # therefore sets nothing; a variable is for trying a model without
-# repinning.
+# changing this file.
 #
 # What is the calling repository's stays the caller's: its trigger, run
 # name and concurrency, its bounds (`allow`, `fix-allow`) and runner
@@ -62,7 +63,7 @@ on:
         type: string
         default: .github/agentic-job/fix.toml
       config:
-        description: "The caller's runner configuration file; empty: the variable AGENT_CONFIG, else .github/agentic-job/hosted.toml. .agentic-job-source/.github/agentic-job/hosted.toml is agentic-job's own at the pinned commit"
+        description: "The caller's runner configuration file; empty: the variable AGENT_CONFIG, else .github/agentic-job/hosted.toml. .agentic-job-source/.github/agentic-job/hosted.toml is agentic-job's own at the commit policy ran"
         type: string
         default: ""
       skills:
@@ -229,7 +230,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@9456dd719bbcf731911fb3872d5fc255618783fd
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@main
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -308,17 +309,17 @@ jobs:
           ref: ${{ needs.policy.outputs.ref }}
           persist-credentials: false
       # The actions come from the policy call's own source, which must be
-      # the commit this file names.
-      - name: The policy call's source repository and commit
+      # the repository this file calls; its commit is whatever main was when
+      # the run started, and is checked out below as policy reported it.
+      - name: The policy call's source repository
         env:
           SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
           SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
-          PINNED_REPOSITORY: cgwalters-forge/agentic-job
-          PINNED_SHA: 9456dd719bbcf731911fb3872d5fc255618783fd
+          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
         run: |
           echo "$SOURCE_REPOSITORY at $SOURCE_SHA"
-          [[ "$SOURCE_REPOSITORY" == "$PINNED_REPOSITORY" && "$SOURCE_SHA" == "$PINNED_SHA" ]] ||
-            { echo "::error::the policy call is not $PINNED_REPOSITORY at $PINNED_SHA"; exit 1; }
+          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ needs.policy.outputs.source-repository }}
@@ -329,13 +330,13 @@ jobs:
         with:
           binary-artifact-id: ${{ needs.policy.outputs.binary-artifact-id }}
           policy-artifact-id: ${{ needs.policy.outputs.policy-artifact-id }}
-      # Our one privileged step, at a commit of this repository's own action, before anything of the agent's is on the
+      # Our one privileged step, this repository's own action at main, before anything of the agent's is on the
       # machine. The action picks the client id and tags by organization,
       # joins with --accept-dns=false and makes tailscaled's socket root's
       # only. Only for a real agent: the scripted one needs no proxy.
       - name: Join the tailnet
         if: ${{ needs.target.outputs.agent != 'fake' }}
-        uses: cgwalters-forge/actions/tailscale@d7bfa158217182d8c0b0b775189dcf91a6afcdde
+        uses: cgwalters-forge/actions/tailscale@main
         with:
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
       # The last step with root.
@@ -358,7 +359,7 @@ jobs:
     permissions:
       contents: read
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@9456dd719bbcf731911fb3872d5fc255618783fd
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@main
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -366,7 +367,7 @@ jobs:
   apply:
     needs: [policy, agent, check]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@9456dd719bbcf731911fb3872d5fc255618783fd
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@main
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches

@@ -5,11 +5,11 @@ world-readable copy under `/etc/agent-share/<name>`, so that the
 sandboxed steps of a
 [workflow-compiler](https://github.com/cgwalters-forge/workflow-compiler)
 job can read it but not change it. It is what the compiler emits for a
-`share` runner step, pinned by commit; it runs as root through `sudo`,
+`share` runner step; it runs as root through `sudo`,
 before the job enters its sandbox.
 
 ```yaml
-- uses: cgwalters-forge/actions/sandbox-share@<sha>
+- uses: cgwalters-forge/actions/sandbox-share@main
   with:
     name: config
     path: ci/config.toml
