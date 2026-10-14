@@ -6,6 +6,7 @@ this repository's issues.
 
 | Action | Status | Roadmap |
 | --- | --- | --- |
+| [lint](lint/README.md) | actionlint, zizmor and the runner-label policy; this repository's CI calls it | Called from each forge repository's CI |
 | [tailscale](tailscale/README.md) | Settings by organization; CI runs its unit tests and checks the socket and CLI are closed after a join that fails, no real join (no tailnet credentials here) | Replace devspace.yml's and agent.yml's tailscale/github-action steps; take over the RHEL prerequisites |
 
 ## cgwalters-agentic-job

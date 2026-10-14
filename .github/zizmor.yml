@@ -6,3 +6,7 @@ rules:
       policies:
         "cgwalters-forge/*": ref-pin
         "*": hash-pin
+  # Suggests `$/` for every local action, ci.yml's included; we keep `./`
+  # (./.agentic-job-source is another repository's checkout anyway).
+  self-repository:
+    disable: true

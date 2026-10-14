@@ -1,0 +1,50 @@
+# lint
+
+The workflow check every forge repository runs the same way:
+[actionlint](https://github.com/rhysd/actionlint) and
+[zizmor](https://docs.zizmor.sh/) at pinned versions, then a runner-label
+policy that denies `ubuntu-latest` in any `runs-on`. New workflows use
+`ubuntu-26.04`; every other label, self-hosted and custom runners
+included, is allowed.
+
+```yaml
+jobs:
+  lint:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cgwalters-forge/actions/lint@main
+```
+
+It checks the repository checked out at the workspace root and needs
+docker and cargo on the runner, as GitHub's Ubuntu runners have. zizmor
+reads the repository's own `.github/zizmor.yml`.
+
+## Runner labels
+
+`ubuntu-latest` follows GitHub's choice of Ubuntu, so a workflow changes
+under a repository without a commit. A job is refused when its `runs-on`
+names a denied label: as a string, in a list or `labels`, as a quoted
+literal inside an expression (`inputs.runner || 'ubuntu-latest'`), in the
+job's matrix under any key when `runs-on` reads the matrix (`exclude`
+aside), as the
+default or a choice option of a `workflow_call` or `workflow_dispatch`
+input that `runs-on` reads, or in the `with` of a job calling a reusable
+workflow (followed through the matrix and inputs the same way). Labels are
+compared case-insensitively. It catches a label written by mistake, not
+one assembled to get past it (`format()`, a repository variable).
+
+The `deny` input adds labels to the list, separated by whitespace or
+commas; `ubuntu-latest` stays on it whatever the input says.
+
+## Locally
+
+```sh
+just --justfile path/to/actions/lint/Justfile --working-directory . check
+```
+
+`CONTAINER=podman` runs the linters with podman.
