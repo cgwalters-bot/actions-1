@@ -28,8 +28,13 @@ jobs:
         with:
           args: --offline --include-fragments --no-progress "**/*.md"
           fail: true
-      - name: actionlint
-        run: docker run --rm -v "$PWD:/repo" -w /repo docker.io/rhysd/actionlint:1.7.12 -color
+      # The shared workflow check, called as other repositories call it.
+      - uses: ./lint
+      # just is on the path from the lint action; the tests run whether or
+      # not its check passed.
+      - name: lint unit tests
+        if: ${{ !cancelled() }}
+        run: just test-lint
       # sandbox-share on this runner: content, a file and a directory are
       # shared root-owned and read-only, and a symlink is refused.
       - name: Make files to share

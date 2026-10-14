@@ -1,0 +1,11 @@
+[package]
+name = "runner-labels"
+version = "0.1.0"
+edition = "2024"
+# let chains
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+yaml-rust2 = "0.13.0"
