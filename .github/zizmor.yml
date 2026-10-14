@@ -1,5 +1,5 @@
-# Our own workflows and actions follow a ref, main, rather than a commit
-# (cgwalters-forge/tracker#544); everyone else's stay pinned by commit.
+# Our own workflows and actions follow a ref (main, or agentic-job's release
+# tag) rather than a commit; everyone else's stay pinned by commit.
 rules:
   unpinned-uses:
     config:
