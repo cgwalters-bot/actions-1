@@ -86,6 +86,10 @@ on:
         description: "The run's budget in AIC, hundredths of a dollar; a pool that costs more per run needs a larger one"
         type: string
         default: "500"
+      max-requests:
+        description: "The most inference requests the run may make, 1 to 1000 (checked for every agent; fake, which makes none, is given 0)"
+        type: string
+        default: "400"
       runner:
         description: "The agent job's runner label, as JSON; empty: the variable AGENT_RUNNER, else our default"
         type: string
@@ -131,6 +135,7 @@ jobs:
       task: ${{ steps.target.outputs.task }}
       agent: ${{ steps.target.outputs.agent }}
       skills: ${{ steps.target.outputs.skills }}
+      max-requests: ${{ steps.target.outputs.max-requests }}
       runner: ${{ steps.target.outputs.runner }}
       model: ${{ steps.target.outputs.model }}
       inference-url: ${{ steps.target.outputs.inference-url }}
@@ -147,6 +152,7 @@ jobs:
           PROFILE: ${{ inputs.kind }}
           TASK: ${{ inputs.task }}
           SKILLS: ${{ inputs.skills }}
+          MAX_REQUESTS: ${{ inputs.max-requests }}
           # The deployment's defaults: the one place they are written.
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
           AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
@@ -193,7 +199,15 @@ jobs:
             if (agent === 'vibe' && process.env.AGENT_MODEL.includes('/')) {
               throw new Error(`vibe takes a bare Mistral model name such as devstral-small-latest, not '${process.env.AGENT_MODEL}'`);
             }
+            // The budget and the timeout bound a run's cost and time; the
+            // request count is vibe's only cost bound, as the proxy has no
+            // price for its models, so a mistyped count is capped here.
+            const maxRequests = process.env.MAX_REQUESTS;
+            if (!/^[1-9][0-9]*$/.test(maxRequests) || Number(maxRequests) > 1000) {
+              throw new Error('max-requests must be an integer from 1 to 1000');
+            }
             core.setOutput('agent', agent);
+            core.setOutput('max-requests', real ? maxRequests : '0');
             core.setOutput('runner', runner);
             core.setOutput('model', real ? process.env.AGENT_MODEL : '');
             core.setOutput('inference-url', real ? process.env.INFERENCE_URL : '');
@@ -261,8 +275,8 @@ jobs:
       config: ${{ inputs.config || vars.AGENT_CONFIG || '.github/agentic-job/hosted.toml' }}
       fake-profile: ${{ needs.target.outputs.agent == 'fake' && ((inputs.kind == 'triage' || inputs.kind == 'research') && 'comment' || (inputs.kind == 'fix' && 'implement' || inputs.kind)) || '' }}
       # Counted by the proxy for every real agent; vibe requires it, having
-      # no price for a model to hold a budget against.
-      max-requests: ${{ needs.target.outputs.agent == 'fake' && '0' || '150' }}
+      # no price for a model to hold a budget against. Checked in the target job.
+      max-requests: ${{ needs.target.outputs.max-requests }}
       review: ${{ inputs.kind == 'review' }}
       review-item: ${{ inputs.kind == 'review' && inputs.item || '' }}
       # The pull request a fix pushes to: policy reads its branch and head.

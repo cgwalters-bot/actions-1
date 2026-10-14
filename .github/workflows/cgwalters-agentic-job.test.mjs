@@ -57,7 +57,7 @@ async function target(env, { pull = false } = {}) {
   const context = { eventName: 'workflow_call' };
   const environment = {
     TARGET_REPO: 'example/repo', TARGET_ITEM: '7', PROFILE: 'implement', TASK: 'Do it.',
-    SKILLS: 'false', AGENT: 'opencode', AGENT_MODEL: 'p/m', AGENT_RUNNER: '"ubuntu-26.04"',
+    SKILLS: 'false', MAX_REQUESTS: '400', AGENT: 'opencode', AGENT_MODEL: 'p/m', AGENT_RUNNER: '"ubuntu-26.04"',
     INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud', AGENT_CONFIG_REPO: 'o/c',
     AGENT_CONFIG_PATH: 'p', APPLY_ENVIRONMENT: 'apply', ...env,
   };
@@ -97,4 +97,24 @@ test('policy is given skills only from the target job', () => {
   assert.match(workflow, /\n {10}SKILLS: \$\{\{ inputs\.skills \}\}\n/);
   assert.match(workflow, /\n {6}agent-skills: \$\{\{ needs\.target\.outputs\.skills == 'true' \}\}\n/);
   assert.match(workflow, /\n {6}skills: \$\{\{ steps\.target\.outputs\.skills \}\}\n/);
+});
+
+test('max-requests defaults to 400, passes through for a real agent and is 0 for fake', async () => {
+  assert.match(workflow, /\n {6}max-requests:\n {8}description: [^\n]*\n {8}type: string\n {8}default: "400"\n/);
+  assert.equal((await target({}))['max-requests'], '400');
+  assert.equal((await target({ MAX_REQUESTS: '1000', AGENT: 'claude' }))['max-requests'], '1000');
+  assert.equal((await target({ MAX_REQUESTS: '1', AGENT: 'vibe', AGENT_MODEL: 'devstral-small-latest' }))['max-requests'], '1');
+  assert.equal((await target({ MAX_REQUESTS: '900', AGENT: 'fake' }))['max-requests'], '0');
+});
+
+test('max-requests outside 1 to 1000 fails the run', async () => {
+  for (const value of ['', '0', '1001', '-1', '01', '4e2', ' 400', '400 ']) {
+    await assert.rejects(target({ MAX_REQUESTS: value }), /max-requests must be/, JSON.stringify(value));
+  }
+});
+
+test('policy is given max-requests only from the target job', () => {
+  assert.match(workflow, /\n {10}MAX_REQUESTS: \$\{\{ inputs\.max-requests \}\}\n/);
+  assert.match(workflow, /\n {6}max-requests: \$\{\{ needs\.target\.outputs\.max-requests \}\}\n/);
+  assert.match(workflow, /\n {6}max-requests: \$\{\{ steps\.target\.outputs\.max-requests \}\}\n/);
 });
