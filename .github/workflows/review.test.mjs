@@ -74,7 +74,7 @@ test('the bounds admit one comment on this repository only', () => {
   assert.equal(review, `${common(repos)}
 events = ["pull_request_target", "pull_request"]
 roles = ["all"]
-bots = []
+bots = ["dependabot[bot]"]
 forks = true`);
   assert.equal(command, `${common(repos)}
 events = ["issue_comment"]
