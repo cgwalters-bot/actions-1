@@ -104,14 +104,15 @@ deployment-specific pieces from agentic-job is a separate follow-up.
 live tailnet joins and GitHub review writes are not exercised locally.
 
 Runs may edit `.github/` here, so pull requests are reviewed by
-cgwalters-forge/agentic-job's [review workflow](.github/workflows/review.yml),
-called as in its `docs/review.md`, with this repository's bounds and task
-in [workflow/](workflow/review.toml). The ruleset on `main` is to require its
+[this repository's caller](.github/workflows/review.yml) of the wrapper
+above, referenced locally so that it runs as on the base branch, never as
+a pull request edits it, with this repository's bounds and task in
+[workflow/](workflow/review.toml). The ruleset on `main` is to require its
 approval, dismissed when new commits are pushed; the approval is submitted
 only with the repository variable `AGENT_REAL_REVIEWS=true`, beside the
-agent and inference variables its `docs/review.md` lists. Without
-`.github/agentic-job/merge.toml` the reviewer is told a person approves
-after it.
+variables listed above. Dependabot's pull requests are reviewed only with
+its ID in `REVIEW_BOT_IDS`. Without `.github/agentic-job/merge.toml` the
+reviewer is told a person approves after it.
 
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or
 [MIT](LICENSE-MIT), at your option.
