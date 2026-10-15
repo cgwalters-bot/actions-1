@@ -1,4 +1,4 @@
-# Composed from agentic-job v0.2.0's review.yml: keep event policy and
+# Composed from agentic-job v0.4.0's review.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
 # No dispatcher inputs: identity/configuration comes from repository variables.
 name: cgwalters-review
@@ -20,7 +20,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.2.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.4.0
     permissions:
       contents: read
     with:
@@ -93,6 +93,8 @@ jobs:
       exit: ${{ steps.run.outputs.exit }}
       over-budget: ${{ steps.run.outputs.over-budget }}
       safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
+      # Let the submitted review's footer link the agent job, not just the run.
+      job: ${{ job.check_run_id }}
     steps:
       # The trusted base, never the head; source actions come from policy's pin.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -130,7 +132,7 @@ jobs:
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.agent.outputs.safe-outputs-artifact-id != '' }}
     permissions:
       contents: read
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.2.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.4.0
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -171,6 +173,7 @@ jobs:
           CHECK_RESULT: ${{ needs.check.result }}
           VERDICT: ${{ needs.check.outputs.verdict }}
           AGENT_EXIT: ${{ needs.agent.outputs.exit }}
+          AGENT_JOB: ${{ needs.agent.outputs.job }}
           REAL_REVIEWS: ${{ vars.AGENT_REAL_REVIEWS }}
         with:
           result-encoding: string
@@ -183,7 +186,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.2.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.4.0
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
