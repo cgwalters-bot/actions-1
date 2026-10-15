@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-// The review gate: a thin caller of agentic-job's review.yml, with this
-// repository's copies of the bounds and the task, which that workflow reads
-// from the base branch (agentic-job's docs/review.md, "Another repository").
+// The review gate: a thin caller of this repository's cgwalters-review.yml,
+// with this repository's copies of the bounds and the task, which that
+// workflow reads from the base branch (agentic-job's docs/review.md,
+// "Another repository").
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const caller = read('./review.yml');
 
@@ -18,7 +19,7 @@ test('the caller runs nothing of the head and passes no secret', () => {
   const lines = caller.split('\n')
     .map(line => line.replace(/ # zizmor: .*$/, ''))
     .filter(line => line.trim() && !line.trim().startsWith('#'));
-  assert.equal(lines.join('\n').replace(/@v\d+\.\d+\.\d+$/m, '@TAG'), `name: review
+  assert.equal(lines.join('\n'), `name: review
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -30,7 +31,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
-    uses: cgwalters-forge/agentic-job/.github/workflows/review.yml@TAG
+    uses: ./.github/workflows/cgwalters-review.yml
     permissions:
       contents: read
       issues: read
@@ -41,15 +42,25 @@ jobs:
 });
 
 // One agentic-job tag across our workflows, which dependabot moves together.
-test('review.yml is called at the tag the agent job calls', () => {
-  const refs = [...caller.matchAll(/uses: (\S+)@(\S+)/g)];
-  assert.deepEqual(refs.map(match => match[1]), ['cgwalters-forge/agentic-job/.github/workflows/review.yml']);
-  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
-    const tags = [...read(file).matchAll(/uses: cgwalters-forge\/agentic-job\/\S+@(\S+)/g)];
-    assert.equal(tags.length, 3, file);
-    for (const [, tag] of tags) assert.equal(refs[0][2], tag, file);
+test('the wrapper calls agentic-job at the tag the agent job calls', () => {
+  const tags = file => [...read(file).matchAll(/uses: cgwalters-forge\/agentic-job\/\S+@(\S+)/g)]
+    .map(match => match[1]);
+  const agent = tags('./cgwalters-agentic-job.yml');
+  assert.equal(agent.length, 3);
+  assert.match(agent[0], /^v\d+\.\d+\.\d+$/);
+  assert.deepEqual(tags('./cgwalters-review.yml'), agent);
+});
+
+// A called workflow's jobs get at most what the caller grants, so the caller
+// grants what the wrapper's jobs ask for, and nothing more.
+test('the caller grants exactly the union of the wrapper\'s job grants', () => {
+  const grants = text => [...text.matchAll(/\n {4}permissions:\n((?: {6}\S.*\n?)+)/g)]
+    .flatMap(match => match[1].trim().split('\n').map(line => line.trim().split(': ')));
+  const union = {};
+  for (const [scope, level] of grants(read('./cgwalters-review.yml'))) {
+    if (union[scope] !== 'write') union[scope] = level;
   }
-  assert.match(refs[0][2], /^v\d+\.\d+\.\d+$/);
+  assert.deepEqual(Object.fromEntries(grants(caller)), union);
 });
 
 test('the composed review links its pinned helper to the agent job', () => {
