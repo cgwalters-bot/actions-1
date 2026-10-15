@@ -54,7 +54,7 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.2.0**'s policy, check,
+event-review wrapper. It composes agentic-job **v0.4.0**'s policy, check,
 apply and review helpers because its review workflow does not yet expose a
 network hook. It adds our tailnet join and defaults: opencode,
 `praxis/gpt-6.1-sol`, `ubuntu-26.04`, and the dispatch wrapper's inference

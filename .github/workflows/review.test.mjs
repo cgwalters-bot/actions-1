@@ -44,10 +44,20 @@ jobs:
 test('review.yml is called at the tag the agent job calls', () => {
   const refs = [...caller.matchAll(/uses: (\S+)@(\S+)/g)];
   assert.deepEqual(refs.map(match => match[1]), ['cgwalters-forge/agentic-job/.github/workflows/review.yml']);
-  const tags = [...read('./cgwalters-agentic-job.yml').matchAll(/uses: cgwalters-forge\/agentic-job\/\S+@(\S+)/g)];
-  assert.ok(tags.length > 0);
-  for (const [, tag] of tags) assert.equal(refs[0][2], tag);
+  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
+    const tags = [...read(file).matchAll(/uses: cgwalters-forge\/agentic-job\/\S+@(\S+)/g)];
+    assert.equal(tags.length, 3, file);
+    for (const [, tag] of tags) assert.equal(refs[0][2], tag, file);
+  }
   assert.match(refs[0][2], /^v\d+\.\d+\.\d+$/);
+});
+
+test('the composed review links its pinned helper to the agent job', () => {
+  const workflow = read('./cgwalters-review.yml');
+  const agent = workflow.split('\n  agent:\n')[1].split('\n  check:\n')[0];
+  const submit = workflow.split('\n  submit:\n')[1].split('\n  apply:\n')[0];
+  assert.match(agent, /\n {6}job: \$\{\{ job\.check_run_id \}\}\n/);
+  assert.match(submit, /\n {10}AGENT_JOB: \$\{\{ needs\.agent\.outputs\.job \}\}\n/);
 });
 
 // The bounds, comments aside: comment-only outputs for this repository's
