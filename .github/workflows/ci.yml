@@ -35,6 +35,9 @@ jobs:
       - name: lint unit tests
         if: ${{ !cancelled() }}
         run: just test-lint
+      - name: event-review wrapper tests
+        if: ${{ !cancelled() }}
+        run: just test-review
       # sandbox-share on this runner: content, a file and a directory are
       # shared root-owned and read-only, and a symlink is refused.
       - name: Make files to share
