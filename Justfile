@@ -5,3 +5,7 @@ lint:
 # The check's unit tests.
 test-lint:
     {{ just_executable() }} --justfile lint/Justfile test
+
+# Reusable event-review admission and credential-boundary regressions.
+test-review:
+    node --test workflow/review.test.cjs
