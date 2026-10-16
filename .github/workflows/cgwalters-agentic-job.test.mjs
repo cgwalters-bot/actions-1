@@ -24,6 +24,19 @@ test('agentic-job is called at one release tag, our tailscale at main', () => {
   assert.match(workflow, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
 });
 
+// Without `issue`, apply opens an implement pull request with no closing
+// reference, so its merge leaves the issue open (agentic-job#877). Only the
+// dispatched item, never another target: a merge must not close a tracking
+// issue.
+test('policy is given the implement item as issue, and nothing else', () => {
+  const issues = [...workflow.matchAll(/\n {6}issue: (.*)\n/g)];
+  assert.deepEqual(issues.map(match => match[1]), ["${{ inputs.kind == 'implement' && inputs.item || '' }}"]);
+  assert.match(job('policy'), /\n {6}issue: /);
+  // With the item in `repo` itself apply writes `Closes`; an `item-repo`
+  // would make it a mere `Refs`.
+  assert.doesNotMatch(workflow, /item-repo:/);
+});
+
 // Dependabot moves the tag, all three calls in one pull request, without
 // the third-party cooldown.
 test('dependabot proposes new agentic-job tags as one group', () => {
