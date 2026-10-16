@@ -129,3 +129,10 @@ test('the task treats the head as hostile and defers to the merge policy', () =>
     assert.ok(!task.includes(claim), claim);
   }
 });
+
+// The review wrapper has no inputs and its caller passes no secret, so it
+// stays on the broker: agentic-job's provider-key mode (its #740) is not
+// wired here.
+test('the review wrapper stays on the inference broker', () => {
+  assert.doesNotMatch(read('./cgwalters-review.yml'), /INFERENCE_API_KEY|inference-register|inference-provider|inference-api-key/);
+});

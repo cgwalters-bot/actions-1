@@ -64,7 +64,7 @@ async function target(env, { pull = false, caller = { private: false, visibility
   const environment = {
     TARGET_REPO: 'example/repo', TARGET_ITEM: '7', PROFILE: 'implement', TASK: 'Do it.',
     SKILLS: 'false', MAX_REQUESTS: '400', AGENT: 'opencode', AGENT_MODEL: 'p/m', AGENT_RUNNER: '"ubuntu-26.04"',
-    INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud', AGENT_CONFIG_REPO: 'o/c',
+    INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud', INFERENCE_REGISTER: 'github-oidc', AGENT_CONFIG_REPO: 'o/c',
     AGENT_CONFIG_PATH: 'p', APPLY_ENVIRONMENT: 'apply', SESSION: 'false', IDLE_MINUTES: '',
     TAILNET_DOMAIN: '', RUN_ID: '123', RUN_ATTEMPT: '2', ...env,
   };
@@ -207,4 +207,24 @@ test('the session job posts the endpoint before apply concludes, and only for a 
 test('agentic-job is called at a tag whose policy has the session input', () => {
   const [, tag] = workflow.match(/agentic-job\/\.github\/workflows\/policy\.yml@(\S+)/);
   assert.ok(!['v0.0.1', 'v0.0.2', 'v0.0.3', 'v0.1.0'].includes(tag), `${tag} has no session input`);
+});
+
+// agentic-job's provider-key mode (its #740), off unless a caller asks:
+// the defaults are its broker's, and the key, which `run` holds outside
+// the agent's sandbox, is handed to that one step and to nothing else.
+test('provider-key mode passes through with broker defaults, the key to run alone', () => {
+  assert.match(workflow, /\n {6}inference-register:\n {8}description: [^\n]*\n {8}type: string\n {8}default: github-oidc\n/);
+  assert.match(workflow, /\n {6}inference-provider:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
+  assert.match(workflow, /\n {6}INFERENCE_API_KEY:\n {8}required: false\n/);
+  assert.match(job('policy'), /\n {6}inference-register: \$\{\{ inputs\.inference-register \}\}\n {6}inference-provider: \$\{\{ inputs\.inference-provider \}\}\n/);
+  const uses = [...workflow.matchAll(/secrets\.INFERENCE_API_KEY/g)];
+  assert.equal(uses.length, 1);
+  assert.match(job('agent'), /\n {8}uses: \.\/\.agentic-job-source\/run\n {8}with:\n {10}github-token: \$\{\{ github\.token \}\}\n {10}inference-api-key: \$\{\{ secrets\.INFERENCE_API_KEY \}\}\n/);
+});
+
+test('the broker audience goes to policy only with the broker registration', async () => {
+  assert.equal((await target({}))['inference-audience'], 'aud');
+  assert.equal((await target({ AGENT: 'fake' }))['inference-audience'], '');
+  assert.equal((await target({ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }))['inference-audience'], '');
+  assert.match(workflow, /\n {10}INFERENCE_REGISTER: \$\{\{ inputs\.inference-register \}\}\n/);
 });
