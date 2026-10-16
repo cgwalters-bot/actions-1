@@ -79,12 +79,9 @@ the job user again later in the job, or put another `tailscale` in its
 
 ## RHEL runners
 
-tailscale/github-action installs into `/usr/local/bin`, which isn't in
-sudo's `PATH` there, and needs `iptables`. Until that moves in here, run
-this first:
-
-```bash
-sudo dnf install -y iptables
-sudo ln -sfn /usr/local/bin/tailscale /usr/bin/tailscale
-sudo ln -sfn /usr/local/bin/tailscaled /usr/bin/tailscaled
-```
+On RHEL 10 (`ID=rhel` and `VERSION_ID` 10 or 10.x in `/etc/os-release`)
+the action first installs `iptables`, which tailscaled needs, and links
+`/usr/bin/tailscale{,d}` to the binaries tailscale/github-action
+installs into `/usr/local/bin`, which isn't in sudo's `PATH` there.
+The link leads to the CLI this action makes root's only, so the cleanup
+still skips. Other systems get nothing extra.

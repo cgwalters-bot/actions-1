@@ -52,6 +52,25 @@ runs:
         PROXY: ${{ inputs.proxy }}
         ACTION_PATH: ${{ github.action_path }}
       run: node "$ACTION_PATH/setup.mjs"
+    # tailscale/github-action installs into /usr/local/bin and runs `sudo
+    # tailscale up`; RHEL's sudo secure_path leaves /usr/local/bin out, and
+    # tailscaled needs iptables, which RHEL 10 runners don't have. The links
+    # dangle until the join installs the binaries. Elsewhere nothing runs.
+    - name: Install RHEL prerequisites
+      shell: bash
+      env:
+        OS_RELEASE: /etc/os-release
+      run: |
+        if ! test -r "$OS_RELEASE"; then exit 0; fi
+        # shellcheck source=/dev/null
+        release=$(. "$OS_RELEASE" && echo "${ID:-} ${VERSION_ID:-}")
+        case "$release" in
+          "rhel 10" | "rhel 10."*) ;;
+          *) exit 0 ;;
+        esac
+        sudo dnf install -y iptables
+        sudo ln -sfn /usr/local/bin/tailscale /usr/bin/tailscale
+        sudo ln -sfn /usr/local/bin/tailscaled /usr/bin/tailscaled
     - name: Connect to the tailnet
       id: join
       uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
