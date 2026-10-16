@@ -19,7 +19,15 @@ zizmor:
 # cargo runs from here, so a checked repository's rust-toolchain.toml and
 # .cargo/config.toml don't pick the toolchain or flags of this build.
 runner-labels:
-    cd "{{ justfile_directory() }}" && cargo run --quiet --locked -- "$OLDPWD/.github/workflows"
+    cd "{{ justfile_directory() }}" && cargo run --quiet --locked --bin runner-labels -- "$OLDPWD/.github/workflows"
 
 test:
     cd "{{ justfile_directory() }}" && cargo test --locked
+
+# The check an organization ruleset requires of pull requests
+# (workflows-check.md), run from the root of the target repository's clone
+# with BASE and HEAD set to full commit IDs. Its files are read as Git
+# blobs; nothing of the clone is run, and cargo runs from here so that
+# nothing of it configures the build either.
+workflows-check:
+    cd "{{ justfile_directory() }}" && cargo run --quiet --locked --bin workflows-check -- "$OLDPWD" "$BASE" "$HEAD"

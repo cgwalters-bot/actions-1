@@ -3,3 +3,9 @@
 self-hosted-runner:
   labels:
     - ubuntu-26.04
+# actionlint 1.7.12 predates the job context's workflow_repository and
+# workflow_sha, which the required workflow checks itself out by.
+paths:
+  .github/workflows/workflows-check.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'

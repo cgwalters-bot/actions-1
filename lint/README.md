@@ -48,3 +48,9 @@ just --justfile path/to/actions/lint/Justfile --working-directory . check
 ```
 
 `CONTAINER=podman` runs the linters with podman.
+
+## workflows-check
+
+The same crate builds the check an organization ruleset requires of every
+pull request, so that a pull request cannot replace its own checker; see
+[workflows-check.md](workflows-check.md).
