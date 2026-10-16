@@ -51,6 +51,17 @@ test('the wrapper calls agentic-job at the tag the agent job calls', () => {
   assert.deepEqual(tags('./cgwalters-review.yml'), agent);
 });
 
+// From v0.5.0 check.yml's detect job asks for `id-token: write`, and GitHub
+// refuses a call that grants less than a called job asks for: every run
+// would fail at startup. Nothing more than that, as no secret goes to check.
+test('both wrappers grant check exactly what its jobs ask for', () => {
+  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
+    const check = read(file).split('\n  check:\n')[1].split(/\n {2}[a-z-]+:\n/)[0];
+    assert.match(check, /\n {4}permissions:\n {6}contents: read\n {6}id-token: write\n {4}(?:#[^\n]*\n {4})*uses: /, file);
+    assert.doesNotMatch(check, /secrets/, file);
+  }
+});
+
 // A called workflow's jobs get at most what the caller grants, so the caller
 // grants what the wrapper's jobs ask for, and nothing more.
 test('the caller grants exactly the union of the wrapper\'s job grants', () => {
