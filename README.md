@@ -17,7 +17,9 @@ One reusable workflow is here too:
 agent run of cgwalters-forge/agentic-job with this deployment's tailnet
 join, inference proxy, runner, agent and model. Our repositories call it
 at main, which is the one `job_workflow_ref` the inference broker and the
-tailnet have to admit.
+tailnet have to admit. It refuses runs from a private repository, so
+agentic-job's opt-in for private repositories, which admits only the
+calling repository, stays off.
 
 A repository gets agent runs with the workflow below, a bounds file at
 `.github/agentic-job/dispatch.toml` (and `fix.toml` for the `fix` kind), a
@@ -55,9 +57,12 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.5.0**'s policy, check,
-apply and review helpers because its review workflow does not yet expose a
-network hook. It adds our tailnet join and defaults: opencode,
+event-review wrapper. It composes agentic-job **v0.5.1**'s policy, check,
+apply and review helpers, so that the tailnet and the inference broker admit
+this file's `job_workflow_ref`; agentic-job's review workflow can now run a
+caller's own network step instead (its #705), which callers have not moved
+to. It refuses private repositories, as the dispatch wrapper does. It adds
+our tailnet join and defaults: opencode,
 `praxis/gpt-6.1-sol`, `ubuntu-26.04`, and the dispatch wrapper's inference
 URL and audience. It has **no inputs**. Repository/organization variables
 `AGENT`, `AGENT_MODEL`, `AGENT_RUNNER` (JSON), `INFERENCE_URL`,

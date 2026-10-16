@@ -1,4 +1,4 @@
-# Composed from agentic-job v0.5.0's review.yml: keep event policy and
+# Composed from agentic-job v0.5.1's review.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
 # No dispatcher inputs: identity/configuration comes from repository variables.
 name: cgwalters-review
@@ -14,13 +14,17 @@ jobs:
     # or reopening PRs. Otherwise-unassociated bots are off by default,
     # admitted by immutable id AND bounds. Preserve upstream's association
     # admission for all authors. /review requires write access in policy.
+    # Never for a private repository, whatever its bounds say: agentic-job's
+    # opt-in (its #739) would send its source through our shared inference
+    # proxy and runners.
     if: >-
+      github.event.repository.visibility == 'public' && (
       (github.event_name == 'pull_request_target' && !github.event.pull_request.draft &&
         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.5.0
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.5.1
     permissions:
       contents: read
     with:
@@ -135,7 +139,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.5.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.5.1
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -189,7 +193,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.5.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.5.1
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
