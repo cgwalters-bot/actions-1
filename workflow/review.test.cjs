@@ -65,7 +65,7 @@ test('trusted source only, one network join before dropping root, no post-agent 
   assert.match(jobs.agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);
   assert.doesNotMatch(jobs.agent, /(?:pull-requests|contents|issues): write|secrets\./);
   for (const name of ['policy', 'check', 'apply']) {
-    assert.match(jobs[name], new RegExp(`uses: [^\\n]+/${name}\\.yml@v0\\.4\\.0`));
+    assert.match(jobs[name], new RegExp(`uses: [^\\n]+/${name}\\.yml@v0\\.5\\.0`));
   }
   for (const [name, body] of Object.entries(jobs)) {
     if (name !== 'apply') assert.doesNotMatch(body, /secrets\./);
