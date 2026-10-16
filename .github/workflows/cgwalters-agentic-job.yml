@@ -187,6 +187,18 @@ jobs:
                 context.ref !== `refs/heads/${context.payload.repository.default_branch}`) {
               throw new Error('Dispatch must run on the default branch');
             }
+            // agentic-job (its #739) admits a private target only when it is
+            // the calling repository and the caller's bounds set `private =
+            // true`. Not here: the runner is a dispatcher's input, and a
+            // runner that publishes its own logs (devspace's do) or the
+            // shared inference proxy would carry the source out. A public
+            // caller can never be admitted privately, so refusing a private
+            // caller keeps the opt-in off whatever the bounds say. Asked of
+            // the API, as not every event's payload names the repository.
+            const { data: caller } = await github.rest.repos.get(context.repo);
+            if (caller.private !== false || caller.visibility !== 'public') {
+              throw new Error('cgwalters-agentic-job runs only from a public repository');
+            }
             const profile = process.env.PROFILE;
             if (!['implement', 'triage', 'research', 'review', 'fix'].includes(profile)) {
               throw new Error('Unknown dispatch profile');
@@ -293,7 +305,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.5.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.5.1
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -480,7 +492,7 @@ jobs:
       contents: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.5.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.5.1
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -488,7 +500,7 @@ jobs:
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.5.0
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.5.1
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches

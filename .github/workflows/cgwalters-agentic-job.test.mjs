@@ -48,13 +48,19 @@ const script = workflow.split('          script: |\n')[1].split('\n\n')[0]
   .split('\n').map(line => line.replace(/^ {12}/, '')).join('\n');
 const AsyncFunction = (async () => {}).constructor;
 
-async function target(env, { pull = false } = {}) {
+async function target(env, { pull = false, caller = { private: false, visibility: 'public' } } = {}) {
   const outputs = {};
   const core = { setOutput: (name, value) => { outputs[name] = value; } };
-  const github = { rest: { issues: { get: async ({ issue_number }) => ({
-    data: { number: issue_number, title: 't', body: 'b', ...(pull ? { pull_request: {} } : {}) },
-  }) } } };
-  const context = { eventName: 'workflow_call' };
+  const github = { rest: {
+    issues: { get: async ({ issue_number }) => ({
+      data: { number: issue_number, title: 't', body: 'b', ...(pull ? { pull_request: {} } : {}) },
+    }) },
+    repos: { get: async ({ owner, repo }) => {
+      assert.equal(`${owner}/${repo}`, 'caller/repo');
+      return { data: caller };
+    } },
+  } };
+  const context = { eventName: 'workflow_call', repo: { owner: 'caller', repo: 'repo' } };
   const environment = {
     TARGET_REPO: 'example/repo', TARGET_ITEM: '7', PROFILE: 'implement', TASK: 'Do it.',
     SKILLS: 'false', MAX_REQUESTS: '400', AGENT: 'opencode', AGENT_MODEL: 'p/m', AGENT_RUNNER: '"ubuntu-26.04"',
@@ -66,6 +72,15 @@ async function target(env, { pull = false } = {}) {
     core, github, context, { env: environment });
   return outputs;
 }
+
+// agentic-job's opt-in for private repositories (its #739) admits only the
+// calling repository, so a public caller keeps it off whatever its bounds say.
+test('a run from a repository that is not public fails before policy', async () => {
+  for (const caller of [{ private: true, visibility: 'private' }, { private: false, visibility: 'internal' }, {}]) {
+    await assert.rejects(target({}, { caller }), /only from a public repository/, JSON.stringify(caller));
+  }
+  assert.match(job('policy'), /\n {4}needs: target\n/);
+});
 
 test('skills are off by default and the task keeps its one-line contract', async () => {
   const outputs = await target({});
