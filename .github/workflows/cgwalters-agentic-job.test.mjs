@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
@@ -240,4 +243,56 @@ test('the broker audience goes to policy only with the broker registration', asy
   assert.equal((await target({ AGENT: 'fake' }))['inference-audience'], '');
   assert.equal((await target({ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }))['inference-audience'], '');
   assert.match(workflow, /\n {10}INFERENCE_REGISTER: \$\{\{ inputs\.inference-register \}\}\n/);
+});
+
+// Execute the agent job's first step against stub os-release files with a
+// recording sudo double: only RHEL 10 installs or links anything, and it
+// does so before the first checkout, which needs git.
+test('only RHEL 10 installs git, node and gh and links agentic-job into sudo\'s PATH', () => {
+  const agent = job('agent');
+  const step = agent.split('      - name: Install RHEL prerequisites\n')[1]?.split('\n      - ')[0];
+  assert.ok(step, 'the agent job has no RHEL prerequisites step');
+  assert.match(agent, /\n {4}steps:\n(?: {6}#[^\n]*\n)* {6}- name: Install RHEL prerequisites\n/);
+  assert.match(step, /\n {10}OS_RELEASE: \/etc\/os-release\n/);
+  assert.doesNotMatch(step, /\n {8}if:/);
+  const script = step.split('        run: |\n')[1]
+    .split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+  const directory = mkdtempSync(join(homedir(), 'agent-prerequisites-'));
+  const log = join(directory, 'calls');
+  const osRelease = join(directory, 'os-release');
+  try {
+    writeFileSync(join(directory, 'sudo'), `#!${process.execPath}
+require('node:fs').appendFileSync(process.env.CALL_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+`, { mode: 0o700 });
+    const rhel = [
+      ['dnf', 'install', '-y', 'git', 'nodejs'],
+      ['dnf', 'install', '-y', 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm'],
+      ['dnf', 'install', '-y', 'gh'],
+      ['ln', '-sfn', '/usr/local/bin/agentic-job', '/usr/bin/agentic-job'],
+    ];
+    for (const [release, expected] of [
+      ['NAME="Red Hat Enterprise Linux"\nID="rhel"\nID_LIKE="centos fedora"\nVERSION_ID="10.0"\n', rhel],
+      ['ID=rhel\nVERSION_ID=10\n', rhel],
+      ['NAME="Ubuntu"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID="26.04"\n', []],
+      ['ID="rhel"\nVERSION_ID="9.6"\n', []],
+      ['ID="rhel"\nVERSION_ID="100"\n', []],
+      ['ID="centos"\nID_LIKE="rhel fedora"\nVERSION_ID="10"\n', []],
+      ['', []],
+      [null, []],
+    ]) {
+      if (release === null) rmSync(osRelease, { force: true });
+      else writeFileSync(osRelease, release);
+      writeFileSync(log, '');
+      const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, CALL_LOG: log, OS_RELEASE: osRelease },
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, 0, result.stderr);
+      const calls = readFileSync(log, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+      assert.deepEqual(calls, expected, release);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
