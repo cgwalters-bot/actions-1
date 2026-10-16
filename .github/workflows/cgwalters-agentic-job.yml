@@ -410,6 +410,29 @@ jobs:
       exit: ${{ steps.run.outputs.exit }}
       safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
     steps:
+      # The bootc-dev RHEL 10 runners lack what the steps below assume: git,
+      # without which checkout falls back to the REST API and prepare sees
+      # no commit; node, for the .mjs steps and the tailscale action; gh,
+      # from EPEL, for run's public-repository check. And sudo's
+      # secure_path omits /usr/local/bin, where prepare installs
+      # agentic-job; the link dangles until it does. Elsewhere, Ubuntu
+      # included, nothing runs. Shrinks once agentic-job calls itself by
+      # absolute path under sudo and stops needing gh.
+      - name: Install RHEL prerequisites
+        env:
+          OS_RELEASE: /etc/os-release
+        run: |
+          if ! test -r "$OS_RELEASE"; then exit 0; fi
+          # shellcheck source=/dev/null
+          release=$(. "$OS_RELEASE" && echo "${ID:-} ${VERSION_ID:-}")
+          case "$release" in
+            "rhel 10" | "rhel 10."*) ;;
+            *) exit 0 ;;
+          esac
+          sudo dnf install -y git nodejs
+          sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm
+          sudo dnf install -y gh
+          sudo ln -sfn /usr/local/bin/agentic-job /usr/bin/agentic-job
       # The calling repository at the policy job's commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
