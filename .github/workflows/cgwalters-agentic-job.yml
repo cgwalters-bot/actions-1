@@ -373,6 +373,12 @@ jobs:
       inference-provider: ${{ inputs.inference-provider }}
       output-repo: ${{ inputs.repo }}
       comment-target: ${{ inputs.item }}
+      # The issue an implement run is for: apply adds `Closes #N` (or
+      # `Refs` across repositories) to the pull request it opens, so that
+      # merging it closes the issue and the scheduler sees it done. Only
+      # implement opens a pull request; for the other kinds the item is
+      # already the comment's target, or the pull request itself.
+      issue: ${{ inputs.kind == 'implement' && inputs.item || '' }}
       apply-environment: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
       budget: ${{ inputs.budget }}
       # Keep the finished work of a run that stops on its budget, except for
