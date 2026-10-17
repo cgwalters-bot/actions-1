@@ -28,12 +28,13 @@ test('agentic-job is called at one release tag, our tailscale at main', () => {
 });
 
 // Without `issue`, apply opens an implement pull request with no closing
-// reference, so its merge leaves the issue open (agentic-job#877). Only the
-// dispatched item, never another target: a merge must not close a tracking
-// issue.
-test('policy is given the implement item as issue, and nothing else', () => {
+// reference, so its merge leaves the issue open (agentic-job#877), and
+// policy selects no watcher for opt-in steering. Only the dispatched item,
+// never another target: a merge must not close a tracking issue. Only
+// implement opens a new pull request, so the other kinds close nothing.
+test('policy is given the dispatched item as issue, and nothing else', () => {
   const issues = [...workflow.matchAll(/\n {6}issue: (.*)\n/g)];
-  assert.deepEqual(issues.map(match => match[1]), ["${{ inputs.kind == 'implement' && inputs.item || '' }}"]);
+  assert.deepEqual(issues.map(match => match[1]), ['${{ inputs.item }}']);
   assert.match(job('policy'), /\n {6}issue: /);
   // With the item in `repo` itself apply writes `Closes`; an `item-repo`
   // would make it a mere `Refs`.

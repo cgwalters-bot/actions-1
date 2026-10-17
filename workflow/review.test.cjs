@@ -71,16 +71,43 @@ test('trusted source only, one network join before dropping root, no post-agent 
   const steps = [...jobs.agent.matchAll(/^      - (?:uses: ([^\s]+)|name: (.+)|id: (.+))/gm)]
     .map(([, uses, name, id]) => uses || name || id);
   assert.deepEqual(steps.slice(2), [
-    './.agentic-job-source/prepare', 'Join the tailnet', './.agentic-job-source/secure-host', 'run',
+    './.agentic-job-source/prepare', 'Join the tailnet', 'Check inference proxy reachability',
+    './.agentic-job-source/secure-host', 'run',
   ]);
   assert.match(jobs.agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);
   assert.doesNotMatch(jobs.agent, /(?:pull-requests|contents|issues): write|secrets\./);
   for (const name of ['policy', 'check', 'apply']) {
-    assert.match(jobs[name], new RegExp(`uses: [^\\n]+/${name}\\.yml@v0\\.5\\.2`));
+    assert.match(jobs[name], new RegExp(`uses: [^\\n]+/${name}\\.yml@v0\\.5\\.3`));
   }
   for (const [name, body] of Object.entries(jobs)) {
     if (name !== 'apply') assert.doesNotMatch(body, /secrets\./);
   }
+});
+
+test('both composed jobs retain the release pins and check the proxy between join and setup', () => {
+  for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
+    const source = readFileSync(`.github/workflows/${file}`, 'utf8');
+    const calls = [...source.matchAll(/uses: (\S+\/(?:policy|check|apply)\.yml)@(\S+)/g)];
+    assert.equal(calls.length, 3, file);
+    for (const [, , ref] of calls) assert.equal(ref, 'v0.5.3', file);
+    const agent = source.split('\n  agent:\n')[1].split(/\n  [a-z]+:\n/)[0];
+    const check = 'run: agentic-job secure-host inference .agentic-job/config.toml';
+    assert.equal(agent.split(check).length - 1, 1, file);
+    assert.ok(agent.indexOf('name: Join the tailnet') < agent.indexOf(check), file);
+    assert.ok(agent.indexOf(check) < agent.indexOf('uses: ./.agentic-job-source/secure-host'), file);
+    assert.ok(agent.indexOf('uses: ./.agentic-job-source/secure-host') < agent.indexOf('uses: ./.agentic-job-source/run'), file);
+    assert.doesNotMatch(agent, /steps\.secure-host\.outputs\.session-endpoint/);
+  }
+});
+
+test('steering receives the dispatch item through policy metadata, or the admitted review event', () => {
+  const dispatch = readFileSync('.github/workflows/cgwalters-agentic-job.yml', 'utf8');
+  const policy = dispatch.split('\n  policy:\n')[1].split('\n  agent:\n')[0];
+  assert.match(policy, /^      issue: \$\{\{ inputs.item \}\}$/m);
+  assert.match(policy, /^      output-repo: \$\{\{ inputs.repo \}\}$/m);
+  assert.match(jobs.policy, /^      event: true$/m);
+  // Opt-in remains the trusted configuration's, not a new dispatcher input.
+  for (const source of [dispatch, workflow]) assert.doesNotMatch(source, /watch-item:/);
 });
 
 test('real reviews are opt-in and use only the checked artifact at the admitted head', () => {
