@@ -3,6 +3,10 @@ const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
 const { runInNewContext } = require('node:vm');
 
+// The agentic-job tag both wrappers call: a bump changes it here, in the
+// six calls, the review wrapper's header and the README.
+const PIN = 'v0.6.1';
+
 const workflow = readFileSync('.github/workflows/cgwalters-review.yml', 'utf8');
 const jobs = Object.fromEntries([...workflow.matchAll(/^  ([a-z]+):\n([\s\S]*?)(?=^  [a-z]+:\n|$(?![\s\S]))/gm)]
   .map(([, name, body]) => [name, body]));
@@ -77,7 +81,7 @@ test('trusted source only, one network join before dropping root, no post-agent 
   assert.match(jobs.agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);
   assert.doesNotMatch(jobs.agent, /(?:pull-requests|contents|issues): write|secrets\./);
   for (const name of ['policy', 'check', 'apply']) {
-    assert.match(jobs[name], new RegExp(`uses: [^\\n]+/${name}\\.yml@v0\\.5\\.3`));
+    assert.match(jobs[name], new RegExp(`uses: [^\\n]+/${name}\\.yml@${PIN.replaceAll('.', '\\.')}`));
   }
   for (const [name, body] of Object.entries(jobs)) {
     if (name !== 'apply') assert.doesNotMatch(body, /secrets\./);
@@ -89,7 +93,7 @@ test('both composed jobs retain the release pins and check the proxy between joi
     const source = readFileSync(`.github/workflows/${file}`, 'utf8');
     const calls = [...source.matchAll(/uses: (\S+\/(?:policy|check|apply)\.yml)@(\S+)/g)];
     assert.equal(calls.length, 3, file);
-    for (const [, , ref] of calls) assert.equal(ref, 'v0.5.3', file);
+    for (const [, , ref] of calls) assert.equal(ref, PIN, file);
     const agent = source.split('\n  agent:\n')[1].split(/\n  [a-z]+:\n/)[0];
     const check = 'run: agentic-job secure-host inference .agentic-job/config.toml';
     assert.equal(agent.split(check).length - 1, 1, file);
