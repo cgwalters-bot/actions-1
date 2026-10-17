@@ -6,4 +6,5 @@
 "cgwalters-agentic-job.yml" = "Reusable wrapper of agentic-job's reusable workflows, which run the agent in their own sandbox."
 "cgwalters-review.yml" = "Reusable wrapper of agentic-job's review workflows, which run the agent in their own sandbox."
 "review.yml" = "This repository's caller of cgwalters-review.yml, run from the base branch."
+"secure-host.yml" = "This repository's CI for the secure-host action: runs it by local path (./secure-host) on hosted runners, with a read-only token."
 "workflows-check.yml" = "The required check itself: reads a pull request's files as Git blobs, with a read-only token."
