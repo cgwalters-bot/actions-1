@@ -27,6 +27,15 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
+Both wrappers pin agentic-job v0.5.3 and check inference reachability after
+the tailnet join, before securing the host. The pinned `run` action publishes
+the session endpoint itself; no extra endpoint step is needed here.
+Mid-run steering stays off unless the caller's runner configuration enables
+`[session] watch-item = true`. Policy derives the watched item from the
+dispatch wrapper's `issue` (in `output-repo`) or the review event;
+`run` needs no additional input. Upstream bounds delivery to 10 updates of
+8000 characters, quoted as untrusted item text, not instructions.
+
 ```yaml
 name: dispatch
 run-name: ${{ inputs.kind }} ${{ inputs.repo }}#${{ inputs.item }}
@@ -57,7 +66,7 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.5.2**'s policy, check,
+event-review wrapper. It composes agentic-job **v0.5.3**'s policy, check,
 apply and review helpers, so that the tailnet and the inference broker admit
 this file's `job_workflow_ref`; agentic-job's review workflow can now run a
 caller's own network step instead (its #705), which callers have not moved

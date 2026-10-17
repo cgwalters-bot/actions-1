@@ -324,7 +324,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.5.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.5.3
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -373,12 +373,11 @@ jobs:
       inference-provider: ${{ inputs.inference-provider }}
       output-repo: ${{ inputs.repo }}
       comment-target: ${{ inputs.item }}
-      # The issue an implement run is for: apply adds `Closes #N` (or
-      # `Refs` across repositories) to the pull request it opens, so that
-      # merging it closes the issue and the scheduler sees it done. Only
-      # implement opens a pull request; for the other kinds the item is
-      # already the comment's target, or the pull request itself.
-      issue: ${{ inputs.kind == 'implement' && inputs.item || '' }}
+      # Policy records this as run's watched item when the caller's config
+      # opts into steering. comment-target alone does not select a watcher.
+      # For implement, apply also links a new PR to this issue (Closes, or
+      # Refs for partial work); other profiles do not open a new PR.
+      issue: ${{ inputs.item }}
       apply-environment: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
       budget: ${{ inputs.budget }}
       # Keep the finished work of a run that stops on its budget, except for
@@ -471,6 +470,10 @@ jobs:
         uses: cgwalters-forge/actions/tailscale@main
         with:
           hostname: ${{ needs.target.outputs.session-host || format('agentic-job-{0}-{1}', github.run_id, github.run_attempt) }}
+      # Fail on a missing proxy route before setup, not in its sandbox probes.
+      # This TCP check sends no credentials and skips fake/no-proxy runs.
+      - name: Check inference proxy reachability
+        run: agentic-job secure-host inference .agentic-job/config.toml
       # The last step with root.
       - uses: ./.agentic-job-source/secure-host
         with:
@@ -543,7 +546,7 @@ jobs:
       contents: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.5.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.5.3
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -551,7 +554,7 @@ jobs:
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.5.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.5.3
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
