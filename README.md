@@ -8,6 +8,7 @@ this repository's issues.
 | --- | --- | --- |
 | [lint](lint/README.md) | actionlint, zizmor and the runner-label policy; this repository's CI calls it | Called from each forge repository's CI |
 | [workflows-check](lint/workflows-check.md) | Required workflow over a pull request's workflow files: job shape, new dangerous triggers, new zizmor ignores, checker references; CI runs its tests with fixture workflows | An organization ruleset requires it, evaluate mode first |
+| [secure-host](secure-host/README.md) | Runs agentic-job's attested, digest-pinned image: no later step has root or the metadata service, world-write by owner only; CI runs the two-job example, the inputs and the world-write policy on ubuntu-26.04 | agentic-job's own action forwards here; opt-in egress (agentic-job#995) |
 | [tailscale](tailscale/README.md) | Settings by organization; CI runs its unit tests and checks the socket and CLI are closed after a join that fails, no real join (no tailnet credentials here) | Replace devspace.yml's and agent.yml's tailscale/github-action steps |
 
 ## cgwalters-agentic-job

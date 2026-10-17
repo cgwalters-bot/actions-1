@@ -21,3 +21,10 @@ updates:
     cooldown:
       default-days: 7
       exclude: ["cgwalters-forge/agentic-job*"]
+  # secure-host/Containerfile.pin, the image the action runs: Dependabot
+  # moves its tag and digest together. The image is agentic-job's release,
+  # our own, so it is not held back either.
+  - package-ecosystem: docker
+    directory: /secure-host
+    schedule:
+      interval: daily

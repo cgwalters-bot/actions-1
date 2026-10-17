@@ -38,6 +38,9 @@ jobs:
       - name: event-review wrapper tests
         if: ${{ !cancelled() }}
         run: just test-review
+      - name: secure-host unit tests
+        if: ${{ !cancelled() }}
+        run: just test-secure-host
       # sandbox-share on this runner: content, a file and a directory are
       # shared root-owned and read-only, and a symlink is refused.
       - name: Make files to share
