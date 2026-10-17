@@ -134,5 +134,42 @@ variables listed above. Dependabot's pull requests are reviewed only with
 its ID in `REVIEW_BOT_IDS`. Without `.github/agentic-job/merge.toml` the
 reviewer is told a person approves after it.
 
+## Lock new items
+
+[lock-new-items](.github/workflows/lock-new-items.yml) locks each newly
+opened issue and pull request, so that only collaborators can comment on
+it and agent runs on it read no outsider's comments (tracker#733). Its one
+step locks the item by API with the caller's job token: no PAT, and
+nothing of the item is read or run. It does not cover the opener's own
+text, comments in the seconds before the lock, items opened by another
+workflow's job token or transferred in (no `opened` event), or items that
+predate the caller. A repository opts in with this one
+file, `.github/workflows/lock.yml`, as
+[this repository's caller](.github/workflows/lock.yml) but for its `uses`:
+
+```yaml
+name: lock
+on:
+  issues:
+    types: [opened]
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened]
+permissions: {}
+jobs:
+  lock:
+    uses: cgwalters-forge/actions/.github/workflows/lock-new-items.yml@main
+    permissions:
+      issues: write
+      pull-requests: write
+```
+
+The same pull request exempts the file in
+`.github/agentic-job/workflows.toml`, creating it if need be, as this
+repository does: without that, workflows-check's shape check refuses every
+later pull request. Its zizmor needs the `ref-pin` policy for our own
+workflows that [.github/zizmor.yml](.github/zizmor.yml) sets. workflows-check refuses the pull request that adds
+it (a new `pull_request_target` trigger and a new zizmor ignore), so an
+organization owner merges it bypassing the ruleset.
+
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or
 [MIT](LICENSE-MIT), at your option.
