@@ -53,6 +53,19 @@ test('omitted inputs configure hosted.toml without the proxy', () => {
   }
 });
 
+// The CI fixture replaces the image's policy, and the action's check
+// (`egress-git`) fetches from github.com: a fixture without the git fetch
+// rule fails that check on the hosted runner, not here.
+test('the CI egress-policy fixture keeps git fetch from github.com', () => {
+  const rules = readFileSync('secure-host/ci-egress-policy.toml', 'utf8').split(/^\[\[write\]\]$/m).slice(1);
+  const github = rules.filter(rule => /^hosts = \[[^\]]*"github\.com"/m.test(rule));
+  // Only the fetch: a wider github.com rule would let a push (git-receive-pack) through.
+  assert.equal(github.length, 1);
+  assert.match(github[0], /^hosts = \["github\.com"\]$/m);
+  assert.match(github[0], /^methods = \["POST"\]$/m);
+  assert.match(github[0], /^paths = \["\/\*\*\/git-upload-pack"\]$/m);
+});
+
 // Its rules are parsed only by the image's proxy at setup, which the action
 // waits for; a file that cannot be read fails here, before root runs anything.
 test('an unreadable egress-policy fails before the image runs', () => {

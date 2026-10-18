@@ -100,8 +100,9 @@ jobs:
           check: "false"
       - run: just secure-host-options after
 
-  # The `egress-policy` input: the fixture's one rule allows its POST and no
-  # other, and the runner's own write endpoints still take an artifact.
+  # The `egress-policy` input: the fixture's probe rule allows its POST and
+  # no other, its git fetch rule keeps the action's check passing, and the
+  # runner's own write endpoints still take an artifact.
   egress-policy:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
