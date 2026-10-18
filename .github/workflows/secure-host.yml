@@ -38,10 +38,13 @@ jobs:
       - run: just secure-host-metadata before
       - run: node secure-host/reads-probe.mjs before
       - uses: ./secure-host
+        with:
+          egress: write-policy
       # What would be `make test`: steps of the runner's user, without root.
       - run: just secure-host-root after
       - run: just secure-host-metadata after
       - run: node secure-host/reads-probe.mjs after
+      - run: just secure-host-egress
       - run: mkdir out && git rev-parse HEAD > out/commit
       - id: up
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
