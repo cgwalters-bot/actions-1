@@ -19,3 +19,26 @@ test('egress probe requires a positive read and a proxy-specific write refusal',
   }
   await assert.rejects(probe(() => assert.fail('must not request'), { NODE_USE_ENV_PROXY: '1' }));
 });
+
+test('egress probe requires a rule-allowed POST to pass and others still refused', async () => {
+  const denied = { 'x-egress-denied': 'POST to an endpoint not in the write allowlist' };
+  for (const outcome of ['rule', 'rule-refused', 'all-open', 'unforwarded']) {
+    const urls = [];
+    const exercise = probe(async (url, options) => {
+      urls.push(`${options.method} ${url}`);
+      if (options.method === 'GET') return new Response('', { status: 200 });
+      const root = url === 'https://example.com/';
+      const refuse = root ? outcome !== 'all-open' : outcome === 'rule-refused';
+      // The origin's own refusal of an allowed write still passes.
+      const status = refuse || outcome === 'rule' ? 403 : 502;
+      return new Response('', { status, headers: refuse ? denied : {} });
+    }, {}, '/allowed');
+    if (outcome === 'rule') {
+      await exercise;
+      assert.deepEqual(urls, ['GET https://example.com/', 'POST https://example.com/',
+        'POST https://example.com/allowed']);
+    } else {
+      await assert.rejects(exercise);
+    }
+  }
+});

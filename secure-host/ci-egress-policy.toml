@@ -1,0 +1,11 @@
+# The secure-host workflow's `egress-policy` fixture: it replaces the
+# image's policy, so this one rule is the only write the proxy allows
+# beyond the runner's own endpoints. The egress probe POSTs to its path
+# and to example.com's root, which no rule here matches.
+
+[[write]]
+name = "secure-host CI probe"
+why = "Proves a caller's rule allows its write and nothing else; example.com accepts no data."
+hosts = ["example.com"]
+methods = ["POST"]
+paths = ["/secure-host-ci"]
