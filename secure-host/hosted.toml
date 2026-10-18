@@ -43,7 +43,7 @@ allow-sockets = [
     "/run/systemd/resolve.hook/",
 ]
 
-# Egress filtering is opt-in and not offered yet (agentic-job#995).
+# The action's egress: write-policy input opts into the runner write policy.
 [egress]
 proxy = false
 

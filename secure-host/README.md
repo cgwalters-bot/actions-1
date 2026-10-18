@@ -40,6 +40,7 @@ jobs:
       - uses: actions/checkout@<sha>
         with: {persist-credentials: false}
       - uses: cgwalters-forge/actions/secure-host@<sha>  # runs as root: pin it
+        with: {egress: write-policy}
       - run: make test                       # as the runner's user: no root, writes only by rule
       - id: up
         uses: actions/upload-artifact@<sha>
@@ -99,8 +100,25 @@ Any step can compromise the steps after it. The job is the unit of trust.
    not terminate it. Runner cleanup remains responsible for ending it,
    and the CI job must still finish successfully with the rule enabled.
 6. **Container actions** fail with dockerd stopped.
-7. **Egress** is open: no proxy and no host-wide rules yet
-   (agentic-job#995). Only the metadata service is refused.
+7. **Egress** is open by default except for metadata. Opt in with
+   `egress: write-policy` to stop later steps sending HTTP writes to arbitrary
+   destinations. Every runner process's new public TCP connections on 80/443
+   are redirected to the proxy: reads (GET, HEAD, OPTIONS without bodies) stay
+   open except for the threat feed; writes need a `[[write]]` rule or a built-in
+   runner endpoint. Other external ports, UDP and IPv6 are refused; loopback,
+   resolver DNS and connections opened before setup remain. This is not complete
+   exfiltration prevention: reads and DNS can carry data.
+   The runner's built-in writes allow `actions.githubusercontent.com` and its
+   subdomains, and PUT to any `*.blob.core.windows.net` account. GitHub publishes
+   no list of its `productionresultssaN` storage accounts: an attacker's Azure
+   account remains a write channel, as does another repository's runtime token.
+   The proxy terminates TLS and sees credentials sent through it. The action
+   exports its per-job CA for later Node/Python steps; tools with other trust
+   stores must configure them or fail closed. Agent jobs cannot opt in yet:
+   provider and tailnet requests are refused. For DNS/IP-only filtering, see
+   [step-security/harden-runner](https://github.com/step-security/harden-runner).
+   CI's build job opts in, requires a proxy-refused POST and a successful GET,
+   then uploads an artifact for the publish job to validate.
 
 agentic-job v0.6 still creates its second, unprivileged user and leaves
 the runner's user a sudo rule for `agentic-job sandbox` commands. This
@@ -138,4 +156,6 @@ release, then a pin update here.
 | --- | --- | --- |
 | `config` | the action's [`hosted.toml`](hosted.toml) | A host configuration (agentic-job's `[sandbox]`, `[egress]` and `[setup]` tables). The image's `agentic-job config --host` checks it and adds the runner's user. Another runner image needs one of its own: the probes fail on each socket left open and name it |
 | `check` | `true` | Prove the result with `agentic-job sandbox check` before the step returns |
+| `egress` | `off` | `write-policy` enables the proxy and its Rust implementation and overrides the config's write-policy setting. Requires `sandbox.lock-runner = true`; the image rejects otherwise. `off` overrides write-policy to false |
+| `egress-policy` | | A TOML file of `[[write]]` rules replacing the image's policy, copied to a host path. Requires `egress: write-policy`; overrides `egress.policy` in `config`. Choose only trusted policy files |
 | `image-archive` | | An image archive (`podman load`) to run in place of the pinned image, to test an unreleased image. It is not verified: only for a job that built it |

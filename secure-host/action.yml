@@ -19,6 +19,12 @@ inputs:
   check:
     description: Prove the result with `agentic-job sandbox check` before the step returns; `false` leaves that to the job
     default: "true"
+  egress:
+    description: 'off, or write-policy to refuse HTTP writes except policy rules and runner endpoints'
+    default: "off"
+  egress-policy:
+    description: 'A TOML file of [[write]] rules, replacing the image policy; needs egress: write-policy'
+    default: ""
   image-archive:
     description: >-
       An image archive (as `podman load` takes it) to run in place of the pinned image, for testing
@@ -84,14 +90,10 @@ runs:
       env:
         ACTION: ${{ github.action_path }}
         CONFIG: ${{ inputs.config }}
+        EGRESS: ${{ inputs.egress }}
+        EGRESS_POLICY: ${{ inputs.egress-policy }}
         ID: ${{ steps.image.outputs.id }}
-      run: |
-        dir="$RUNNER_TEMP/secure-host"
-        mkdir -p "$dir/in"
-        cp -- "${CONFIG:-$ACTION/hosted.toml}" "$dir/in/config.toml"
-        sudo podman run --rm --network=none --entrypoint /agentic-job -v "$dir/in:/in:ro" "$ID" \
-          config --host --from /in/config.toml --string sandbox.runner-user="$(id -un)" > "$dir/config.toml"
-        cat "$dir/config.toml"
+      run: node "$ACTION/config.mjs"
     # The last thing in the job that has root. The image installs its binary
     # on the host and sets the host up through the host's `nsenter -t 1`; the
     # world-write policy and the rules outlive the container. No container
@@ -101,6 +103,13 @@ runs:
       env:
         ID: ${{ steps.image.outputs.id }}
       run: sudo podman run --rm --privileged --pid=host --network=none -v /:/host "$ID" "$RUNNER_TEMP/secure-host/config.toml"
+    - name: Trust the per-job proxy in later JavaScript and Python steps
+      if: ${{ inputs.egress == 'write-policy' }}
+      shell: bash
+      env:
+        ACTION: ${{ github.action_path }}
+      # Copies only the CA variables of the image's root-owned runner.env.
+      run: node "$ACTION/runner-env.mjs"
     - name: Prove it
       if: ${{ inputs.check != 'false' }}
       shell: bash
