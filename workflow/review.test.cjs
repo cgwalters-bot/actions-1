@@ -5,7 +5,7 @@ const { runInNewContext } = require('node:vm');
 
 // The agentic-job tag both wrappers call: a bump changes it here, in the
 // six calls, the review wrapper's header and the README.
-const PIN = 'v0.6.1';
+const PIN = 'v0.6.2';
 
 const workflow = readFileSync('.github/workflows/cgwalters-review.yml', 'utf8');
 const jobs = Object.fromEntries([...workflow.matchAll(/^  ([a-z]+):\n([\s\S]*?)(?=^  [a-z]+:\n|$(?![\s\S]))/gm)]
@@ -76,7 +76,7 @@ test('trusted source only, one network join before dropping root, no post-agent 
     .map(([, uses, name, id]) => uses || name || id);
   assert.deepEqual(steps.slice(2), [
     './.agentic-job-source/prepare', 'Join the tailnet', 'Check inference proxy reachability',
-    './.agentic-job-source/secure-host', 'run',
+    './.agentic-job-source/secure-host/internal', 'run',
   ]);
   assert.match(jobs.agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);
   assert.doesNotMatch(jobs.agent, /(?:pull-requests|contents|issues): write|secrets\./);
@@ -98,9 +98,25 @@ test('both composed jobs retain the release pins and check the proxy between joi
     const check = 'run: agentic-job secure-host inference .agentic-job/config.toml';
     assert.equal(agent.split(check).length - 1, 1, file);
     assert.ok(agent.indexOf('name: Join the tailnet') < agent.indexOf(check), file);
-    assert.ok(agent.indexOf(check) < agent.indexOf('uses: ./.agentic-job-source/secure-host'), file);
-    assert.ok(agent.indexOf('uses: ./.agentic-job-source/secure-host') < agent.indexOf('uses: ./.agentic-job-source/run'), file);
+    const secureHost = 'uses: ./.agentic-job-source/secure-host/internal';
+    assert.ok(agent.indexOf(check) < agent.indexOf(secureHost), file);
+    assert.ok(agent.indexOf(secureHost) < agent.indexOf('uses: ./.agentic-job-source/run'), file);
     assert.doesNotMatch(agent, /steps\.secure-host\.outputs\.session-endpoint/);
+  }
+});
+
+// Since v0.6.2 the public secure-host action forwards to the image action
+// and fails on `binary`; internal keeps the second user `run` expects. Its
+// check needs the proposals upload's digest (its grant: review.test.mjs).
+test('both agent jobs use secure-host/internal and hand the proposals digest to check', () => {
+  for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
+    const source = readFileSync(`.github/workflows/${file}`, 'utf8');
+    const job = name => source.split(`\n  ${name}:\n`)[1].split(/\n  [a-z]+:\n/)[0];
+    const agent = job('agent');
+    assert.deepEqual([...agent.matchAll(/uses: (\.\/\.agentic-job-source\/secure-host\S*)/g)].map(m => m[1]),
+      ['./.agentic-job-source/secure-host/internal'], file);
+    assert.match(agent, /\n {6}safe-outputs-artifact-digest: \$\{\{ steps\.run\.outputs\.safe-outputs-artifact-digest \}\}\n/, file);
+    assert.match(job('check'), /\n {6}safe-outputs-artifact-digest: \$\{\{ needs\.agent\.outputs\.safe-outputs-artifact-digest \}\}/, file);
   }
 });
 
