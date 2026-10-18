@@ -324,7 +324,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.1
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.2
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -408,6 +408,7 @@ jobs:
     outputs:
       exit: ${{ steps.run.outputs.exit }}
       safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}
     steps:
       # The bootc-dev RHEL 10 runners lack what the steps below assume: git,
       # without which checkout falls back to the REST API and prepare sees
@@ -477,8 +478,11 @@ jobs:
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability
         run: agentic-job secure-host inference .agentic-job/config.toml
-      # The last step with root.
-      - uses: ./.agentic-job-source/secure-host
+      # The last step with root. Since v0.6.2 the public secure-host action
+      # forwards to this repository's image action and refuses `binary`;
+      # internal keeps `sandbox setup` and the second user that run expects,
+      # as agentic-job's own review workflow does.
+      - uses: ./.agentic-job-source/secure-host/internal
         with:
           binary: /usr/local/bin/agentic-job
           config: .agentic-job/config.toml
@@ -545,19 +549,23 @@ jobs:
     # only when the calling repository sets AGENTIC_JOB_DETECT_MODEL. Leave
     # that unset: detect runs on a hosted runner without our tailnet join,
     # so it cannot reach the proxy and would block every apply.
+    # Since v0.6.2 check verifies the proposals upload's digest, which it
+    # reads with `actions: read`.
     permissions:
       contents: read
+      actions: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.1
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.2
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}
 
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.1
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.2
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
