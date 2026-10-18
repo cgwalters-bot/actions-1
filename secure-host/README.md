@@ -64,7 +64,8 @@ joining a network) comes before it too.
 
 **What is claimed:** after secure-host, no step gets root or reaches the
 cloud metadata service, and writes to world-writable files on the root
-filesystem go only to their owner.
+filesystem go only to their owner. Steps cannot read another runner
+process's environment through `/proc/PID/environ`.
 
 **What is not claimed:** that the steps of one job are kept apart from
 each other, or from that job's own tokens. GitHub's step model gives
@@ -89,11 +90,14 @@ Any step can compromise the steps after it. The job is the unit of trust.
    audience: the untrusted job never has `id-token`.
 3. **checkout's persisted credentials and `GITHUB_TOKEN`** are readable by
    every step: use `persist-credentials: false` and minimal permissions.
-4. **Another process's `/proc/PID/environ`** is readable by a later step:
-   Yama checks only attaches, and `hidepid` does not separate one user's
-   processes. agentic-job has an opt-in BPF hook for this, which this
-   action does not turn on yet.
-5. **A process left behind** lives until the job ends.
+4. **Another process's `/proc/PID/environ`** is refused by the BPF
+   runner-read rule, enabled in the default hosted configuration. CI on
+   `ubuntu-26.04` checks a later step cannot read a process left by an
+   earlier step, with a successful read before the action as control.
+   This is not isolation between steps or protection of the job's tokens.
+5. **A process left behind** lives until the job ends; the read rule does
+   not terminate it. Runner cleanup remains responsible for ending it,
+   and the CI job must still finish successfully with the rule enabled.
 6. **Container actions** fail with dockerd stopped.
 7. **Egress** is open: no proxy and no host-wide rules yet
    (agentic-job#995). Only the metadata service is refused.
