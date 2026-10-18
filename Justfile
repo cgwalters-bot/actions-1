@@ -35,7 +35,7 @@ secure-host-options want:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{ want }}" = before ]; then
-      sed -e 's/^lock-runner = true$/lock-runner = false/' -e 's/^deny-runner-metadata = true$/deny-runner-metadata = false/' \
+      sed -e 's/^lock-runner = true$/lock-runner = false/' -e 's/^deny-runner-metadata = true$/deny-runner-metadata = false/' -e 's/^deny-runner-reads = true$/deny-runner-reads = false/' \
         secure-host/hosted.toml > "$RUNNER_TEMP/unlocked.toml"
       grep -qx 'lock-runner = false' "$RUNNER_TEMP/unlocked.toml"
       exit
