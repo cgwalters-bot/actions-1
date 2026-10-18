@@ -137,10 +137,12 @@ reviewer is told a person approves after it.
 ## Lock new items
 
 [lock-new-items](.github/workflows/lock-new-items.yml) locks each newly
-opened issue and pull request, so that only collaborators can comment on
+opened issue, so that only collaborators can comment on
 it and agent runs on it read no outsider's comments (tracker#733). Its one
 step locks the item by API with the caller's job token: no PAT, and
-nothing of the item is read or run. It does not cover the opener's own
+nothing of the item is read or run. Pull requests are not locked: a locked
+PR refuses reviews from the review job token, and the supervisor only
+dispatches issues. It does not cover the opener's own
 text, comments in the seconds before the lock, items opened by another
 workflow's job token or transferred in (no `opened` event), or items that
 predate the caller. A repository opts in with this one
@@ -152,24 +154,19 @@ name: lock
 on:
   issues:
     types: [opened]
-  pull_request_target: # zizmor: ignore[dangerous-triggers]
-    types: [opened]
 permissions: {}
 jobs:
   lock:
     uses: cgwalters-forge/actions/.github/workflows/lock-new-items.yml@main
     permissions:
       issues: write
-      pull-requests: write
 ```
 
 The same pull request exempts the file in
 `.github/agentic-job/workflows.toml`, creating it if need be, as this
 repository does: without that, workflows-check's shape check refuses every
 later pull request. Its zizmor needs the `ref-pin` policy for our own
-workflows that [.github/zizmor.yml](.github/zizmor.yml) sets. workflows-check refuses the pull request that adds
-it (a new `pull_request_target` trigger and a new zizmor ignore), so an
-organization owner merges it bypassing the ruleset.
+workflows that [.github/zizmor.yml](.github/zizmor.yml) sets.
 
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or
 [MIT](LICENSE-MIT), at your option.

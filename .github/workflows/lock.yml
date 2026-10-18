@@ -2,10 +2,6 @@ name: lock
 on:
   issues:
     types: [opened]
-  # The base's reusable workflow runs, and it reads nothing of the head
-  # (lock-new-items.test.mjs enforces that), so this trigger is accepted.
-  pull_request_target: # zizmor: ignore[dangerous-triggers]
-    types: [opened]
 permissions: {}
 jobs:
   lock:
@@ -14,4 +10,3 @@ jobs:
     uses: ./.github/workflows/lock-new-items.yml
     permissions:
       issues: write
-      pull-requests: write
