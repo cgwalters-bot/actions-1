@@ -14,9 +14,11 @@ test-review:
 test-secure-host:
     node --test secure-host/*.test.mjs
 
-# The proxy, not an origin error or timeout, must refuse the write.
-secure-host-egress:
-    node secure-host/egress-probe.mjs
+# The proxy, not an origin error or timeout, must refuse the write; and
+# with ALLOWED, a path of example.com an `egress-policy` rule allows, let
+# that POST through.
+secure-host-egress allowed="":
+    node secure-host/egress-probe.mjs {{ quote(allowed) }}
 
 # The secure-host workflow's host checks (secure-host/README.md), each run
 # by the runner's user in a step of its own. WANT says which side of the
