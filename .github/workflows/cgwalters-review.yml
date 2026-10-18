@@ -1,4 +1,4 @@
-# Composed from agentic-job v0.6.1's review.yml: keep event policy and
+# Composed from agentic-job v0.6.2's review.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
 # No dispatcher inputs: identity/configuration comes from repository variables.
 name: cgwalters-review
@@ -24,7 +24,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.1
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.2
     permissions:
       contents: read
     with:
@@ -97,6 +97,7 @@ jobs:
       exit: ${{ steps.run.outputs.exit }}
       over-budget: ${{ steps.run.outputs.over-budget }}
       safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}
       # Let the submitted review's footer link the agent job, not just the run.
       job: ${{ job.check_run_id }}
     steps:
@@ -125,7 +126,8 @@ jobs:
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability
         run: agentic-job secure-host inference .agentic-job/config.toml
-      - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
+      # internal, as upstream's review.yml: the public action now refuses `binary`.
+      - uses: ./.agentic-job-source/secure-host/internal # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
           binary: /usr/local/bin/agentic-job
           config: .agentic-job/config.toml
@@ -139,14 +141,16 @@ jobs:
     needs: [policy, agent]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.agent.outputs.safe-outputs-artifact-id != '' }}
     # check.yml's detect job asks for it; only that job takes it (see
-    # cgwalters-agentic-job.yml).
+    # cgwalters-agentic-job.yml). `actions: read` is for the digest check.
     permissions:
       contents: read
+      actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.1
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.2
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}
 
   submit:
     needs: [policy, agent, check]
@@ -197,7 +201,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.1
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.2
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
