@@ -5,7 +5,7 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     # The workflows, and the composite actions' own pins.
-    directories: [/, /tailscale, /lint]
+    directories: [/, /tailscale, /lint, /app-token]
     schedule:
       interval: daily
     # policy, check and apply must name the same tag (the run refuses calls
