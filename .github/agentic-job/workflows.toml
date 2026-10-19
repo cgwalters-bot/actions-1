@@ -1,8 +1,11 @@
 # This repository's workflow files, exempt from workflows-check's job
-# shape check (lint/workflows-check.md): none runs an agent outside the
-# reusable workflow, and each is reviewed here.
+# shape check (lint/workflows-check.md): none runs an agent but
+# cgwalters-agent.yml, agentic-job's own agent job with our tailnet join,
+# and each is reviewed here. The check reads this file at a pull request's
+# base, so an entry takes effect from the pull request after it lands.
 [exempt]
 "ci.yml" = "This repository's CI: tests this revision's actions by local path, with a read-only token."
+"cgwalters-agent.yml" = "The agent job of both wrappers, called only by them at their own commit: agentic-job's agent.yml at the pinned tag with our tailnet join and, on RHEL runners only, a root step of our own installing distribution and EPEL packages before any checkout; it runs the tag's secure-host forwarder from the policy-selected source, then the agent as the runner's user, with read-only permissions, no id-token, and no secret but the run token, the agent's anyway, and a single-use tailnet key spent before secure-host."
 "cgwalters-agentic-job.yml" = "Reusable wrapper of agentic-job's reusable workflows, which run the agent in their own sandbox."
 "cgwalters-review.yml" = "Reusable wrapper of agentic-job's review workflows, which run the agent in their own sandbox."
 "lock-new-items.yml" = "Reusable workflow whose one step locks the opened item by API, reading and running nothing of it."

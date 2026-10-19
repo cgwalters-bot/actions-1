@@ -5,7 +5,7 @@ const { runInNewContext } = require('node:vm');
 
 // The agentic-job tag both wrappers call: a bump changes it here, in the
 // six calls, the review wrapper's header and the README.
-const PIN = 'v0.6.2';
+const PIN = 'v0.6.3';
 
 const workflow = readFileSync('.github/workflows/cgwalters-review.yml', 'utf8');
 const jobs = Object.fromEntries([...workflow.matchAll(/^  ([a-z]+):\n([\s\S]*?)(?=^  [a-z]+:\n|$(?![\s\S]))/gm)]
@@ -70,16 +70,29 @@ test('only admitted agent jobs compete, and only pushes cancel them', () => {
   assert.match(jobs.agent, /cancel-in-progress: \$\{\{ github.event_name == 'pull_request_target' \}\}/);
 });
 
+// The shared agent job both wrappers call (cgwalters-agent.yml), and its steps.
+const agentWorkflow = readFileSync('.github/workflows/cgwalters-agent.yml', 'utf8');
+const agentJob = agentWorkflow.split('\n  agent:\n')[1];
+const agentSteps = [...agentJob.matchAll(/^      - (?:uses: ([^\s]+)|name: (.+)|id: (.+))/gm)]
+  .map(([, uses, name, id]) => uses || name || id);
+
+// Since v0.6.3 the agent is the runner's user, after the secure-host image
+// action, and `run` requires runner-home. The tailnet join is its job's one
+// privileged step, with the register job's key, before the proxy check and
+// before secure-host; nothing follows run.
 test('trusted source only, one network join before dropping root, no post-agent steps', () => {
   assert.doesNotMatch(workflow, /pull_request.head|head.ref|secrets: inherit|workflow_dispatch/);
-  const steps = [...jobs.agent.matchAll(/^      - (?:uses: ([^\s]+)|name: (.+)|id: (.+))/gm)]
-    .map(([, uses, name, id]) => uses || name || id);
-  assert.deepEqual(steps.slice(2), [
-    './.agentic-job-source/prepare', 'Join the tailnet', 'Check inference proxy reachability',
-    './.agentic-job-source/secure-host/internal', 'run',
+  assert.deepEqual(agentSteps.slice(4), [
+    './.agentic-job-source/prepare', 'Admit the runner-user configuration',
+    "Join the tailnet with the register job's key", "Make tailscaled's LocalAPI root's only",
+    'Check inference proxy reachability', "The host's configuration",
+    './.agentic-job-source/secure-host', 'The setup script', 'run',
   ]);
-  assert.match(jobs.agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);
-  assert.doesNotMatch(jobs.agent, /(?:pull-requests|contents|issues): write|secrets\./);
+  assert.match(agentJob, /ref: \$\{\{ fromJSON\(inputs.policy\).ref \}\}/);
+  assert.match(agentJob, /\n {10}runner-home: \$\{\{ runner\.temp \}\}\/agent-home\n/);
+  assert.match(agentJob, /\n {10}authkey: \$\{\{ secrets\.NETWORK_SECRET \}\}\n/);
+  assert.match(agentJob, /\n {10}inference-run-token: \$\{\{ secrets\.INFERENCE_RUN_TOKEN \}\}\n/);
+  assert.equal([...agentJob.matchAll(/secrets\./g)].length, 2);
   for (const name of ['policy', 'check', 'apply']) {
     assert.match(jobs[name], new RegExp(`uses: [^\\n]+/${name}\\.yml@${PIN.replaceAll('.', '\\.')}`));
   }
@@ -88,35 +101,66 @@ test('trusted source only, one network join before dropping root, no post-agent 
   }
 });
 
-test('both composed jobs retain the release pins and check the proxy between join and setup', () => {
+// The identity token could mint tokens for any audience, so the job of the
+// runner's-user agent holds none (agentic-job's docs/secure-host.md): only
+// each wrapper's register job does, which runs nothing of the agent's and
+// hands it the run token and the tailnet key as secrets of the call.
+test('only the register job holds id-token; the agent job gets its outputs as secrets', () => {
+  assert.match(agentWorkflow, /\n {4}permissions:\n {6}contents: read\n {6}issues: read\n {6}pull-requests: read\n {6}actions: read\n {4}outputs:/);
+  const code = agentWorkflow.split('\n').filter(line => !line.trim().startsWith('#')).join('\n');
+  assert.doesNotMatch(code, /id-token|: write/);
+  for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
+    const source = readFileSync(`.github/workflows/${file}`, 'utf8');
+    const job = name => source.split(`\n  ${name}:\n`)[1].split(/\n  [a-z]+:\n/)[0];
+    const agent = job('agent');
+    assert.doesNotMatch(agent, /id-token|: write|\n {4}steps:/, file);
+    assert.match(agent, /\n {4}uses: \.\/\.github\/workflows\/cgwalters-agent\.yml /, file);
+    assert.match(agent, /\n {4}secrets:\n {6}INFERENCE_RUN_TOKEN: \$\{\{ needs\.register\.outputs\.run-token \}\}\n {6}NETWORK_SECRET: \$\{\{ needs\.register\.outputs\.network-secret \}\}\n/, file);
+    const register = job('register');
+    assert.match(register, /\n {4}permissions:\n {6}id-token: write\n {4}outputs:/, file);
+    assert.doesNotMatch(register, /actions\/checkout|agentic-job-source/, file);
+    const steps = [...register.matchAll(/^      - (?:uses: ([^\s@]+)|name: (.+)|id: (.+))/gm)]
+      .map(([, uses, name, id]) => uses || name || id);
+    assert.deepEqual(steps, [
+      "The policy call's source repository and upload IDs", 'Refuse step debug logging',
+      'Join the tailnet', "Mint the agent job's key", 'actions/download-artifact', 'register',
+    ], file);
+    // The mint reads the client ID and tags at the join action's own ref.
+    const [, ref] = register.match(/uses: cgwalters-forge\/actions\/tailscale@(\S+)/);
+    assert.match(register, new RegExp(`TAILNETS: https://raw\\.githubusercontent\\.com/cgwalters-forge/actions/${ref}/tailscale/tailnets\\.json\\n`), file);
+    const others = Object.keys(Object.fromEntries([...source.matchAll(/^  ([a-z]+):\n/gm)].map(m => [m[1]])))
+      .filter(name => !['register', 'check'].includes(name));
+    for (const name of others) assert.doesNotMatch(job(name), /id-token/, `${file} ${name}`);
+  }
+});
+
+test('both wrappers pin one release and check the proxy between join and setup', () => {
   for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
     const source = readFileSync(`.github/workflows/${file}`, 'utf8');
     const calls = [...source.matchAll(/uses: (\S+\/(?:policy|check|apply)\.yml)@(\S+)/g)];
     assert.equal(calls.length, 3, file);
     for (const [, , ref] of calls) assert.equal(ref, PIN, file);
-    const agent = source.split('\n  agent:\n')[1].split(/\n  [a-z]+:\n/)[0];
-    const check = 'run: agentic-job secure-host inference .agentic-job/config.toml';
-    assert.equal(agent.split(check).length - 1, 1, file);
-    assert.ok(agent.indexOf('name: Join the tailnet') < agent.indexOf(check), file);
-    const secureHost = 'uses: ./.agentic-job-source/secure-host/internal';
-    assert.ok(agent.indexOf(check) < agent.indexOf(secureHost), file);
-    assert.ok(agent.indexOf(secureHost) < agent.indexOf('uses: ./.agentic-job-source/run'), file);
-    assert.doesNotMatch(agent, /steps\.secure-host\.outputs\.session-endpoint/);
   }
+  const check = 'run: agentic-job secure-host inference .agentic-job/config.toml';
+  assert.equal(agentJob.split(check).length - 1, 1);
+  assert.ok(agentJob.indexOf("name: Join the tailnet with the register job's key") < agentJob.indexOf(check));
+  const secureHost = 'uses: ./.agentic-job-source/secure-host ';
+  assert.ok(agentJob.indexOf(check) < agentJob.indexOf(secureHost));
+  assert.ok(agentJob.indexOf(secureHost) < agentJob.indexOf('uses: ./.agentic-job-source/run '));
 });
 
-// Since v0.6.2 the public secure-host action forwards to the image action
-// and fails on `binary`; internal keeps the second user `run` expects. Its
-// check needs the proposals upload's digest (its grant: review.test.mjs).
-test('both agent jobs use secure-host/internal and hand the proposals digest to check', () => {
+// v0.6.3 has no secure-host/internal: its public secure-host forwards to
+// this repository's image action. Check needs the proposals upload's digest
+// (its grant: review.test.mjs).
+test('the agent job uses the secure-host forwarder and hands the proposals digest to check', () => {
+  assert.deepEqual([...agentJob.matchAll(/uses: (\.\/\.agentic-job-source\/secure-host\S*)/g)].map(m => m[1]),
+    ['./.agentic-job-source/secure-host']);
+  assert.match(agentJob, /\n {6}safe-outputs-artifact-digest: \$\{\{ steps\.run\.outputs\.safe-outputs-artifact-digest \}\}\n/);
+  assert.match(agentWorkflow, /\n {6}safe-outputs-artifact-digest:\n {8}value: \$\{\{ jobs\.agent\.outputs\.safe-outputs-artifact-digest \}\}\n/);
   for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
     const source = readFileSync(`.github/workflows/${file}`, 'utf8');
-    const job = name => source.split(`\n  ${name}:\n`)[1].split(/\n  [a-z]+:\n/)[0];
-    const agent = job('agent');
-    assert.deepEqual([...agent.matchAll(/uses: (\.\/\.agentic-job-source\/secure-host\S*)/g)].map(m => m[1]),
-      ['./.agentic-job-source/secure-host/internal'], file);
-    assert.match(agent, /\n {6}safe-outputs-artifact-digest: \$\{\{ steps\.run\.outputs\.safe-outputs-artifact-digest \}\}\n/, file);
-    assert.match(job('check'), /\n {6}safe-outputs-artifact-digest: \$\{\{ needs\.agent\.outputs\.safe-outputs-artifact-digest \}\}/, file);
+    const check = source.split('\n  check:\n')[1].split(/\n  [a-z]+:\n/)[0];
+    assert.match(check, /\n {6}safe-outputs-artifact-digest: \$\{\{ needs\.agent\.outputs\.safe-outputs-artifact-digest \}\}/, file);
   }
 });
 

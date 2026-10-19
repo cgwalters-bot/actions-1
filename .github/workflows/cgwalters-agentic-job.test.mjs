@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
+// The agent job both wrappers call.
+const agentWorkflow = readFileSync(new URL('./cgwalters-agent.yml', import.meta.url), 'utf8');
 
 // agentic-job is called at one release tag: check, apply, prepare and run
 // refuse calls that resolved to different commits, which following main
@@ -192,7 +194,7 @@ test('a session names its endpoint from the join hostname and the repository var
   assert.equal((await target({}))['session-host'], '');
   // The address is the node the agent job joins as, also when that job
   // alone is re-run, on a domain only the calling repository sets.
-  assert.match(job('agent'), /\n {10}hostname: \$\{\{ needs\.target\.outputs\.session-host \|\| format\('agentic-job-\{0\}-\{1\}', github\.run_id, github\.run_attempt\) \}\}\n/);
+  assert.match(job('agent'), /\n {6}hostname: \$\{\{ needs\.target\.outputs\.session-host \|\| format\('agentic-job-\{0\}-\{1\}', github\.run_id, github\.run_attempt\) \}\}\n/);
   assert.match(job('target'), /\n {6}session-host: \$\{\{ steps\.target\.outputs\.session-host \}\}\n/);
   assert.match(workflow, /\n {10}TAILNET_DOMAIN: \$\{\{ vars\.TAILNET_DOMAIN \}\}\n/);
   assert.doesNotMatch(workflow, /inputs\.tailnet/i);
@@ -210,8 +212,13 @@ test('a session without a usable domain, for review, or with idle-minutes out of
   await assert.rejects(target({ IDLE_MINUTES: '10' }), /idle-minutes/);
 });
 
+// The register job joins and mints the agent job's key only for those, and
+// the agent job joins with it only then.
 test('the tailnet join is for a real agent or a session', () => {
-  assert.match(job('agent'), /- name: Join the tailnet\n {8}if: \$\{\{ needs\.target\.outputs\.agent != 'fake' \|\| needs\.target\.outputs\.session == 'true' \}\}\n/);
+  const when = "\\$\\{\\{ needs\\.target\\.outputs\\.agent != 'fake' \\|\\| needs\\.target\\.outputs\\.session == 'true' \\}\\}";
+  assert.match(job('register'), new RegExp(`- name: Join the tailnet\\n {8}if: ${when}\\n`));
+  assert.match(job('register'), new RegExp(`- name: Mint the agent job's key\\n {8}id: mint\\n {8}if: ${when}\\n`));
+  assert.match(job('agent'), new RegExp(`\\n {6}join: ${when}\\n`));
 });
 
 test('the session job posts the endpoint before apply concludes, and only for a session', () => {
@@ -239,16 +246,16 @@ test('agentic-job is called at a tag whose policy has the session input', () => 
 });
 
 // agentic-job's provider-key mode (its #740), off unless a caller asks:
-// the defaults are its broker's, and the key, which `run` holds outside
-// the agent's sandbox, is handed to that one step and to nothing else.
-test('provider-key mode passes through with broker defaults, the key to run alone', () => {
+// the defaults are its broker's. Since v0.6.3 the agent is the runner's
+// user, which would hold the key, so the key is still declared but goes
+// to no job, and agentic-job's agent job refuses `api-key`.
+test('provider-key mode passes through with broker defaults, the key to no job', () => {
   assert.match(workflow, /\n {6}inference-register:\n {8}description: [^\n]*\n {8}type: string\n {8}default: github-oidc\n/);
   assert.match(workflow, /\n {6}inference-provider:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
   assert.match(workflow, /\n {6}INFERENCE_API_KEY:\n {8}required: false\n/);
   assert.match(job('policy'), /\n {6}inference-register: \$\{\{ inputs\.inference-register \}\}\n {6}inference-provider: \$\{\{ inputs\.inference-provider \}\}\n/);
-  const uses = [...workflow.matchAll(/secrets\.INFERENCE_API_KEY/g)];
-  assert.equal(uses.length, 1);
-  assert.match(job('agent'), /\n {8}uses: \.\/\.agentic-job-source\/run\n {8}with:\n {10}github-token: \$\{\{ github\.token \}\}\n {10}inference-api-key: \$\{\{ secrets\.INFERENCE_API_KEY \}\}\n/);
+  assert.doesNotMatch(workflow, /secrets\.INFERENCE_API_KEY/);
+  assert.doesNotMatch(agentWorkflow, /INFERENCE_API_KEY|inference-api-key/);
 });
 
 test('the broker audience goes to policy only with the broker registration', async () => {
@@ -261,8 +268,8 @@ test('the broker audience goes to policy only with the broker registration', asy
 // Execute the agent job's first step against stub os-release files with a
 // recording sudo double: only RHEL 10 installs or links anything, and it
 // does so before the first checkout, which needs git.
-test('only RHEL 10 installs git, node and gh and links agentic-job into sudo\'s PATH', () => {
-  const agent = job('agent');
+test('only RHEL 10 installs git, node, iptables and gh and links agentic-job and tailscale into sudo\'s PATH', () => {
+  const agent = `\n${agentWorkflow.split('\n  agent:\n')[1]}`;
   const step = agent.split('      - name: Install RHEL prerequisites\n')[1]?.split('\n      - ')[0];
   assert.ok(step, 'the agent job has no RHEL prerequisites step');
   assert.match(agent, /\n {4}steps:\n(?: {6}#[^\n]*\n)* {6}- name: Install RHEL prerequisites\n/);
@@ -278,10 +285,12 @@ test('only RHEL 10 installs git, node and gh and links agentic-job into sudo\'s 
 require('node:fs').appendFileSync(process.env.CALL_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
 `, { mode: 0o700 });
     const rhel = [
-      ['dnf', 'install', '-y', 'git', 'nodejs'],
+      ['dnf', 'install', '-y', 'git', 'nodejs', 'iptables'],
       ['dnf', 'install', '-y', 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm'],
       ['dnf', 'install', '-y', 'gh'],
       ['ln', '-sfn', '/usr/local/bin/agentic-job', '/usr/bin/agentic-job'],
+      ['ln', '-sfn', '/usr/local/bin/tailscale', '/usr/bin/tailscale'],
+      ['ln', '-sfn', '/usr/local/bin/tailscaled', '/usr/bin/tailscaled'],
     ];
     for (const [release, expected] of [
       ['NAME="Red Hat Enterprise Linux"\nID="rhel"\nID_LIKE="centos fedora"\nVERSION_ID="10.0"\n', rhel],

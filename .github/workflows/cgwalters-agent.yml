@@ -1,0 +1,194 @@
+# The agent job of both wrappers, cgwalters-agentic-job.yml and
+# cgwalters-review.yml: agentic-job's agent.yml at the tag they pin, with
+# our tailnet join in place of its caller's network step. Since v0.6.3 the
+# agent is the runner's user, without root, after this repository's
+# secure-host (through the tag's forwarder); with `id-token: write` it
+# could mint identity tokens for any audience (agentic-job's
+# docs/secure-host.md). So this job has none: each wrapper's register job
+# joins the tailnet and registers the run with the identity token, which
+# names the wrapper as its `job_workflow_ref`, and hands this job two
+# things as secrets, which masks them in every log of it: the broker's run
+# token and a single-use tailnet key, spent on the join before secure-host.
+# A call, not a job of the wrappers' own, because only a call's `secrets:`
+# makes another job's output a secret. Called only by those two, at their
+# own commit.
+name: cgwalters-agent
+
+on:
+  workflow_call:
+    inputs:
+      policy:
+        description: The policy call's outputs, as JSON
+        type: string
+        required: true
+      runner:
+        description: The runner label, as JSON
+        type: string
+        required: true
+      join:
+        description: Join the tailnet with NETWORK_SECRET before secure-host
+        type: boolean
+        default: true
+      hostname:
+        description: The node name of that join
+        type: string
+        default: ""
+    secrets:
+      # The register job's `agentic-job register`: empty for every mode but
+      # `github-oidc`. Only `run` gets it, and gives the agent this token:
+      # narrow, capped and expiring.
+      INFERENCE_RUN_TOKEN:
+        required: false
+      # The register job's single-use, ephemeral, preauthorized tailnet key,
+      # expiring in an hour; given to the join alone.
+      NETWORK_SECRET:
+        required: false
+    outputs:
+      exit:
+        value: ${{ jobs.agent.outputs.exit }}
+      over-budget:
+        value: ${{ jobs.agent.outputs.over-budget }}
+      # apply's status comment names a refused upload's secret by it.
+      secret-at:
+        value: ${{ jobs.agent.outputs.secret-at }}
+      safe-outputs-artifact-id:
+        value: ${{ jobs.agent.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest:
+        value: ${{ jobs.agent.outputs.safe-outputs-artifact-digest }}
+      job:
+        value: ${{ jobs.agent.outputs.job }}
+
+permissions: {}
+
+jobs:
+  agent:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 360
+    # Read only, and nothing more: `run` hands this job's token to the agent
+    # for GitHub reads, and no check sees what it was granted. No `id-token`.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    outputs:
+      exit: ${{ steps.run.outputs.exit }}
+      over-budget: ${{ steps.run.outputs.over-budget }}
+      secret-at: ${{ steps.run.outputs.secret-at }}
+      safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}
+      # Let the submitted review's footer link the agent job, not just the run.
+      job: ${{ job.check_run_id }}
+    steps:
+      # The bootc-dev RHEL 10 runners lack what the steps below assume: git,
+      # without which checkout falls back to the REST API and prepare sees
+      # no commit; node, for the .mjs steps; iptables, for tailscaled; gh,
+      # from EPEL, for run's public-repository check. And sudo's
+      # secure_path omits /usr/local/bin, where prepare installs
+      # agentic-job and the join installs tailscale; the links dangle until
+      # they do. Elsewhere, Ubuntu included, nothing runs. Shrinks once
+      # agentic-job calls itself by absolute path under sudo and stops
+      # needing gh.
+      - name: Install RHEL prerequisites
+        env:
+          OS_RELEASE: /etc/os-release
+        run: |
+          if ! test -r "$OS_RELEASE"; then exit 0; fi
+          # shellcheck source=/dev/null
+          release=$(. "$OS_RELEASE" && echo "${ID:-} ${VERSION_ID:-}")
+          case "$release" in
+            "rhel 10" | "rhel 10."*) ;;
+            *) exit 0 ;;
+          esac
+          sudo dnf install -y git nodejs iptables
+          sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm
+          sudo dnf install -y gh
+          sudo ln -sfn /usr/local/bin/agentic-job /usr/bin/agentic-job
+          sudo ln -sfn /usr/local/bin/tailscale /usr/bin/tailscale
+          sudo ln -sfn /usr/local/bin/tailscaled /usr/bin/tailscaled
+      # The calling repository at the policy job's commit (a review's base,
+      # never the head).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(inputs.policy).ref }}
+          persist-credentials: false
+      # The actions come from the policy call's own source, which must be
+      # the repository the wrappers call; its commit is the one the tag
+      # named when the run started, and is checked out below as policy
+      # reported it.
+      - name: The policy call's source repository
+        env:
+          SOURCE_REPOSITORY: ${{ fromJSON(inputs.policy).source-repository }}
+          SOURCE_SHA: ${{ fromJSON(inputs.policy).source-sha }}
+          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
+        run: |
+          echo "$SOURCE_REPOSITORY at $SOURCE_SHA"
+          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ fromJSON(inputs.policy).source-repository }}
+          ref: ${{ fromJSON(inputs.policy).source-sha }}
+          path: .agentic-job-source
+          persist-credentials: false
+      - uses: ./.agentic-job-source/prepare # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
+        with:
+          binary-artifact-id: ${{ fromJSON(inputs.policy).binary-artifact-id }}
+          policy-artifact-id: ${{ fromJSON(inputs.policy).policy-artifact-id }}
+      # agentic-job's refusal of what the runner's user cannot be given: a
+      # private caller or target, a provider's API key, a session, MCP.
+      - name: Admit the runner-user configuration
+        env:
+          CALLER_PRIVATE: ${{ toJSON(github.event.repository.private) }}
+        run: python3 .agentic-job-source/workflow/runner-setup.py admit
+      # Our one privileged step, before anything of the agent's is on the
+      # machine: tailscale/github-action with the register job's key, as
+      # our tailscale action joins, and its hardening after it.
+      - name: Join the tailnet with the register job's key
+        id: join
+        if: ${{ inputs.join }}
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          authkey: ${{ secrets.NETWORK_SECRET }}
+          hostname: ${{ inputs.hostname }}
+          args: --accept-dns=false
+      # As tailscale/action.yml: the LocalAPI socket is 0666 and does not
+      # check who dials through it, so any later local user could use the
+      # node's tailnet access; also on a failed join, since tailscaled may
+      # be running anyway.
+      - name: Make tailscaled's LocalAPI root's only
+        if: ${{ always() && inputs.join }}
+        env:
+          JOINED: ${{ steps.join.outcome == 'success' }}
+        run: |
+          if sudo test -f /usr/local/bin/tailscale; then sudo chmod 0700 /usr/local/bin/tailscale; fi
+          if ! sudo test -d /var/run/tailscale; then echo "tailscaled is not running"; exit 0; fi
+          sudo chmod 0700 /var/run/tailscale
+          echo "/var/run/tailscale: $(sudo stat -c '%a %U:%G' /var/run/tailscale)"
+          if test "$JOINED" = true; then sudo /usr/local/bin/tailscale status --self >/dev/null; fi
+      # Fail on a missing proxy route before setup, not in its sandbox probes.
+      # This TCP check sends no credentials and skips fake/no-proxy runs.
+      - name: Check inference proxy reachability
+        run: agentic-job secure-host inference .agentic-job/config.toml
+      # The policy job's configuration for the host, but for `setup.script`,
+      # which the step after secure-host runs without root.
+      - name: The host's configuration
+        run: agentic-job config --host --no-script --from .agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+      # The last step with root: this repository's secure-host, through the
+      # forwarder of the policy job's commit, which pins it.
+      - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
+        with:
+          config: ${{ runner.temp }}/agentic-job-host.toml
+      - name: The setup script
+        env:
+          AGENT_HOME: ${{ runner.temp }}/agent-home
+        run: python3 .agentic-job-source/workflow/runner-setup.py setup
+      # The agent's GH_TOKEN is this job's read-only token. No step follows:
+      # nothing here touches what the agent left.
+      - id: run
+        timeout-minutes: 340
+        uses: ./.agentic-job-source/run # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
+        with:
+          runner-home: ${{ runner.temp }}/agent-home
+          github-token: ${{ github.token }}
+          inference-run-token: ${{ secrets.INFERENCE_RUN_TOKEN }}

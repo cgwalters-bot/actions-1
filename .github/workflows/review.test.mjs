@@ -80,7 +80,11 @@ test('the composed review links its pinned helper to the agent job', () => {
   const workflow = read('./cgwalters-review.yml');
   const agent = workflow.split('\n  agent:\n')[1].split('\n  check:\n')[0];
   const submit = workflow.split('\n  submit:\n')[1].split('\n  apply:\n')[0];
-  assert.match(agent, /\n {6}job: \$\{\{ job\.check_run_id \}\}\n/);
+  // The agent job is the shared one's, which passes its job's ID on.
+  assert.match(agent, /\n {4}uses: \.\/\.github\/workflows\/cgwalters-agent\.yml[ \n]/);
+  const called = read('./cgwalters-agent.yml');
+  assert.match(called, /\n {6}job:\n {8}value: \$\{\{ jobs\.agent\.outputs\.job \}\}\n/);
+  assert.match(called, /\n {6}job: \$\{\{ job\.check_run_id \}\}\n/);
   assert.match(submit, /\n {10}AGENT_JOB: \$\{\{ needs\.agent\.outputs\.job \}\}\n/);
 });
 

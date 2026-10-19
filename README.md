@@ -29,14 +29,19 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
-Both wrappers pin agentic-job v0.6.2 and check inference reachability after
-the tailnet join, before securing the host. They still compose that tag's
-`secure-host/internal` action, which runs `sandbox setup` on the host, not
-this repository's [secure-host](secure-host/README.md) image action that the
-tag's public `secure-host` now forwards to, so its egress
-proxy stays a host unit. Since v0.6.0 the agent's home no longer copies the
-runner image's `/etc/skel`, toolchains and dotfiles included. The pinned `run` action publishes
-the session endpoint itself; no extra endpoint step is needed here.
+Both wrappers pin agentic-job v0.6.3, which runs the agent as the
+runner's user after this repository's [secure-host](secure-host/README.md)
+image action (through the tag's `secure-host`), with no second user. So
+the agent job, [cgwalters-agent](.github/workflows/cgwalters-agent.yml),
+which both call, holds no `id-token`: each wrapper's `register` job joins
+the tailnet, registers the run at the broker and mints a single-use
+tailnet key, and the agent job gets the run token and that key as
+secrets. It joins with the key and checks inference reachability before
+securing the host. That tag's agent job refuses a session, a provider's
+API key and MCP credentials, which the runner's user would hold, so
+`session` and `INFERENCE_API_KEY` no longer work here. Since v0.6.0 the
+agent's home no longer copies the runner image's `/etc/skel`, toolchains
+and dotfiles included.
 Mid-run steering stays off unless the caller's runner configuration enables
 `[session] watch-item = true`. Policy derives the watched item from the
 dispatch wrapper's `issue` (in `output-repo`) or the review event;
@@ -73,9 +78,9 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.6.2**'s policy, check,
+event-review wrapper. It composes agentic-job **v0.6.3**'s policy, check,
 apply and review helpers, so that the tailnet and the inference broker admit
-this file's `job_workflow_ref`; agentic-job's review workflow can now run a
+this file's `job_workflow_ref` in its register job; agentic-job's review workflow can now run a
 caller's own network step instead (its #705), which callers have not moved
 to. It refuses private repositories, as the dispatch wrapper does. It adds
 our tailnet join and defaults: opencode,

@@ -1,4 +1,4 @@
-# Composed from agentic-job v0.6.2's review.yml: keep event policy and
+# Composed from agentic-job v0.6.3's review.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
 # No dispatcher inputs: identity/configuration comes from repository variables.
 name: cgwalters-review
@@ -24,7 +24,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.3
     permissions:
       contents: read
     with:
@@ -78,64 +78,116 @@ jobs:
           REASON: ${{ needs.policy.outputs.reason }}
         run: node .agentic-job-source/workflow/review.cjs refusal
 
-  agent:
+  # The agent's identity token is this job's; it names this file as its
+  # job_workflow_ref, so the tailnet and the broker must admit it. This job
+  # joins the tailnet, mints the agent job's key and registers the run, and
+  # runs nothing of the agent's; cgwalters-agent.yml says why the agent job
+  # cannot. Its outputs are read only by the agent's call, as secrets of that call.
+  register:
     needs: policy
+    if: ${{ needs.policy.outputs.admitted == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    outputs:
+      run-token: ${{ steps.register.outputs.run-token }}
+      network-secret: ${{ steps.mint.outputs.secret }}
+    steps:
+      - name: The policy call's source repository and upload IDs
+        env:
+          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
+          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
+          BINARY: ${{ needs.policy.outputs.binary-artifact-id }}
+          POLICY: ${{ needs.policy.outputs.policy-artifact-id }}
+        run: |
+          [[ "$SOURCE_REPOSITORY" == cgwalters-forge/agentic-job && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not cgwalters-forge/agentic-job at a full commit"; exit 1; }
+          # Empty IDs would make download-artifact take every upload.
+          [[ "$BINARY" =~ ^[1-9][0-9]*$ && "$POLICY" =~ ^[1-9][0-9]*$ ]] ||
+            { echo '::error::register requires binary and policy upload IDs from policy'; exit 1; }
+      # As `agentic-job register` refuses for the run token: with step debug
+      # logging the runner logs each output it sets, the minted key too.
+      - name: Refuse step debug logging
+        run: |
+          if test -n "${RUNNER_DEBUG-}"; then
+            echo "::error::Refusing to mint the agent job's tailnet key with step debug logging on; re-run without it"
+            exit 1
+          fi
+      - name: Join the tailnet
+        uses: cgwalters-forge/actions/tailscale@d7bfa158217182d8c0b0b775189dcf91a6afcdde
+        with:
+          hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}-register
+      # The key the Tailscale CLI makes from the identity token itself
+      # (feature/identityfederation), with the client ID and tags of the
+      # join's action at the same commit: single-use, ephemeral,
+      # preauthorized, expiring in an hour. Not masked: GitHub drops a job
+      # output holding a masked value, and none of it is printed.
+      - name: Mint the agent job's key
+        id: mint
+        shell: python3 -I {0}
+        env:
+          TAILNETS: https://raw.githubusercontent.com/cgwalters-forge/actions/d7bfa158217182d8c0b0b775189dcf91a6afcdde/tailscale/tailnets.json
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          import json, os, urllib.parse, urllib.request
+
+          def fetch(url, data=None, headers={}):
+              request = urllib.request.Request(url, data=data, headers=headers)
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          tailnet = fetch(os.environ["TAILNETS"])[os.environ["OWNER"]]
+          client = tailnet["oauth-client-id"]
+          audience = urllib.parse.quote(f"api.tailscale.com/{client}", safe="")
+          jwt = fetch(f"{os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']}&audience={audience}",
+                      headers={"Authorization": f"Bearer {os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']}"})["value"]
+          form = {"grant_type": "authorization_code", "code": "", "client_id": client, "jwt": jwt}
+          access = fetch("https://api.tailscale.com/api/v2/oauth/token-exchange",
+                         urllib.parse.urlencode(form).encode(),
+                         {"Content-Type": "application/x-www-form-urlencoded"})["access_token"]
+          create = {"reusable": False, "ephemeral": True, "preauthorized": True,
+                    "tags": tailnet["tags"].split(",")}
+          body = {"capabilities": {"devices": {"create": create}}, "expirySeconds": 3600}
+          key = fetch("https://api.tailscale.com/api/v2/tailnet/-/keys", json.dumps(body).encode(),
+                      {"Authorization": f"Bearer {access}", "Content-Type": "application/json"})["key"]
+          if not key.startswith("tskey-") or any(c.isspace() for c in key):
+              raise SystemExit("Tailscale returned no auth key")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"secret={key}\n")
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}
+          path: ${{ runner.temp }}/agentic-job
+          merge-multiple: true
+      - id: register
+        name: Register the run at the inference proxy
+        env:
+          JOB_DIR: ${{ runner.temp }}/agentic-job
+        run: |
+          chmod +x "$JOB_DIR/agentic-job"
+          "$JOB_DIR/agentic-job" register --config "$JOB_DIR/config.toml" --output "$GITHUB_OUTPUT"
+
+  agent:
+    needs: [policy, register]
     if: ${{ needs.policy.outputs.admitted == 'true' }}
     # Only admitted runs compete; comments cannot cancel an automatic review.
     concurrency:
       group: review-pull-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
-    runs-on: ${{ fromJSON(vars.AGENT_RUNNER || '"ubuntu-26.04"') }}
-    timeout-minutes: 360
     permissions:
       contents: read
       issues: read
       pull-requests: read
       actions: read
-      id-token: write
-    outputs:
-      exit: ${{ steps.run.outputs.exit }}
-      over-budget: ${{ steps.run.outputs.over-budget }}
-      safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
-      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}
-      # Let the submitted review's footer link the agent job, not just the run.
-      job: ${{ job.check_run_id }}
-    steps:
-      # The trusted base, never the head; source actions come from policy's pin.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.policy.outputs.ref }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ needs.policy.outputs.source-repository }}
-          ref: ${{ needs.policy.outputs.source-sha }}
-          path: .agentic-job-source
-          persist-credentials: false
-      - uses: ./.agentic-job-source/prepare # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
-        with:
-          binary-artifact-id: ${{ needs.policy.outputs.binary-artifact-id }}
-          policy-artifact-id: ${{ needs.policy.outputs.policy-artifact-id }}
-      # One privileged network step, before secure-host drops root. The
-      # tailnet and broker must admit this wrapper's job_workflow_ref.
-      - name: Join the tailnet
-        uses: cgwalters-forge/actions/tailscale@d7bfa158217182d8c0b0b775189dcf91a6afcdde
-        with:
-          hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
-      # Fail on a missing proxy route before setup, not in its sandbox probes.
-      # This TCP check sends no credentials and skips fake/no-proxy runs.
-      - name: Check inference proxy reachability
-        run: agentic-job secure-host inference .agentic-job/config.toml
-      # internal, as upstream's review.yml: the public action now refuses `binary`.
-      - uses: ./.agentic-job-source/secure-host/internal # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
-        with:
-          binary: /usr/local/bin/agentic-job
-          config: .agentic-job/config.toml
-      - id: run
-        timeout-minutes: 340
-        uses: ./.agentic-job-source/run # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
-        with:
-          github-token: ${{ github.token }}
+    uses: ./.github/workflows/cgwalters-agent.yml # zizmor: ignore[self-repository] This file's own commit.
+    secrets:
+      INFERENCE_RUN_TOKEN: ${{ needs.register.outputs.run-token }}
+      NETWORK_SECRET: ${{ needs.register.outputs.network-secret }}
+    with:
+      policy: ${{ toJSON(needs.policy.outputs) }}
+      runner: ${{ vars.AGENT_RUNNER || '"ubuntu-26.04"' }}
+      hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
 
   check:
     needs: [policy, agent]
@@ -146,7 +198,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.3
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -201,7 +253,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.3
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
