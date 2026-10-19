@@ -11,8 +11,8 @@ import { settings } from './setup.mjs';
 // their tailnet membership of the new one is confirmed.
 test('known organizations supply join settings and proxy', () => {
   for (const [owner, proxy] of [
-    ['bootc-dev', 'http://100.121.0.115:18080'],
-    ['cgwalters-forge-stage', 'http://100.121.0.115:18080'],
+    ['bootc-dev', 'http://100.114.231.4:18080'],
+    ['cgwalters-forge-stage', 'http://100.114.231.4:18080'],
     ['cgwalters-forge', 'http://100.114.231.4:18080'],
   ]) {
     const result = settings(owner);
