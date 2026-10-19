@@ -50,6 +50,18 @@ test('dependabot proposes new agentic-job tags as one group', () => {
   assert.match(config, /\n {6}exclude: \["cgwalters-forge\/agentic-job\*"\]\n/);
 });
 
+// A repository without INFERENCE_URL falls back to the broker its runner
+// joins the tailnet to reach: the wrappers and tailnets.json move together.
+test('the wrappers fall back to the cgwalters-forge tailnet broker', () => {
+  const tailnets = JSON.parse(readFileSync(new URL('../../tailscale/tailnets.json', import.meta.url), 'utf8'));
+  const broker = tailnets['cgwalters-forge'].proxy;
+  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
+    const text = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const fallbacks = [...text.matchAll(/vars\.INFERENCE_URL \|\| '([^']*)'/g)].map(match => match[1]);
+    assert.deepEqual(fallbacks, [broker], file);
+  }
+});
+
 // Third-party actions stay pinned by full commit; dependabot moves them.
 test('every other action is pinned by full commit', () => {
   for (const file of ['./cgwalters-agentic-job.yml', './ci.yml', '../../tailscale/action.yml']) {

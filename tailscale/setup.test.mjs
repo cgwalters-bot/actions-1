@@ -7,12 +7,18 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { settings } from './setup.mjs';
 
+// cgwalters-forge's broker moved; the others stay on the old host until
+// their tailnet membership of the new one is confirmed.
 test('known organizations supply join settings and proxy', () => {
-  for (const owner of ['bootc-dev', 'cgwalters-forge-stage', 'cgwalters-forge']) {
+  for (const [owner, proxy] of [
+    ['bootc-dev', 'http://100.121.0.115:18080'],
+    ['cgwalters-forge-stage', 'http://100.121.0.115:18080'],
+    ['cgwalters-forge', 'http://100.114.231.4:18080'],
+  ]) {
     const result = settings(owner);
     assert.equal(result.audience, `api.tailscale.com/${result['oauth-client-id']}`);
     assert.equal(result.tags, 'tag:bootc-dev-sandbox');
-    assert.equal(result.proxy, 'http://100.121.0.115:18080');
+    assert.equal(result.proxy, proxy);
   }
 });
 

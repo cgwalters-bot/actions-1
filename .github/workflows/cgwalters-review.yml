@@ -45,7 +45,7 @@ jobs:
       # Repository names are configured by the owner, never dispatch inputs.
       agent-config-repo: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_REPO || '' }}
       agent-config-path: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_PATH || '' }}
-      inference-url: ${{ vars.INFERENCE_URL || 'http://100.121.0.115:18080' }}
+      inference-url: ${{ vars.INFERENCE_URL || 'http://100.114.231.4:18080' }}
       inference-audience: ${{ vars.INFERENCE_AUDIENCE || 'praxis-credential-broker' }}
       max-requests: '150'
       budget: '500'

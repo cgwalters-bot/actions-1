@@ -192,7 +192,7 @@ jobs:
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
           AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
           AGENT_RUNNER: ${{ inputs.runner || vars.AGENT_RUNNER || '"ubuntu-26.04"' }}
-          INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL || 'http://100.121.0.115:18080' }}
+          INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL || 'http://100.114.231.4:18080' }}
           INFERENCE_AUDIENCE: ${{ inputs.inference-audience || vars.INFERENCE_AUDIENCE || 'praxis-credential-broker' }}
           INFERENCE_REGISTER: ${{ inputs.inference-register }}
           AGENT_CONFIG_REPO: ${{ inputs.agent-config-repo || vars.AGENT_CONFIG_REPO || 'cgwalters-forge/agenthome' }}
