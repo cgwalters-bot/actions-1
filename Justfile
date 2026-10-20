@@ -20,6 +20,10 @@ test-secure-host:
 secure-host-egress allowed="":
     node secure-host/egress-probe.mjs {{ quote(allowed) }}
 
+# A readable invalid policy must fail setup, not only sandbox check.
+secure-host-invalid-policy:
+    test "$OUTCOME" = failure
+
 # The secure-host workflow's host checks (secure-host/README.md), each run
 # by the runner's user in a step of its own. WANT says which side of the
 # action the step is on: `before` for the controls, `after` for the claims.
