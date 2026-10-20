@@ -118,7 +118,10 @@ Any step can compromise the steps after it. The job is the unit of trust.
    provider and tailnet requests are refused. For DNS/IP-only filtering, see
    [step-security/harden-runner](https://github.com/step-security/harden-runner).
    CI's build job opts in, requires a proxy-refused POST and a successful GET,
-   then uploads an artifact for the publish job to validate.
+   then uploads an artifact for the publish job to validate. The custom-policy
+   job also requires refusal of an npm audit POST allowed only by the image's
+   default policy, proving replacement rather than merging. A separate job
+   requires a readable invalid write rule to fail setup with `check: false`.
 
 agentic-job v0.6 still creates its second, unprivileged user and leaves
 the runner's user a sudo rule for `agentic-job sandbox` commands. This
