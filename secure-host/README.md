@@ -4,8 +4,9 @@
 
 One step that secures the machine a job runs on, for whatever the job
 does next: a build, a test suite, an agent. Every later step runs as the
-runner's user, without root. It is taken from agentic-job's
-`docs/secure-host.md`, for this action's contract.
+runner's user, without root. This README and [`docs/`](#documentation)
+are the documentation of record for the host's hardening; they describe
+the pinned image, which can lag agentic-job's main.
 
 The action runs agentic-job's secure-host image as root podman:
 
@@ -17,7 +18,7 @@ The image holds only agentic-job's static binary and its BPF object. It
 installs the binary on the host and sets the host up through the host's
 own `nsenter -t 1`, so the BPF links and the network rules outlive the
 container. Docker is not used: setup stops it. There is no `exec` command:
-nothing runs as another user.
+this action runs nothing as another user.
 
 ## The contract
 
@@ -92,40 +93,50 @@ Any step can compromise the steps after it. The job is the unit of trust.
 3. **checkout's persisted credentials and `GITHUB_TOKEN`** are readable by
    every step: use `persist-credentials: false` and minimal permissions.
 4. **Another process's `/proc/PID/environ`** is refused by the BPF
-   runner-read rule, enabled in the default hosted configuration. CI on
-   `ubuntu-26.04` checks a later step cannot read a process left by an
-   earlier step, with a successful read before the action as control.
-   This is not isolation between steps or protection of the job's tokens.
+   [runner-read rule](docs/runner-reads.md), enabled in the default
+   hosted configuration. CI on `ubuntu-26.04` checks a later step cannot
+   read a process left by an earlier step, with a successful read before
+   the action as control. This is not isolation between steps or
+   protection of the job's tokens.
 5. **A process left behind** lives until the job ends; the read rule does
    not terminate it. Runner cleanup remains responsible for ending it,
    and the CI job must still finish successfully with the rule enabled.
 6. **Container actions** fail with dockerd stopped.
 7. **Egress** is open by default except for metadata. Opt in with
-   `egress: write-policy` to stop later steps sending HTTP writes to arbitrary
-   destinations. Every runner process's new public TCP connections on 80/443
-   are redirected to the proxy: reads (GET, HEAD, OPTIONS without bodies) stay
-   open except for the threat feed; writes need a `[[write]]` rule or a built-in
-   runner endpoint. Other external ports, UDP and IPv6 are refused; loopback,
-   resolver DNS and connections opened before setup remain. This is not complete
-   exfiltration prevention: reads and DNS can carry data.
-   The runner's built-in writes allow `actions.githubusercontent.com` and its
-   subdomains, and PUT to any `*.blob.core.windows.net` account. GitHub publishes
-   no list of its `productionresultssaN` storage accounts: an attacker's Azure
-   account remains a write channel, as does another repository's runtime token.
-   The proxy terminates TLS and sees credentials sent through it. The action
-   exports its per-job CA for later Node/Python steps; tools with other trust
-   stores must configure them or fail closed. Agent jobs cannot opt in yet:
-   provider and tailnet requests are refused. For DNS/IP-only filtering, see
-   [step-security/harden-runner](https://github.com/step-security/harden-runner).
-   CI's build job opts in, requires a proxy-refused POST and a successful GET,
-   then uploads an artifact for the publish job to validate. The custom-policy
-   job also requires refusal of an npm audit POST allowed only by the image's
-   default policy, proving replacement rather than merging. A separate job
-   requires a readable invalid write rule to fail setup with `check: false`.
+   `egress: write-policy` to stop later steps sending HTTP writes to
+   arbitrary destinations: every runner process's new public TCP
+   connections on 80/443 go through the proxy, reads stay open except for
+   the threat feed, and writes need a `[[write]]` rule or one of the
+   runner's built-in endpoints. This is not complete exfiltration
+   prevention: reads and DNS can carry data, the pinned image lets PUTs
+   through to any `*.blob.core.windows.net` account, an attacker's
+   included, and the proxy sees the credentials sent through it. Agent jobs
+   cannot opt in yet: provider and tailnet requests are refused. See
+   [egress](docs/egress.md).
+8. **The Worker's .NET diagnostic sockets** let any step have
+   `Runner.Worker` dump its memory, every secret of the job in it, unless
+   `sandbox.unlink-worker-diagnostics` is set, which the default hosted
+   configuration does not do ([runner reads](docs/runner-reads.md#the-workers-diagnostic-sockets)).
 
-agentic-job v0.6 still creates its second, unprivileged user and leaves
-the runner's user a sudo rule for `agentic-job sandbox` commands. This
-action does not use them, and they give no root.
+## The sandbox user (opt-in)
+
+Setup creates a second, unprivileged user by default, `runner-sandbox`,
+so that opting into running code as a user that holds nothing of the
+job's stays easy. That user has its own home and subordinate uids, no
+sudo, polkit, cron, at or lingering, no group that is root by another
+name and none of the job's environment, and is refused the metadata
+service ([at IPv6 only with `deny-runner-metadata`](docs/egress.md#network)); the runner's home and the job's directories are closed to it
+([setup](docs/setup.md#what-the-step-does-to-the-host),
+[probes](docs/probes.md#the-sandbox-users-probes)).
+
+This action runs nothing as it, and offers no supported way to yet:
+every later step is the runner's user's, and the protections above do
+not depend on the sandbox user. agentic-job enters it through the
+root-owned helper's `enter` operation, which the lock leaves the
+runner's user a sudo rule for and which gives no root; that is
+agentic-job's interface, not this action's. A key for a host to skip
+creating the user is planned
+([agentic-job#1617](https://github.com/cgwalters-forge/agentic-job/issues/1617)).
 
 ## Hosts
 
@@ -133,15 +144,9 @@ Exactly **Ubuntu 26.04** and **RHEL 10**, by `ID` and `VERSION_ID` of
 `/etc/os-release`; the image refuses any other host before it changes
 anything. Only GitHub's hosted `ubuntu-26.04` is tested here. The action
 needs `node`, `gh` and podman, and installs podman with apt where it is
-missing.
-
-The world-write policy is a BPF program on five tracing links pinned in
-the host's bpffs. Before enabling it, the loader proves a root-owned mode
-0666 file on `/` is writable as `nobody`; after, that the write fails with
-`EACCES` while one owned by `nobody` still succeeds. A load or probe
-failure fails the step; there is no fallback. On failure, partial
-attachments are left in place: the job must not continue with untrusted
-code, and reuse of that host is unsupported.
+missing. A load, setup or probe failure fails the step and can leave the
+host partly changed: the job must not continue with untrusted code, and
+reuse of that host is unsupported ([setup](docs/setup.md#supported-hosts)).
 
 ## The image and its pin
 
@@ -162,3 +167,64 @@ release, then a pin update here.
 | `egress` | `off` | `write-policy` enables the proxy and its Rust implementation and overrides the config's write-policy setting. Requires `sandbox.lock-runner = true`; the image rejects otherwise. `off` overrides write-policy to false |
 | `egress-policy` | | A TOML file of `[[write]]` rules replacing the image's policy, copied to a host path. Requires `egress: write-policy`; overrides `egress.policy` in `config`. Choose only trusted policy files. With `check`, keep the image's git fetch rule (POST to `/**/git-upload-pack` on `github.com`): the check's `egress-git` fetches from GitHub. An unreadable file fails the action before the image runs; the proxy parses the rules at setup, which fails if it cannot start. CI's `egress-policy` job tests a [fixture](ci-egress-policy.toml) on `ubuntu-26.04`: its probe rule's POST passes, a POST elsewhere is refused, and an artifact uploads |
 | `image-archive` | | An image archive (`podman load`) to run in place of the pinned image, to test an unreleased image. It is not verified: only for a job that built it |
+
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [Threat model](docs/threat-model.md) | what the action assumes and claims, the tokens a later step still holds, R4, R10 and R11 |
+| [Setup](docs/setup.md) | the image, supported hosts, what setup changes, the lock, what a job has to know, containers |
+| [Egress](docs/egress.md) | the opt-in write policy, its policy file and allowlist, the network rules |
+| [World-write policy](docs/world-write.md) | the BPF policy, its loader and its limits |
+| [Runner reads](docs/runner-reads.md) | the rule against reading another runner process, and the Worker's diagnostic sockets |
+| [Probes](docs/probes.md) | what `sandbox check` proves |
+| [Evidence](docs/evidence.md) | what CI has shown, where, and what is unverified |
+
+Where agentic-job's host sections moved (each is a heading, so its anchor
+is the heading's):
+
+| agentic-job | Here |
+| --- | --- |
+| `docs/secure-host.md#egress-write-policy-opt-in` | [egress](docs/egress.md#egress-write-policy-opt-in) |
+| `docs/secure-host.md#access-time-world-write-policy` | [world-write](docs/world-write.md#access-time-world-write-policy) |
+| `docs/secure-host.md#what-went-with-the-walk` | [world-write](docs/world-write.md#what-went-with-the-walk) |
+| `docs/secure-host.md#reads-between-the-runners-own-processes-opt-in` | [runner-reads](docs/runner-reads.md#reads-between-the-runners-own-processes-opt-in) |
+| `docs/secure-host.md#what-the-step-does-to-the-host` | [setup](docs/setup.md#what-the-step-does-to-the-host) |
+| `docs/secure-host.md#what-a-job-has-to-know` | [setup](docs/setup.md#what-a-job-has-to-know) |
+| `docs/secure-host.md#containers` | [setup](docs/setup.md#containers) |
+| `docs/secure-host.md#the-image` | [setup](docs/setup.md#the-image) |
+| `docs/secure-host.md#without-the-action` | [setup](docs/setup.md#without-the-action) |
+| `docs/secure-host.md#what-the-final-probe-proves` | [probes](docs/probes.md#what-the-final-probe-proves) |
+| `docs/secure-host.md#what-a-later-step-can-count-on-and-what-it-cannot` | [threat model](docs/threat-model.md#what-a-later-step-can-count-on-and-what-it-cannot) |
+| `docs/secure-host.md#one-trust-level-for-the-rest-of-the-job` | [threat model](docs/threat-model.md#one-trust-level-for-the-rest-of-the-job) |
+| `docs/secure-host.md#run-time-controls-through-the-action-on-hosted-ubuntu-2604` | [evidence](docs/evidence.md#run-time-controls-through-the-action-on-hosted-ubuntu-2604) |
+| `docs/secure-host.md#acceptance-evidence-and-remaining-host-work` | [evidence](docs/evidence.md) |
+| `docs/secure-host.md#rhel-10-follow-up-issue-obtain-a-disposable-runner-and-publish-acceptance` | [evidence](docs/evidence.md#rhel-10) |
+| `docs/secure-host.md#job-start-to-the-agent-before-and-after-the-walk-went` | [evidence](docs/evidence.md#timing) |
+| `docs/sandbox.md#what-it-assumes` | [threat model](docs/threat-model.md#what-it-assumes) |
+| `docs/sandbox.md#what-sandbox-setup-does` | [setup](docs/setup.md#what-the-step-does-to-the-host) |
+| `docs/sandbox.md#network` | [egress](docs/egress.md#network) |
+| `docs/sandbox.md#the-egress-proxy` | [egress](docs/egress.md#the-policy-file) |
+| `docs/sandbox.md#opt-in-domain-allowlist` | [egress](docs/egress.md#opt-in-domain-allowlist) |
+| `docs/sandbox.md#what-it-does-not-do` | [threat model](docs/threat-model.md#not-claimed), [egress](docs/egress.md#what-egress-does-not-stop) |
+| `docs/sandbox-check.md#the-probes` | [probes](docs/probes.md#the-sandbox-users-probes) |
+| `docs/sandbox-check.md#after-setup-nothing-has-root` | [probes](docs/probes.md#after-setup-nothing-has-root), [the lock](docs/setup.md#the-lock) |
+| `docs/sandbox-check.md#the-runners-probes` | [probes](docs/probes.md#after-setup-nothing-has-root) |
+| `docs/sandbox-check.md#the-network-probes` | [probes](docs/probes.md#the-network-probes) |
+| `docs/sandbox-check.md#local-sockets` | [probes](docs/probes.md#local-sockets) |
+| `docs/sandbox-check.md#the-jobs-work-directories` | [probes](docs/probes.md#the-jobs-work-directories) |
+| `docs/sandbox-check.md#where-each-probe-has-been-seen-to-fail` | [evidence](docs/evidence.md#where-each-probe-has-been-seen-to-fail) |
+| `docs/requirements.md#r4-the-runners-user-loses-root-before-the-agent-runs` | [threat model](docs/threat-model.md#r4-the-runners-user-loses-root-before-untrusted-steps-run) |
+| `docs/requirements.md#r10-what-the-guarantees-depend-on` | [threat model](docs/threat-model.md#r10-what-the-guarantees-depend-on) |
+| `docs/requirements.md#r11-lints-are-not-boundaries` | [threat model](docs/threat-model.md#r11-lints-are-not-boundaries) |
+| `README.md#sandbox-execution-and-runner-deprivileging` | [the contract](#the-contract), [threat model](docs/threat-model.md) |
+
+What concerns only agentic-job stays there: the forwarder and its
+inputs (`docs/secure-host.md#inputs-and-outputs`), where its binary comes
+from, runner outbound observation, why the agent is not in a container
+(`docs/sandbox.md#why-not-a-container`), the sandbox user's read-only
+view (`docs/sandbox.md#why-a-systemd-read-only-view-has-not-replaced-the-walk`),
+`run`'s token probes (`docs/sandbox.md#what-is-tested`), the check's pass
+record, and the agent's actors and trust
+(`docs/requirements.md#actors-and-trust`; the host's are in the
+[threat model](docs/threat-model.md#actors-and-trust)).
