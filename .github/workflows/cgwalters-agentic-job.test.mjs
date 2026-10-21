@@ -7,21 +7,22 @@ import { test } from 'node:test';
 
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
 
-// agentic-job is called at one release tag: check, apply, prepare and run
+// agentic-job is called at one release: check, apply, prepare and run
 // refuse calls that resolved to different commits, which following main
-// produced for runs spanning an agentic-job merge (tracker#544). Our own
-// tailscale action still follows main.
-test('agentic-job is called at one release tag, our tailscale at main', () => {
-  const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)/g)];
+// produced for runs spanning an agentic-job merge (tracker#544). By the
+// release's commit with its tag as a comment, since a tag can be moved
+// (#109). Our own tailscale action still follows main.
+test('agentic-job is called at one release commit, our tailscale at main', () => {
+  const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)(?: # (\S+))?\n/g)];
   assert.deepEqual(refs.map(match => match[1]), [
     'agentic-job/.github/workflows/policy.yml',
     'actions/tailscale',
     'agentic-job/.github/workflows/check.yml',
     'agentic-job/.github/workflows/apply.yml',
   ]);
-  const tags = new Set(refs.filter(([, path]) => path.startsWith('agentic-job/')).map(match => match[2]));
-  assert.equal(tags.size, 1);
-  assert.match([...tags][0], /^v\d+\.\d+\.\d+$/);
+  const pins = new Set(refs.filter(([, path]) => path.startsWith('agentic-job/')).map(match => `${match[2]} # ${match[3]}`));
+  assert.equal(pins.size, 1);
+  assert.match([...pins][0], /^[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
   assert.equal(refs.find(([, path]) => path === 'actions/tailscale')[2], 'main');
   assert.doesNotMatch(workflow, /PINNED_SHA/);
   assert.match(workflow, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
@@ -234,7 +235,7 @@ test('the session job posts the endpoint before apply concludes, and only for a 
 // or not. These tags predate agentic-job's listening bridge (its #588):
 // this fails until the calls move past them.
 test('agentic-job is called at a tag whose policy has the session input', () => {
-  const [, tag] = workflow.match(/agentic-job\/\.github\/workflows\/policy\.yml@(\S+)/);
+  const [, tag] = workflow.match(/agentic-job\/\.github\/workflows\/policy\.yml@[0-9a-f]{40} # (\S+)/);
   assert.ok(!['v0.0.1', 'v0.0.2', 'v0.0.3', 'v0.1.0'].includes(tag), `${tag} has no session input`);
 });
 

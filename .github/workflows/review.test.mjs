@@ -41,13 +41,15 @@ jobs:
       statuses: write`);
 });
 
-// One agentic-job tag across our workflows, which dependabot moves together.
-test('the wrapper calls agentic-job at the tag the agent job calls', () => {
-  const tags = file => [...read(file).matchAll(/uses: cgwalters-forge\/agentic-job\/\S+@(\S+)/g)]
+// One agentic-job release across our workflows, which dependabot moves
+// together: its commit, since its tags can be moved (#109), and the tag as
+// the comment dependabot updates with it.
+test('the wrapper calls agentic-job at the commit the agent job calls', () => {
+  const tags = file => [...read(file).matchAll(/uses: cgwalters-forge\/agentic-job\/\S+@(.*)/g)]
     .map(match => match[1]);
   const agent = tags('./cgwalters-agentic-job.yml');
   assert.equal(agent.length, 3);
-  assert.match(agent[0], /^v\d+\.\d+\.\d+$/);
+  assert.match(agent[0], /^[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
   assert.deepEqual(tags('./cgwalters-review.yml'), agent);
 });
 
