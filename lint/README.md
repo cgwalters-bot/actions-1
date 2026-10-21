@@ -25,7 +25,10 @@ jobs:
 
 It checks the repository checked out at the workspace root and needs
 docker and cargo on the runner, as GitHub's Ubuntu runners have. zizmor
-reads the repository's own `.github/zizmor.yml`.
+reads the repository's own `.github/zizmor.yml`, and runs its online
+audits with the job's token (`contents: read` is enough): a hash pin to a
+commit that exists only in a fork of the action's repository, or whose
+`# vX` comment no longer matches it, fails the check.
 
 ## Runner labels
 
@@ -50,7 +53,8 @@ commas; `ubuntu-latest` stays on it whatever the input says.
 just --justfile path/to/actions/lint/Justfile --working-directory . check
 ```
 
-`CONTAINER=podman` runs the linters with podman.
+`CONTAINER=podman` runs the linters with podman. Without `GH_TOKEN`
+(`GH_TOKEN=$(gh auth token)`), zizmor runs offline and says so.
 
 ## workflows-check
 

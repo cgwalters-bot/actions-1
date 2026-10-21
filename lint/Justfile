@@ -19,9 +19,22 @@ check: actionlint zizmor runner-labels
 actionlint:
     {{ container }} run --rm -v "$(pwd):/repo:ro" -w /repo {{ actionlint_image }} -color
 
-# Offline: the online audits need a token, and this needs none.
+# With GH_TOKEN (the action passes the job's token; contents: read is
+# enough), zizmor runs its online audits too: GitHub resolves
+# owner/repo@SHA to a commit that only exists in a fork, so a hash pin can
+# be swapped for an attacker's fork commit under the same `# vX` comment,
+# which impostor-commit and ref-version-mismatch catch. Without a token
+# (a local run) it falls back to the offline audits, and says so.
 zizmor:
-    {{ container }} run --rm -v "$(pwd):/repo:ro" -w /repo {{ zizmor_image }} --offline .
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${GH_TOKEN:-}" ]; then
+      offline=()
+    else
+      echo "zizmor: GH_TOKEN is not set, so the online audits (impostor-commit, ref-version-mismatch, ...) are skipped" >&2
+      offline=(--offline)
+    fi
+    {{ container }} run --rm -e GH_TOKEN -v "$(pwd):/repo:ro" -w /repo {{ zizmor_image }} "${offline[@]}" .
 
 # cargo runs from here, so a checked repository's rust-toolchain.toml and
 # .cargo/config.toml don't pick the toolchain or flags of this build.
