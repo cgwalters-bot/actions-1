@@ -12,6 +12,7 @@ this repository's issues.
 | [workflows-check](lint/workflows-check.md) | Required workflow over a pull request's workflow files: job shape, new dangerous triggers, new zizmor ignores, linter configuration and `.gitignore` changes, checker references; CI runs its tests with fixture workflows | An organization ruleset requires it, evaluate mode first |
 | [secure-host](secure-host/README.md) | Runs agentic-job's attested, digest-pinned image: no later step has root or the metadata service, world-write by owner only; CI runs the two-job example, the inputs and the world-write policy on ubuntu-26.04 | agentic-job's own action forwards here; opt-in egress (agentic-job#995) |
 | [app-token](app-token/README.md) | Mints and masks one role's GitHub App installation token, scoped to named repositories; `remint.mjs` mints again near expiry or after a 401; CI runs its unit tests, no real mint (no app here) | Move each role to its app (tracker#766) |
+| [admit](admit/README.md) | Fails unless the calling repository's owner id is in its owners.json; both reusable wrappers run it first; CI runs its unit tests | Brokers and tailnet federation match the same ids |
 | [tailscale](tailscale/README.md) | Settings by organization; CI runs its unit tests and checks the socket and CLI are closed after a join that fails, no real join (no tailnet credentials here) | Replace devspace.yml's and agent.yml's tailscale/github-action steps |
 
 ## cgwalters-agentic-job
@@ -20,10 +21,17 @@ One reusable workflow is here too:
 [cgwalters-agentic-job](.github/workflows/cgwalters-agentic-job.yml), an
 agent run of cgwalters-forge/agentic-job with this deployment's tailnet
 join, inference proxy, runner, agent and model. Our repositories call it
-at main, which is the one `job_workflow_ref` the inference broker and the
-tailnet have to admit. It refuses runs from a private repository, so
-agentic-job's opt-in for private repositories, which admits only the
-calling repository, stays off.
+at main. Any public repository can call it too, and its run's identity
+tokens carry the same `job_workflow_ref`, so the inference broker and the
+tailnet federation must match `repository_owner_id` against the ids in
+[admit/owners.json](admit/owners.json) as well as that `job_workflow_ref`;
+both wrappers refuse any other owner before the agent job's runner, which
+the caller picks, is given the job ([admit](admit/README.md)). With an
+`inference-url` other than ours it needs an `inference-audience` too, so
+that our broker's audience is not sent elsewhere by default (the review
+wrapper's variables still default apart). It refuses runs
+from a private repository, so agentic-job's opt-in for private
+repositories, which admits only the calling repository, stays off.
 
 A repository gets agent runs with the workflow below, a bounds file at
 `.github/agentic-job/dispatch.toml` (and `fix.toml` for the `fix` kind), a
@@ -91,7 +99,9 @@ configuration repository. `AGENT_CONFIG` otherwise uses the pinned
 agentic-job hosted configuration. `AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID`
 and `AGENTIC_JOB_TAILSCALE_TAGS`, read by both wrappers, are the tailnet
 login of an organization that [tailnets.json](tailscale/tailnets.json)
-doesn't list; set, they replace a listed organization's entry too.
+doesn't list; set, they replace a listed organization's entry too. Either
+way the wrappers run only for an owner that
+[admit/owners.json](admit/owners.json) lists.
 
 Call it from the same `pull_request_target` and `issue_comment` events and
 job condition as [this repository's caller](.github/workflows/review.yml),
@@ -138,7 +148,8 @@ suffix brings it under the ruleset; the review above should be in place
 before that rename.
 
 Before migrating tracker (a separate repository), admit this wrapper's
-`job_workflow_ref` in the tailnet federation and inference broker, then
+`job_workflow_ref`, with the owner ids of admit/owners.json, in the
+tailnet federation and inference broker, then
 replace its review caller's `uses` as above and exercise a real review and
 a synchronize cancellation. No ACL, OAuth or broker policy is changed here;
 record those deployment changes in the private wiki when made. Removing the

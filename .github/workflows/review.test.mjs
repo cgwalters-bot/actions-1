@@ -59,7 +59,7 @@ test('the wrapper calls agentic-job at the commit the agent job calls', () => {
 test('both wrappers use our own actions at main', () => {
   for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
     const refs = [...read(file).matchAll(/uses: cgwalters-forge\/actions\/(\S+)@(\S+)/g)];
-    assert.deepEqual(refs.map(match => [match[1], match[2]]), [['tailscale', 'main']], file);
+    assert.deepEqual(refs.map(match => [match[1], match[2]]), [['admit', 'main'], ['tailscale', 'main']], file);
   }
 });
 

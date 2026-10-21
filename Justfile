@@ -10,6 +10,10 @@ test-lint:
 test-review:
     node --test workflow/review.test.cjs
 
+# The wrappers' owner allowlist.
+test-admit:
+    node --test admit/*.test.mjs
+
 # secure-host's pin and signer checks.
 test-secure-host:
     node --test secure-host/*.test.mjs
