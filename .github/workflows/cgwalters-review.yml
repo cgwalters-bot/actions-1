@@ -146,6 +146,9 @@ jobs:
         uses: cgwalters-forge/actions/tailscale@main
         with:
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
+          # As in cgwalters-agentic-job.yml: unset, tailnets.json's entry.
+          oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}
+          tags: ${{ vars.AGENTIC_JOB_TAILSCALE_TAGS }}
       # Fail on a missing proxy route before setup, not in its sandbox probes.
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability

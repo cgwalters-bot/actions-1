@@ -88,7 +88,10 @@ URL and audience. It has **no inputs**. Repository/organization variables
 `AGENT_CONFIG_PATH` select owner-controlled configuration. Set the last
 two for agents needing external configuration; there is no hard-coded
 configuration repository. `AGENT_CONFIG` otherwise uses the pinned
-agentic-job hosted configuration.
+agentic-job hosted configuration. `AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID`
+and `AGENTIC_JOB_TAILSCALE_TAGS`, read by both wrappers, are the tailnet
+login of an organization that [tailnets.json](tailscale/tailnets.json)
+doesn't list; set, they replace a listed organization's entry too.
 
 Call it from the same `pull_request_target` and `issue_comment` events and
 job condition as [this repository's caller](.github/workflows/review.yml),

@@ -40,6 +40,35 @@ test('unknown owners and output injection fail clearly', () => {
   assert.throws(() => settings('bootc-dev', { proxy: 'url\ninjected=value' }), /single-line/);
 });
 
+test('an unlisted organization joins with its own client ID and tags, both', () => {
+  assert.deepEqual(settings('other-org', { 'oauth-client-id': 'other', tags: 'tag:other' }), {
+    'oauth-client-id': 'other', audience: 'api.tailscale.com/other', tags: 'tag:other', proxy: '',
+  });
+  assert.equal(settings('other-org', {
+    'oauth-client-id': 'other', tags: 'tag:other', proxy: 'http://example.test',
+  }).proxy, 'http://example.test');
+  for (const overrides of [{ 'oauth-client-id': 'other' }, { tags: 'tag:other' },
+    { 'oauth-client-id': 'other', tags: '' }, { audience: 'a', proxy: 'http://example.test' }]) {
+    assert.throws(() => settings('other-org', overrides), /No tailnet settings/);
+  }
+  for (const owner of ['__proto__', 'constructor']) {
+    assert.equal(settings(owner, { 'oauth-client-id': 'other', tags: 'tag:other' }).tags, 'tag:other');
+  }
+  assert.throws(() => settings('other-org', { 'oauth-client-id': 'other', tags: 'tag:a\ninjected=value' }), /single-line/);
+});
+
+// The wrappers pass the calling repository's variables, never a
+// dispatcher's input, so that another deployment sets its login once.
+test('both wrappers join with the repository variables for the login', () => {
+  for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
+    const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), 'utf8');
+    const join = text.split('- name: Join the tailnet\n')[1].split(/\n {6}- /)[0];
+    assert.match(join, /\n {10}oauth-client-id: \$\{\{ vars\.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID \}\}\n/, file);
+    assert.match(join, /\n {10}tags: \$\{\{ vars\.AGENTIC_JOB_TAILSCALE_TAGS \}\}(\n|$)/, file);
+    assert.doesNotMatch(join, /inputs\./, file);
+  }
+});
+
 test('the setup subprocess appends outputs and rejects injection before writing', () => {
   const directory = mkdtempSync(join(homedir(), 'tailscale-output-'));
   const output = join(directory, 'output');
@@ -52,6 +81,8 @@ test('the setup subprocess appends outputs and rejects injection before writing'
         TAGS: 'tag:custom', PROXY: 'http://example.test',
       }, status: 0 },
       { owner: 'unknown', overrides: {}, status: 1, error: /No tailnet settings/ },
+      { owner: 'unknown', overrides: { OAUTH_CLIENT_ID: 'other', TAGS: 'tag:other' }, status: 0 },
+      { owner: 'unknown', overrides: { OAUTH_CLIENT_ID: 'other' }, status: 1, error: /No tailnet settings/ },
       ...['\n', '\r', '\r\n'].map(newline => ({
         owner: 'bootc-dev', overrides: { PROXY: `url${newline}injected=value` },
         status: 1, error: /single-line/,

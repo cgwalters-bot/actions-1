@@ -31,9 +31,12 @@ The job needs `permissions: id-token: write` for the OIDC login.
 ## Settings by organization
 
 What a join needs is in [tailnets.json](tailnets.json), keyed by
-`github.repository_owner`; none of it is secret. An organization with no
-entry fails before joining, even when the inputs below are given: add an
-entry for it. The audience is `api.tailscale.com/` followed by the
+`github.repository_owner`; none of it is secret. Another deployment's
+organization, which has no entry, must give both `oauth-client-id` and
+`tags` as inputs, or it fails before joining; its `proxy` is empty unless
+given. The reusable workflows pass the calling repository's variables
+`AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID` and `AGENTIC_JOB_TAILSCALE_TAGS`
+as those inputs. The audience is `api.tailscale.com/` followed by the
 client ID. The node always joins with `--accept-dns=false`, which leaves
 the runner's DNS alone.
 
