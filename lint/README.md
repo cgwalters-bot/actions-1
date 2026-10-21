@@ -40,9 +40,15 @@ job's matrix under any key when `runs-on` reads the matrix (`exclude`
 aside), as the
 default or a choice option of a `workflow_call` or `workflow_dispatch`
 input that `runs-on` reads, or in the `with` of a job calling a reusable
-workflow (followed through the matrix and inputs the same way). Labels are
-compared case-insensitively. It catches a label written by mistake, not
-one assembled to get past it (`format()`, a repository variable).
+workflow (followed through the matrix and inputs the same way). When any
+of these reads `needs.JOB`, every string of that job's `outputs`, `env`
+and steps' `run`, `with` and `env` counts too, one level deep, so a
+dynamic matrix written to `$GITHUB_OUTPUT` is followed; a mention of a
+denied label in that job's scripts for another purpose is refused as
+well. Labels are compared case-insensitively, and `.YML` files are
+checked as workflows-check takes them. It catches a label written by
+mistake, not one assembled to get past it (`format()`, a repository
+variable, a `needs` chain more than one job long).
 
 The `deny` input adds labels to the list, separated by whitespace or
 commas; `ubuntu-latest` stays on it whatever the input says.
