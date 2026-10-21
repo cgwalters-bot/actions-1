@@ -20,7 +20,7 @@ runs anything of, and refuses the pull request when:
 | A change to zizmor's configuration (`zizmor.yml` or `.github/zizmor.yml`) | The same, for every file at once |
 | A change to actionlint's configuration (`.github/actionlint.yaml` or `.yml`) | The same for actionlint, whose `paths` ignores can silence every error in a workflow |
 | A `.gitignore`, at any depth, that gains a pattern or loses a `!` negation | A workflow hidden from zizmor, whose default collection skips what `.gitignore` matches, tracked files included |
-| A change to a job's or step's `uses:` of `workflows-check.yml`, a removal included | A repository's own call of this check repointed at a weaker one |
+| In a file with a job or step whose `uses:` names `workflows-check.yml`, any change to that job (its `uses`, `if`, `needs`, `with` and the rest) or to the file's `on:`, a removal included | A repository's own call of this check repointed at a weaker one, or turned off by an `if:` or a trigger that never fires: a skipped required job reports success |
 
 The lint action's zizmor also collects with `--collect=all`, which skips
 nothing `.gitignore` matches; the `.gitignore` rule is for a repository
@@ -42,7 +42,12 @@ the whole finding it is on, a `run:` block say), a change to a workflow
 file the base already exempts from the shape check, and the other events
 that run with the base branch's secrets on input others write
 (`issue_comment`, `pull_request_review`, `issues`), which the review
-workflows here need.
+workflows here need. Nor does it stop a job that a repository's call of
+this check `needs` being made to fail or skip, through a script it runs
+or the file's `defaults` say, which skips the call too: call it from a
+job with no `needs`, in a file of its own, as
+[the fixture](tests/workflows-check/caller.yml) does, which also keeps
+other changes to the file from being refused with it.
 
 ## Shape check
 
