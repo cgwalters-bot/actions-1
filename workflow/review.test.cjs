@@ -74,7 +74,10 @@ test('trusted source only, one network join before dropping root, no post-agent 
   assert.doesNotMatch(workflow, /pull_request.head|head.ref|secrets: inherit|workflow_dispatch/);
   const steps = [...jobs.agent.matchAll(/^      - (?:uses: ([^\s]+)|name: (.+)|id: (.+))/gm)]
     .map(([, uses, name, id]) => uses || name || id);
-  assert.deepEqual(steps.slice(2), [
+  assert.deepEqual(steps, [
+    'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    "The policy call's source repository",
+    'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
     './.agentic-job-source/prepare', 'Join the tailnet', 'Check inference proxy reachability',
     './.agentic-job-source/secure-host/internal', 'run',
   ]);

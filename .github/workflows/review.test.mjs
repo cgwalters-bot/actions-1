@@ -86,6 +86,33 @@ test('the caller grants exactly the union of the wrapper\'s job grants', () => {
   assert.deepEqual(Object.fromEntries(grants(caller)), union);
 });
 
+// checkout reads an empty `repository` as the calling repository and an
+// empty `ref` as its default branch, so a job that runs the policy call's
+// source checks first that policy reported the repository it calls, at a
+// full commit. Every such job, so that a recomposition cannot drop it.
+test('every job checks the policy call\'s source before checking it out', () => {
+  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
+    const workflow = read(file);
+    const called = workflow.match(/\n {4}uses: ([^/\s]+\/[^/\s]+)\/\.github\/workflows\/policy\.yml@/)?.[1];
+    assert.ok(called, `${file}: policy call`);
+    const jobs = workflow.split(/\n {2}(?=[a-z-]+:\n)/).slice(1);
+    const checked = jobs.filter(job => job.includes('repository: ${{ needs.policy.outputs.source-repository }}'));
+    assert.ok(checked.length >= 2, `${file}: jobs checking out the source`);
+    for (const job of checked) {
+      const name = job.split(':')[0];
+      const steps = job.split(/\n {6}- /);
+      const checkout = steps.findIndex(step => step.includes('repository: ${{ needs.policy.outputs.source-repository }}'));
+      const guard = steps.slice(0, checkout).find(step => step.startsWith('name: The policy call\'s source repository'));
+      assert.ok(guard, `${file}: ${name} checks the source first`);
+      assert.match(guard, /\n {10}SOURCE_REPOSITORY: \$\{\{ needs\.policy\.outputs\.source-repository \}\}\n/, `${file}: ${name}`);
+      assert.match(guard, /\n {10}SOURCE_SHA: \$\{\{ needs\.policy\.outputs\.source-sha \}\}\n/, `${file}: ${name}`);
+      assert.equal(guard.match(/\n {10}EXPECTED_REPOSITORY: (\S+)\n/)?.[1], called, `${file}: ${name}`);
+      assert.ok(guard.includes('[[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||\n'
+        + '            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }'), `${file}: ${name}`);
+    }
+  }
+});
+
 test('the composed review links its pinned helper to the agent job', () => {
   const workflow = read('./cgwalters-review.yml');
   const agent = workflow.split('\n  agent:\n')[1].split('\n  check:\n')[0];
