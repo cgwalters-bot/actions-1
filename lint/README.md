@@ -2,7 +2,8 @@
 
 The workflow check every forge repository runs the same way:
 [actionlint](https://github.com/rhysd/actionlint) and
-[zizmor](https://docs.zizmor.sh/) at pinned versions, then a runner-label
+[zizmor](https://docs.zizmor.sh/) from images pinned by digest in
+[Containerfile.pin](Containerfile.pin), then a runner-label
 policy that denies `ubuntu-latest` in any `runs-on`. New workflows use
 `ubuntu-26.04`; every other label, self-hosted and custom runners
 included, is allowed.

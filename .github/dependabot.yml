@@ -28,3 +28,11 @@ updates:
     directory: /secure-host
     schedule:
       interval: daily
+  # lint/Containerfile.pin, the actionlint and zizmor images the shared
+  # check runs: third-party, so held back like the third-party actions.
+  - package-ecosystem: docker
+    directory: /lint
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 7
