@@ -304,8 +304,7 @@ fn is_workflow(path: &str) -> bool {
     let Some(file) = path.strip_prefix(".github/workflows/") else {
         return false;
     };
-    let lower = file.to_ascii_lowercase();
-    !file.contains('/') && (lower.ends_with(".yml") || lower.ends_with(".yaml"))
+    !file.contains('/') && runner_labels::has_workflow_extension(file)
 }
 
 fn parse(source: &str) -> Option<Yaml> {
