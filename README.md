@@ -116,6 +116,22 @@ GitHub Actions' permission to create/approve PRs for this feature. A stale
 head, cancellation or failed check cannot produce a new approval. The
 compatibility `review` status is not a merge gate or human approval.
 
+For a new repository in this organization, put the review caller and the
+three `workflow/review*` files in its **initial commit**, and set the
+variables above (copy them from an onboarded repository such as tracker)
+and Actions' permission to approve pull requests when you create it. The
+organization's ruleset requires an approving review on `main` and has no
+bypass actors, but the first push to an empty repository isn't a pull
+request, so the review is in place before the first one. Added later, the
+onboarding pull request itself needs an approval from an organization
+owner, because nothing can review it yet.
+
+A repository whose name ends in `-sandbox` is for agents to iterate in
+freely: the organization's approval ruleset excludes it, so its pull
+requests merge without a review. When it's ready, renaming it to drop the
+suffix brings it under the ruleset; the review above should be in place
+before that rename.
+
 Before migrating tracker (a separate repository), admit this wrapper's
 `job_workflow_ref` in the tailnet federation and inference broker, then
 replace its review caller's `uses` as above and exercise a real review and
