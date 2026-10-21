@@ -38,6 +38,9 @@ jobs:
       - name: event-review wrapper tests
         if: ${{ !cancelled() }}
         run: just test-review
+      - name: admit unit tests
+        if: ${{ !cancelled() }}
+        run: just test-admit
       - name: secure-host unit tests
         if: ${{ !cancelled() }}
         run: just test-secure-host

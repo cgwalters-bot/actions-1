@@ -11,10 +11,11 @@ const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta
 // refuse calls that resolved to different commits, which following main
 // produced for runs spanning an agentic-job merge (tracker#544). By the
 // release's commit with its tag as a comment, since a tag can be moved
-// (#109). Our own tailscale action still follows main.
-test('agentic-job is called at one release commit, our tailscale at main', () => {
+// (#109). Our own admit and tailscale actions still follow main.
+test('agentic-job is called at one release commit, our own actions at main', () => {
   const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)(?: # (\S+))?\n/g)];
   assert.deepEqual(refs.map(match => match[1]), [
+    'actions/admit',
     'agentic-job/.github/workflows/policy.yml',
     'actions/tailscale',
     'agentic-job/.github/workflows/check.yml',
@@ -23,7 +24,7 @@ test('agentic-job is called at one release commit, our tailscale at main', () =>
   const pins = new Set(refs.filter(([, path]) => path.startsWith('agentic-job/')).map(match => `${match[2]} # ${match[3]}`));
   assert.equal(pins.size, 1);
   assert.match([...pins][0], /^[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
-  assert.equal(refs.find(([, path]) => path === 'actions/tailscale')[2], 'main');
+  for (const [, path, ref] of refs) if (path.startsWith('actions/')) assert.equal(ref, 'main', path);
   assert.doesNotMatch(workflow, /PINNED_SHA/);
   assert.match(workflow, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
 });
@@ -56,11 +57,47 @@ test('dependabot proposes new agentic-job tags as one group', () => {
 test('the wrappers fall back to the cgwalters-forge tailnet broker', () => {
   const tailnets = JSON.parse(readFileSync(new URL('../../tailscale/tailnets.json', import.meta.url), 'utf8'));
   const broker = tailnets['cgwalters-forge'].proxy;
-  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
-    const text = readFileSync(new URL(file, import.meta.url), 'utf8');
-    const fallbacks = [...text.matchAll(/vars\.INFERENCE_URL \|\| '([^']*)'/g)].map(match => match[1]);
-    assert.deepEqual(fallbacks, [broker], file);
-  }
+  const review = readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8');
+  const fallbacks = [...review.matchAll(/vars\.INFERENCE_URL \|\| '([^']*)'/g)].map(match => match[1]);
+  assert.deepEqual(fallbacks, [broker]);
+  assert.deepEqual([...workflow.matchAll(/\n {10}BROKER_URL: (\S+)\n/g)].map(match => match[1]), [broker]);
+});
+
+// Any public repository can call the wrappers, and the tokens of its run
+// carry their `job_workflow_ref`; the agent job runs on a runner the caller
+// picks, whose owner could mint tokens for any audience there. So every
+// job waits for the admit action, run first on a hosted runner.
+function needsGraph(text) {
+  const section = text.split('\njobs:\n')[1];
+  const keys = [...section.matchAll(/^ {2}([a-z-]+):$/gm)];
+  return Object.fromEntries(keys.map((key, index) => {
+    const name = key[1];
+    const body = section.slice(key.index, keys[index + 1]?.index);
+    const needs = body.match(/\n {4}needs: (\[[^\]]*\]|\S+)\n/)?.[1] ?? '';
+    return [name, { body, needs: needs.replace(/[[\]]/g, '').split(',').map(need => need.trim()).filter(Boolean) }];
+  }));
+}
+
+function admitsFirst(text, gate) {
+  const graph = needsGraph(text);
+  assert.match(graph[gate].body, /\n {4}runs-on: ubuntu-[0-9.]+\n/, `${gate} runs on a hosted runner`);
+  assert.match(graph[gate].body, /\n {4}steps:\n(?: {6}#[^\n]*\n)* {6}- uses: cgwalters-forge\/actions\/admit@main\n/);
+  assert.equal(graph[gate].needs.length, 0);
+  assert.doesNotMatch(graph[gate].body, /\n {4}if:/);
+  const reaches = name => name === gate || graph[name].needs.some(reaches);
+  for (const name of Object.keys(graph)) assert.ok(reaches(name), `${name} waits for ${gate}`);
+}
+
+test('the dispatch wrapper admits the caller\'s owner before any other job', () => {
+  admitsFirst(workflow, 'target');
+  // The issue's case: an owner of no organization of ours fails that step.
+  const admit = new URL('../../admit/admit.mjs', import.meta.url).pathname;
+  const run = spawnSync(process.execPath, [admit], { encoding: 'utf8', env: { ...process.env, OWNER: 'caller', OWNER_ID: '424242' } });
+  assert.equal(run.status, 1, run.stdout);
+});
+
+test('the review wrapper admits the caller\'s owner before any other job', () => {
+  admitsFirst(readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8'), 'admit');
 });
 
 // Third-party actions stay pinned by full commit; dependabot moves them.
@@ -95,6 +132,7 @@ async function target(env, { pull = false, caller = { private: false, visibility
     TARGET_REPO: 'example/repo', TARGET_ITEM: '7', PROFILE: 'implement', TASK: 'Do it.',
     SKILLS: 'false', MAX_REQUESTS: '400', AGENT: 'opencode', AGENT_MODEL: 'p/m', AGENT_RUNNER: '"ubuntu-26.04"',
     INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud', INFERENCE_REGISTER: 'github-oidc', AGENT_CONFIG_REPO: 'o/c',
+    BROKER_URL: 'http://broker', BROKER_AUDIENCE: 'broker-aud',
     AGENT_CONFIG_PATH: 'p', APPLY_ENVIRONMENT: 'apply', SESSION: 'false', IDLE_MINUTES: '',
     TAILNET_DOMAIN: '', RUN_ID: '123', RUN_ATTEMPT: '2', ...env,
   };
@@ -257,6 +295,29 @@ test('the broker audience goes to policy only with the broker registration', asy
   assert.equal((await target({ AGENT: 'fake' }))['inference-audience'], '');
   assert.equal((await target({ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }))['inference-audience'], '');
   assert.match(workflow, /\n {10}INFERENCE_REGISTER: \$\{\{ inputs\.inference-register \}\}\n/);
+});
+
+// Registration posts the identity token to inference-url, so a token for
+// our broker's audience must never go to another URL, which could replay it.
+test('our broker\'s audience is the default only with our broker\'s URL', async () => {
+  const pick = async env => {
+    const outputs = await target(env);
+    return [outputs['inference-url'], outputs['inference-audience']];
+  };
+  assert.deepEqual(await pick({ INFERENCE_URL: '', INFERENCE_AUDIENCE: '' }), ['http://broker', 'broker-aud']);
+  assert.deepEqual(await pick({ INFERENCE_URL: 'http://broker', INFERENCE_AUDIENCE: '' }), ['http://broker', 'broker-aud']);
+  assert.deepEqual(await pick({ INFERENCE_URL: '', INFERENCE_AUDIENCE: 'aud' }), ['http://broker', 'aud']);
+  assert.deepEqual(await pick({ INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud' }), ['http://proxy', 'aud']);
+  for (const url of ['http://proxy', 'http://broker/', 'https://broker']) {
+    await assert.rejects(target({ INFERENCE_URL: url, INFERENCE_AUDIENCE: '' }), /needs its own inference-audience/, url);
+  }
+  // No identity token is minted for the proxy otherwise: nothing to refuse.
+  assert.deepEqual(await pick({ INFERENCE_URL: 'https://api.example', INFERENCE_AUDIENCE: '', INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }), ['https://api.example', '']);
+  assert.deepEqual(await pick({ INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: '', AGENT: 'fake' }), ['', '']);
+  // Neither has a default of its own in the expressions, which would set
+  // one without the other.
+  assert.match(workflow, /\n {10}INFERENCE_URL: \$\{\{ inputs\.inference-url \|\| vars\.INFERENCE_URL \}\}\n/);
+  assert.match(workflow, /\n {10}INFERENCE_AUDIENCE: \$\{\{ inputs\.inference-audience \|\| vars\.INFERENCE_AUDIENCE \}\}\n/);
 });
 
 // Execute the agent job's first step against stub os-release files with a

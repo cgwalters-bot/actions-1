@@ -11,7 +11,19 @@ on:
         required: false
 permissions: {}
 jobs:
+  # The agent job runs on the caller's AGENT_RUNNER, where a self-hosted
+  # runner's owner could mint identity tokens with this file's
+  # `job_workflow_ref` for any audience: refuse an owner not ours on a
+  # hosted runner first (admit/README.md). Everything else needs policy.
+  admit:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - uses: cgwalters-forge/actions/admit@main
+
   policy:
+    needs: admit
     # Untrusted authors must not drain the shared inference budget by opening
     # or reopening PRs. Otherwise-unassociated bots are off by default,
     # admitted by immutable id AND bounds. Preserve upstream's association
@@ -141,7 +153,8 @@ jobs:
           binary-artifact-id: ${{ needs.policy.outputs.binary-artifact-id }}
           policy-artifact-id: ${{ needs.policy.outputs.policy-artifact-id }}
       # One privileged network step, before secure-host drops root. The
-      # tailnet and broker must admit this wrapper's job_workflow_ref. Our own
+      # tailnet and broker must admit this wrapper's job_workflow_ref with
+      # an owner id admit/owners.json lists. Our own
       # action at main, as in cgwalters-agentic-job.yml: nothing moves a
       # commit pin here, so it would keep a retired client or hardening.
       - name: Join the tailnet

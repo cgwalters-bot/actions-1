@@ -36,7 +36,8 @@ organization, which has no entry, must give both `oauth-client-id` and
 `tags` as inputs, or it fails before joining; its `proxy` is empty unless
 given. The reusable workflows pass the calling repository's variables
 `AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID` and `AGENTIC_JOB_TAILSCALE_TAGS`
-as those inputs. The audience is `api.tailscale.com/` followed by the
+as those inputs, but run only for an owner that
+[admit/owners.json](../admit/owners.json) lists. The audience is `api.tailscale.com/` followed by the
 client ID. The node always joins with `--accept-dns=false`, which leaves
 the runner's DNS alone.
 

@@ -1,9 +1,11 @@
 # cgwalters-agentic-job: an agent run of cgwalters-forge/agentic-job with
 # everything that is this deployment's and not the generic project's: the
 # tailnet join, the inference proxy and its audience, the runner, the agent
-# and its model. Every repository of ours calls this one file, so the
-# inference broker and the tailnet have one `job_workflow_ref` to admit, at
-# main. The README has a caller to copy.
+# and its model. Every repository of ours calls this one file at main. Any
+# public repository can call it too, so the inference broker and the
+# tailnet admit its `job_workflow_ref` only with an owner id of ours, and
+# the target job refuses any other owner (admit/owners.json). The README
+# has a caller to copy.
 #
 # The policy, check and apply workflows and the prepare, secure-host and run
 # actions are cgwalters-forge/agentic-job's at a release (its
@@ -111,7 +113,7 @@ on:
         type: string
         default: ""
       inference-audience:
-        description: "Audience of the run's identity token at the proxy; empty: the variable INFERENCE_AUDIENCE, else ours"
+        description: "Audience of the run's identity token at the proxy; empty: the variable INFERENCE_AUDIENCE, else ours, but only with our inference-url: another URL without an audience fails"
         type: string
         default: ""
       agent-config-repo:
@@ -175,6 +177,11 @@ jobs:
       agent-config-repo: ${{ steps.target.outputs.agent-config-repo }}
       agent-config-path: ${{ steps.target.outputs.agent-config-path }}
     steps:
+      # The caller picks the agent job's runner, and on its own machine
+      # could mint identity tokens with this file's `job_workflow_ref` for
+      # any audience: refuse an owner not ours here, on a hosted runner,
+      # before that job is scheduled.
+      - uses: cgwalters-forge/actions/admit@main
       # Trusted pinned code only; no target checkout and no write token.
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         id: target
@@ -196,8 +203,11 @@ jobs:
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
           AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
           AGENT_RUNNER: ${{ inputs.runner || vars.AGENT_RUNNER || '"ubuntu-26.04"' }}
-          INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL || 'http://100.114.231.4:18080' }}
-          INFERENCE_AUDIENCE: ${{ inputs.inference-audience || vars.INFERENCE_AUDIENCE || 'praxis-credential-broker' }}
+          # The broker's URL and audience default together, in the script.
+          INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL }}
+          INFERENCE_AUDIENCE: ${{ inputs.inference-audience || vars.INFERENCE_AUDIENCE }}
+          BROKER_URL: http://100.114.231.4:18080
+          BROKER_AUDIENCE: praxis-credential-broker
           INFERENCE_REGISTER: ${{ inputs.inference-register }}
           AGENT_CONFIG_REPO: ${{ inputs.agent-config-repo || vars.AGENT_CONFIG_REPO || 'cgwalters-forge/agenthome' }}
           AGENT_CONFIG_PATH: ${{ inputs.agent-config-path || vars.AGENT_CONFIG_PATH || 'opencode' }}
@@ -293,10 +303,22 @@ jobs:
             core.setOutput('max-requests', real ? maxRequests : '0');
             core.setOutput('runner', runner);
             core.setOutput('model', real ? process.env.AGENT_MODEL : '');
-            core.setOutput('inference-url', real ? process.env.INFERENCE_URL : '');
             // An audience is for the broker's identity token alone:
-            // agentic-job refuses one with any other registration.
-            core.setOutput('inference-audience', real && process.env.INFERENCE_REGISTER === 'github-oidc' ? process.env.INFERENCE_AUDIENCE : '');
+            // agentic-job refuses one with any other registration. Our
+            // broker's audience is the default only with our broker's URL:
+            // registration posts the token to the URL, which could replay
+            // it to our broker until it expires.
+            const url = process.env.INFERENCE_URL || process.env.BROKER_URL;
+            const oidc = real && process.env.INFERENCE_REGISTER === 'github-oidc';
+            let audience = process.env.INFERENCE_AUDIENCE;
+            if (oidc && !audience) {
+              if (url !== process.env.BROKER_URL) {
+                throw new Error('An inference-url other than the default needs its own inference-audience (or the variable INFERENCE_AUDIENCE)');
+              }
+              audience = process.env.BROKER_AUDIENCE;
+            }
+            core.setOutput('inference-url', real ? url : '');
+            core.setOutput('inference-audience', oidc ? audience : '');
             core.setOutput('agent-config-repo', agent === 'opencode' ? process.env.AGENT_CONFIG_REPO : '');
             core.setOutput('agent-config-path', agent === 'opencode' ? process.env.AGENT_CONFIG_PATH : '');
             const [owner, name] = repo.split('/');
