@@ -51,6 +51,16 @@ test('the wrapper calls agentic-job at the tag the agent job calls', () => {
   assert.deepEqual(tags('./cgwalters-review.yml'), agent);
 });
 
+// Our own actions follow main (dependabot.yml), and zizmor accepts any ref
+// for them, so a commit pin would never move: the review runs would keep
+// joining with an old client, upstream pin and hardening.
+test('both wrappers use our own actions at main', () => {
+  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
+    const refs = [...read(file).matchAll(/uses: cgwalters-forge\/actions\/(\S+)@(\S+)/g)];
+    assert.deepEqual(refs.map(match => [match[1], match[2]]), [['tailscale', 'main']], file);
+  }
+});
+
 // From v0.5.0 check.yml's detect job asks for `id-token: write`, and GitHub
 // refuses a call that grants less than a called job asks for: every run
 // would fail at startup. From v0.6.2 its check job asks for `actions: read`,

@@ -117,9 +117,11 @@ jobs:
           binary-artifact-id: ${{ needs.policy.outputs.binary-artifact-id }}
           policy-artifact-id: ${{ needs.policy.outputs.policy-artifact-id }}
       # One privileged network step, before secure-host drops root. The
-      # tailnet and broker must admit this wrapper's job_workflow_ref.
+      # tailnet and broker must admit this wrapper's job_workflow_ref. Our own
+      # action at main, as in cgwalters-agentic-job.yml: nothing moves a
+      # commit pin here, so it would keep a retired client or hardening.
       - name: Join the tailnet
-        uses: cgwalters-forge/actions/tailscale@d7bfa158217182d8c0b0b775189dcf91a6afcdde
+        uses: cgwalters-forge/actions/tailscale@main
         with:
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
       # Fail on a missing proxy route before setup, not in its sandbox probes.
