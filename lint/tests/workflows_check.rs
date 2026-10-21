@@ -206,12 +206,32 @@ fn changed_checker_reference() {
     let (code, out) = pull_request("ref", &[(CALLER, Some("caller-changed.yml"))]);
     assert_eq!(code, Some(1), "{out}");
     assert!(
-        out.contains("workflows.yml: changes a reference to the workflows-check workflow"),
+        out.contains("workflows.yml: changes a call of the workflows-check workflow"),
         "{out}"
     );
     // Removing the call is a change of it too.
     let (code, _) = pull_request("ref-removed", &[(CALLER, None)]);
     assert_eq!(code, Some(1));
+    // So is turning it off with the same `uses`: a skipped required job
+    // reports success.
+    for fixture in ["caller-skipped.yml", "caller-untriggered.yml"] {
+        let (code, out) = pull_request(fixture, &[(CALLER, Some(fixture))]);
+        assert_eq!(code, Some(1), "{fixture}: {out}");
+        assert!(out.contains("changes a call of the workflows"), "{out}");
+    }
+    // Another job in the file may change; making the call need it may not.
+    let repo = Repo::new("ref-other");
+    let caller = std::fs::read_to_string(Path::new(FIXTURES).join("caller.yml")).unwrap();
+    let other = |caller: &str, run: &str| {
+        format!("{caller}  other:\n    runs-on: ubuntu-26.04\n    steps: [{{run: '{run}'}}]\n")
+    };
+    let base = repo.commit(&[(CALLER, Some(&other(&caller, "a")))]);
+    let head = repo.commit(&[(CALLER, Some(&other(&caller, "b")))]);
+    let (code, out) = repo.check(&base, &head, "0");
+    assert_eq!(code, Some(0), "{out}");
+    let needs = caller.replace("  check:\n", "  check:\n    needs: other\n");
+    let head = repo.commit(&[(CALLER, Some(&other(&needs, "b")))]);
+    assert_eq!(repo.check(&base, &head, "0").0, Some(1));
 }
 
 #[test]

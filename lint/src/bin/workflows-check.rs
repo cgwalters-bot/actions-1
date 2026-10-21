@@ -36,6 +36,8 @@ const EXEMPTIONS: &str = ".github/agentic-job/workflows.toml";
 /// too, and a pull request may not repoint that call.
 const CHECKER_FILES: &[&str] = &["workflows-check.yml", "workflows-check.yaml"];
 
+const CALL_CHANGED: &str = "changes a call of the workflows-check workflow: its job, a job it needs or the file's triggers";
+
 const MAX_FILES: usize = 500;
 const MAX_FILE: u64 = 1024 * 1024;
 const MAX_EXEMPTIONS: u64 = 64 * 1024;
@@ -259,8 +261,8 @@ fn rules(git: &Git, ancestor: &str, head: &str, name: &str) -> Result<Vec<String
     };
     let Some(new) = git.blob(head, name, MAX_FILE)? else {
         // Deleted: only a call of the checker can be lost with it.
-        if !checker_uses(&old).is_empty() {
-            problems.push("changes a reference to the workflows-check workflow".into());
+        if !checker_calls(&old).is_empty() {
+            problems.push(CALL_CHANGED.into());
         }
         return Ok(problems);
     };
@@ -293,8 +295,8 @@ fn rules(git: &Git, ancestor: &str, head: &str, name: &str) -> Result<Vec<String
             problems.push(format!("adds the trigger `{trigger}`, which runs with the base branch's token on input the author controls"));
         }
     }
-    if checker_uses(&old) != checker_uses(&new) {
-        problems.push("changes a reference to the workflows-check workflow".into());
+    if checker_calls(&old) != checker_calls(&new) {
+        problems.push(CALL_CHANGED.into());
     }
     Ok(problems)
 }
@@ -330,30 +332,41 @@ fn triggers(doc: &Yaml) -> Vec<String> {
         .collect()
 }
 
-/// Every job's and step's `uses` naming this checker's workflow file,
-/// with the job, in order.
-fn checker_uses(doc: &Yaml) -> Vec<(String, String)> {
-    let mut found = Vec::new();
+/// What decides whether a file's call of this checker runs, empty when it
+/// has none: the file's `on`, then every job whose or whose step's `uses`
+/// names the checker's workflow file, whole (`if`, `needs`, `with` and
+/// the rest). Comparing only the `uses` string would let an `if: false` or
+/// a trigger that never fires turn the call off, and a skipped required
+/// job reports success. The jobs it `needs` are not compared: they can be
+/// made to fail through files no YAML comparison sees (workflows-check.md).
+fn checker_calls(doc: &Yaml) -> Vec<(String, Yaml)> {
     let Some(jobs) = doc["jobs"].as_hash() else {
-        return found;
+        return Vec::new();
     };
-    for (id, job) in jobs {
-        let id = id.as_str().unwrap_or("?").to_string();
-        let steps = job["steps"].as_vec().into_iter().flatten();
-        for uses in std::iter::once(&job["uses"]).chain(steps.map(|s| &s["uses"])) {
-            let Some(uses) = uses.as_str() else { continue };
-            let path = uses
-                .split('@')
-                .next()
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            let file = path.rsplit('/').next().unwrap_or_default();
-            if CHECKER_FILES.contains(&file) {
-                found.push((id.clone(), uses.to_string()));
-            }
-        }
+    let calls: Vec<(String, Yaml)> = jobs
+        .iter()
+        .filter(|(_, job)| {
+            let steps = job["steps"].as_vec().into_iter().flatten();
+            std::iter::once(&job["uses"])
+                .chain(steps.map(|s| &s["uses"]))
+                .filter_map(Yaml::as_str)
+                .any(|uses| {
+                    let path = uses
+                        .split('@')
+                        .next()
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    CHECKER_FILES.contains(&path.rsplit('/').next().unwrap_or_default())
+                })
+        })
+        .map(|(id, job)| (id.as_str().unwrap_or("?").to_string(), job.clone()))
+        .collect();
+    if calls.is_empty() {
+        return calls;
     }
-    found
+    std::iter::once(("on".to_string(), doc["on"].clone()))
+        .chain(calls)
+        .collect()
 }
 
 /// One file's change as a `-U0` patch, its content as text whatever it is.
@@ -601,16 +614,12 @@ mod tests {
     #[test]
     fn checker_references() {
         let doc = parse(
-            "jobs:\n  a: {uses: o/r/.github/workflows/workflows-check.yml@v1}\n  b: {steps: [{uses: actions/checkout@v1}]}\n",
+            "on: push\njobs:\n  a: {uses: o/r/.github/workflows/workflows-check.yml@v1, needs: b}\n  b: {steps: [{uses: actions/checkout@v1}]}\n  c: {steps: [{uses: ./.github/workflows/Workflows-Check.yaml}]}\n",
         )
         .unwrap();
-        assert_eq!(
-            checker_uses(&doc),
-            [(
-                "a".into(),
-                "o/r/.github/workflows/workflows-check.yml@v1".into()
-            )]
-        );
+        let names: Vec<_> = checker_calls(&doc).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, ["on", "a", "c"]);
+        assert!(checker_calls(&parse("on: push\njobs: {c: {}}\n").unwrap()).is_empty());
     }
 
     #[test]
