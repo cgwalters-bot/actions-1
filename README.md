@@ -31,8 +31,8 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
-Both wrappers pin agentic-job v0.6.2 and check inference reachability after
-the tailnet join, before securing the host. They still compose that tag's
+Both wrappers pin agentic-job v0.6.2, by its commit, and check inference
+reachability after the tailnet join, before securing the host. They still compose that tag's
 `secure-host/internal` action, which runs `sandbox setup` on the host, not
 this repository's [secure-host](secure-host/README.md) image action that the
 tag's public `secure-host` now forwards to, so its egress

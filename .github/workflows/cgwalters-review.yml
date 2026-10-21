@@ -1,5 +1,7 @@
 # Composed from agentic-job v0.6.2's review.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
+# They name the release's commit, not its tag, for the reason
+# cgwalters-agentic-job.yml's header gives.
 # No dispatcher inputs: identity/configuration comes from repository variables.
 name: cgwalters-review
 on:
@@ -24,7 +26,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     permissions:
       contents: read
     with:
@@ -173,7 +175,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -237,7 +239,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:

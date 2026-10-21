@@ -75,8 +75,10 @@ Rulesets, New branch ruleset:
 - Target branches: **Default branch**.
 - Rules: **Require workflows to pass before merging**, with workflow
   `.github/workflows/workflows-check.yml` from this repository at a
-  **pinned tag or commit SHA**, never a branch. Moving the pin to a new
-  revision of this file is how a change here takes effect.
+  **commit SHA**, never a branch or tag: this repository's tags are not
+  protected, so anyone who can push here could move one past review.
+  Moving the pin to a new revision of this file is how a change here takes
+  effect.
 - Bypass list: organization owners only.
 
 A repository with a merge queue gets the check on `merge_group` too. The

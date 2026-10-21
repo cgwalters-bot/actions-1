@@ -6,13 +6,17 @@
 # main. The README has a caller to copy.
 #
 # The policy, check and apply workflows and the prepare, secure-host and run
-# actions are cgwalters-forge/agentic-job's at a release tag (its
+# actions are cgwalters-forge/agentic-job's at a release (its
 # docs/workflow.md, "The pieces, and an agent job of your own"); the agent
-# job is this file's so that the join can be a step of it. A tag rather
+# job is this file's so that the join can be a step of it. A release rather
 # than main: following main failed runs that spanned an agentic-job merge,
 # since check, apply, prepare and run refuse calls that resolved to
-# different commits than the policy call's (tracker#544). The three calls
-# must name the same tag; dependabot proposes newer ones as one change.
+# different commits than the policy call's (tracker#544). The release's
+# commit rather than its tag: agentic-job's tags are not protected, so
+# anyone who can push there could move one to a commit that skipped main's
+# review, and it would run here as root and with the apply token (#109).
+# The three calls must name the same commit, with the tag as a comment;
+# dependabot proposes newer ones as one change.
 #
 # Nesting: the caller, this file, then policy.yml, check.yml or apply.yml,
 # none of which calls another workflow: three of the four levels GitHub
@@ -324,7 +328,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -439,8 +443,8 @@ jobs:
           ref: ${{ needs.policy.outputs.ref }}
           persist-credentials: false
       # The actions come from the policy call's own source, which must be
-      # the repository this file calls; its commit is the one the tag named
-      # when the run started, and is checked out below as policy reported it.
+      # the repository this file calls; its commit is the one policy's `uses:`
+      # pins, and is checked out below as policy reported it.
       - name: The policy call's source repository
         env:
           SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
@@ -562,7 +566,7 @@ jobs:
       actions: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -571,7 +575,7 @@ jobs:
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches

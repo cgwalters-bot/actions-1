@@ -1,6 +1,7 @@
 # Third-party actions are pinned by commit; this keeps those pins moving.
-# agentic-job is referenced by release tag, which this moves too; our other
-# own actions (cgwalters-forge/actions) follow main and need no updates.
+# agentic-job is pinned by its release's commit with the tag as a comment,
+# which this moves too; our other own actions (cgwalters-forge/actions)
+# follow main and need no updates.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -8,9 +9,9 @@ updates:
     directories: [/, /tailscale, /lint, /app-token]
     schedule:
       interval: daily
-    # policy, check and apply must name the same tag (the run refuses calls
-    # at differing commits), so a new tag is one pull request for all three,
-    # in both cgwalters-agentic-job.yml and cgwalters-review.yml.
+    # policy, check and apply must name the same commit (the run refuses
+    # calls at differing commits), so a new tag is one pull request for all
+    # three, in both cgwalters-agentic-job.yml and cgwalters-review.yml.
     groups:
       agentic-job:
         patterns: ["cgwalters-forge/agentic-job*"]
