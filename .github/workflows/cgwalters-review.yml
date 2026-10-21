@@ -63,6 +63,15 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      # As in the agent job: the helper must be the pinned source's.
+      - name: The policy call's source repository
+        env:
+          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
+          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
+          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
+        run: |
+          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ needs.policy.outputs.source-repository }}
@@ -106,6 +115,19 @@ jobs:
         with:
           ref: ${{ needs.policy.outputs.ref }}
           persist-credentials: false
+      # Fail closed before running anything of the source: an empty output
+      # would make checkout fall back to the calling repository or to the
+      # default branch, unreleased code run as root here. The expected
+      # repository is the one policy's `uses:` names (review.test.mjs).
+      - name: The policy call's source repository
+        env:
+          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
+          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
+          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
+        run: |
+          echo "$SOURCE_REPOSITORY at $SOURCE_SHA"
+          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ needs.policy.outputs.source-repository }}
@@ -168,6 +190,15 @@ jobs:
     outputs:
       review-url: ${{ steps.submit.outputs.result }}
     steps:
+      # As in the agent job: the helper must be the pinned source's.
+      - name: The policy call's source repository
+        env:
+          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
+          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
+          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
+        run: |
+          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ needs.policy.outputs.source-repository }}
@@ -226,6 +257,15 @@ jobs:
       pull-requests: read
       statuses: write
     steps:
+      # As in the agent job: the helper must be the pinned source's.
+      - name: The policy call's source repository
+        env:
+          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
+          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
+          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
+        run: |
+          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ needs.policy.outputs.source-repository }}
