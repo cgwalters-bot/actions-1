@@ -18,9 +18,17 @@ runs anything of, and refuses the pull request when:
 | A workflow that gains a `pull_request_target` or `workflow_run` trigger | A workflow that runs with the base branch's token and secrets on input the author controls |
 | An added line with a `zizmor: ignore` comment (in any case or spacing), in a workflow, an `action.yml` or `.github/dependabot.yml`, other than `# zizmor: ignore[self-repository]` on a `uses: ./...` line | A pull request silencing the audit that would flag what it adds |
 | A change to zizmor's configuration (`zizmor.yml` or `.github/zizmor.yml`) | The same, for every file at once |
+| A change to actionlint's configuration (`.github/actionlint.yaml` or `.yml`) | The same for actionlint, whose `paths` ignores can silence every error in a workflow |
+| A `.gitignore`, at any depth, that gains a pattern or loses a `!` negation | A workflow hidden from zizmor, whose default collection skips what `.gitignore` matches, tracked files included |
 | A change to a job's or step's `uses:` of `workflows-check.yml`, a removal included | A repository's own call of this check repointed at a weaker one |
 
-The trigger, ignore and reference rules judge only what the pull request
+The lint action's zizmor also collects with `--collect=all`, which skips
+nothing `.gitignore` matches; the `.gitignore` rule is for a repository
+whose pin of the lint action predates that, and it judges only changed
+`.gitignore` files, so a workflow force-added under a pattern already on
+the base branch is still hidden from such a pin.
+
+The trigger, ignore, `.gitignore` and reference rules judge only what the pull request
 changes from its merge base; what is already on the base branch was
 reviewed there. The one ignore allowed is the one agentic-job's ingress
 check allows: zizmor's `self-repository` audit flags every local `./`
