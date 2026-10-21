@@ -25,6 +25,8 @@ actionlint:
 # be swapped for an attacker's fork commit under the same `# vX` comment,
 # which impostor-commit and ref-version-mismatch catch. Without a token
 # (a local run) it falls back to the offline audits, and says so.
+# Collect all inputs: the default skips what .gitignore matches, tracked
+# files included, which would let a pull request hide a workflow it adds.
 zizmor:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -34,7 +36,7 @@ zizmor:
       echo "zizmor: GH_TOKEN is not set, so the online audits (impostor-commit, ref-version-mismatch, ...) are skipped" >&2
       offline=(--offline)
     fi
-    {{ container }} run --rm -e GH_TOKEN -v "$(pwd):/repo:ro" -w /repo {{ zizmor_image }} "${offline[@]}" .
+    {{ container }} run --rm -e GH_TOKEN -v "$(pwd):/repo:ro" -w /repo {{ zizmor_image }} "${offline[@]}" --collect=all .
 
 # cargo runs from here, so a checked repository's rust-toolchain.toml and
 # .cargo/config.toml don't pick the toolchain or flags of this build.

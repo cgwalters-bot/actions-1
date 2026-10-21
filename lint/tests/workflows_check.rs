@@ -160,6 +160,48 @@ fn new_ignore() {
 }
 
 #[test]
+fn linter_configuration() {
+    for path in [".github/actionlint.yaml", ".github/actionlint.yml"] {
+        let config = "paths:\n  .github/workflows/**/*.yml:\n    ignore: ['.*']\n";
+        let (code, out) = pull_request("actionlint-config", &[(path, Some(config))]);
+        assert_eq!(code, Some(1), "{out}");
+        assert!(out.contains("changes actionlint's configuration"), "{out}");
+    }
+    // A workflow added with the .gitignore line that hides it from zizmor,
+    // in the root or deeper.
+    for (name, gitignore, pattern) in [
+        ("gitignore", ".gitignore", "/.github/workflows/ci.yml\n"),
+        (
+            "gitignore-nested",
+            ".github/.gitignore",
+            "workflows/ci.yml\n",
+        ),
+    ] {
+        let (code, out) = pull_request(name, &[(CI, Some("pass.yml")), (gitignore, Some(pattern))]);
+        assert_eq!(code, Some(1), "{out}");
+        assert!(
+            out.contains(&format!("{gitignore}: line 1 adds a .gitignore pattern")),
+            "{out}"
+        );
+    }
+    // Removing a negation hides what it let through; comments, blank lines
+    // and removed patterns hide nothing.
+    let repo = Repo::new("gitignore-negation");
+    let base = repo.commit(&[(".gitignore", Some("*.yml\n!/.github/\ntarget/\n"))]);
+    let head = repo.commit(&[(".gitignore", Some("*.yml\n# c\n\n"))]);
+    let (code, out) = repo.check(&base, &head, "0");
+    assert_eq!(code, Some(1), "{out}");
+    assert!(
+        out.contains(".gitignore: removes a .gitignore negation"),
+        "{out}"
+    );
+    assert!(!out.contains("adds a .gitignore pattern"), "{out}");
+    let head = repo.commit(&[(".gitignore", Some("*.yml\n!/.github/\n# c\n"))]);
+    let (code, out) = repo.check(&base, &head, "0");
+    assert_eq!(code, Some(0), "{out}");
+}
+
+#[test]
 fn changed_checker_reference() {
     let (code, out) = pull_request("ref", &[(CALLER, Some("caller-changed.yml"))]);
     assert_eq!(code, Some(1), "{out}");

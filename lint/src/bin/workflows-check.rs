@@ -1,7 +1,7 @@
 //! The check an organization ruleset requires of every pull request
 //! (lint/workflows-check.md): a pull request's workflow files, read from
 //! Git as blobs and never checked out or run, against the job shape and
-//! three rules about what a pull request may change.
+//! rules about what a pull request may change.
 //!
 //! Usage: `workflows-check [--shape-check BINARY] REPOSITORY BASE HEAD`,
 //! with BASE and HEAD full commit IDs. Exits 0 when nothing is refused, 1
@@ -24,6 +24,10 @@ const ZIZMOR_CONFIGS: &[&str] = &[
     "zizmor.yml",
     "zizmor.yaml",
 ];
+
+/// actionlint's configuration, whose `paths` ignores can silence every
+/// error in a workflow and `self-hosted-runner.labels` the unknown-label one.
+const ACTIONLINT_CONFIGS: &[&str] = &[".github/actionlint.yaml", ".github/actionlint.yml"];
 
 /// The shape check's exemptions, read from the base commit only.
 const EXEMPTIONS: &str = ".github/agentic-job/workflows.toml";
@@ -206,6 +210,37 @@ fn rules(git: &Git, ancestor: &str, head: &str, name: &str) -> Result<Vec<String
         );
         return Ok(problems);
     }
+    if ACTIONLINT_CONFIGS.contains(&name) {
+        problems.push(
+            "changes actionlint's configuration, which can silence its errors for any workflow"
+                .into(),
+        );
+        return Ok(problems);
+    }
+    // zizmor's default collection skips what a .gitignore at any depth
+    // matches, tracked files included, so a pull request could add a
+    // workflow with `git add -f` and the line that hides it from the audit.
+    // The lint Justfile collects with `--collect=all`, but a caller's pin
+    // of it may predate that.
+    if Path::new(name).file_name().and_then(|n| n.to_str()) == Some(".gitignore") {
+        let patch = patch(git, ancestor, head, name)?;
+        let patch = String::from_utf8_lossy(&patch);
+        for (number, line) in added_lines(&patch) {
+            // Leading spaces are part of a pattern; unescaped trailing ones not.
+            let line = line.trim_end();
+            if !line.is_empty() && !line.starts_with('#') {
+                problems.push(format!(
+                    "line {number} adds a .gitignore pattern, which can hide a file from zizmor"
+                ));
+            }
+        }
+        // Removing a negation ignores again what it had let through.
+        if removed_lines(&patch).iter().any(|l| l.starts_with('!')) {
+            problems
+                .push("removes a .gitignore negation, which can hide a file from zizmor".into());
+        }
+        return Ok(problems);
+    }
     let workflow = is_workflow(name);
     // The other files zizmor audits: actions and Dependabot's configuration.
     let audited = matches!(
@@ -230,18 +265,7 @@ fn rules(git: &Git, ancestor: &str, head: &str, name: &str) -> Result<Vec<String
         return Ok(problems);
     };
     let new = String::from_utf8_lossy(&new).into_owned();
-    let patch = git.run(&[
-        "diff",
-        "--no-ext-diff",
-        "--no-textconv",
-        "--text",
-        "--no-renames",
-        "-U0",
-        ancestor,
-        head,
-        "--",
-        name,
-    ])?;
+    let patch = patch(git, ancestor, head, name)?;
     for (number, line) in added_lines(&String::from_utf8_lossy(&patch)) {
         if ignore_count(line) > 0 && !allowed_ignore(line) {
             problems.push(format!(
@@ -331,6 +355,37 @@ fn checker_uses(doc: &Yaml) -> Vec<(String, String)> {
         }
     }
     found
+}
+
+/// One file's change as a `-U0` patch, its content as text whatever it is.
+fn patch(git: &Git, ancestor: &str, head: &str, name: &str) -> Result<Vec<u8>, String> {
+    git.run(&[
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--text",
+        "--no-renames",
+        "-U0",
+        ancestor,
+        head,
+        "--",
+        name,
+    ])
+}
+
+/// The lines a `-U0` patch removes, those after its first hunk header so
+/// that the `---` file header is not one.
+fn removed_lines(patch: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut in_hunk = false;
+    for line in patch.split('\n') {
+        if line.starts_with("@@ ") {
+            in_hunk = true;
+        } else if in_hunk && let Some(removed) = line.strip_prefix('-') {
+            lines.push(removed);
+        }
+    }
+    lines
 }
 
 /// The lines a `-U0` patch adds, with their numbers in the new file.
@@ -540,6 +595,8 @@ mod tests {
     fn hunks() {
         let patch = "diff --git a/x b/x\n+++ b/x\n@@ -1,0 +2,2 @@\n+a\n+b\n@@ -9 +12 @@\n-c\n+d\n";
         assert_eq!(added_lines(patch), [(2, "a"), (3, "b"), (12, "d")]);
+        let patch = "--- a/x\n+++ b/x\n@@ -1 +0,0 @@\n--x\n@@ -5 +4 @@\n-!y\n+z\n";
+        assert_eq!(removed_lines(patch), ["-x", "!y"]);
     }
 
     #[test]

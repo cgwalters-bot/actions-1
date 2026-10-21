@@ -31,6 +31,7 @@ fn online_with_a_token() {
     let out = zizmor(Some("test-token-not-secret"));
     let args = String::from_utf8(out.stdout).unwrap();
     assert!(!args.contains("--offline"), "{args}");
+    assert!(args.trim_end().ends_with(" --collect=all ."), "{args}");
     // Forwarded by name, so the value is not on the command line.
     assert!(args.contains(" -e GH_TOKEN "), "{args}");
     assert!(!args.contains("test-token-not-secret"), "{args}");
@@ -41,7 +42,10 @@ fn offline_without_a_token() {
     for token in [None, Some("")] {
         let out = zizmor(token);
         let args = String::from_utf8(out.stdout).unwrap();
-        assert!(args.trim_end().ends_with(" --offline ."), "{args}");
+        assert!(
+            args.trim_end().ends_with(" --offline --collect=all ."),
+            "{args}"
+        );
         let note = String::from_utf8(out.stderr).unwrap();
         assert!(note.contains("GH_TOKEN is not set"), "{note}");
     }
