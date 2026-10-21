@@ -20,9 +20,11 @@
 #
 # What is the deployment's is decided in the target job and nowhere else:
 # an input, else the calling repository's variable of the name the input's
-# description gives, else the default written there. A new repository
-# therefore sets nothing; a variable is for trying a model without
-# changing this file.
+# description gives, else the default written there. A variable is for
+# trying a model without changing this file. The inference URL alone is a
+# required input with no variable or default: the broker's address is the
+# deployment's, not this public file's, so the caller passes it from its
+# own configuration, such as its INFERENCE_URL variable.
 #
 # What is the calling repository's stays the caller's: its trigger, run
 # name and concurrency, its bounds (`allow`, `fix-allow`) and runner
@@ -103,9 +105,9 @@ on:
         type: string
         default: ""
       inference-url:
-        description: "The inference proxy; empty: the variable INFERENCE_URL, else ours"
+        description: "The inference proxy, such as the variable INFERENCE_URL; no default"
         type: string
-        default: ""
+        required: true
       inference-audience:
         description: "Audience of the run's identity token at the proxy; empty: the variable INFERENCE_AUDIENCE, else ours"
         type: string
@@ -167,6 +169,7 @@ jobs:
       runner: ${{ steps.target.outputs.runner }}
       model: ${{ steps.target.outputs.model }}
       inference-url: ${{ steps.target.outputs.inference-url }}
+      proxy: ${{ steps.target.outputs.proxy }}
       inference-audience: ${{ steps.target.outputs.inference-audience }}
       agent-config-repo: ${{ steps.target.outputs.agent-config-repo }}
       agent-config-path: ${{ steps.target.outputs.agent-config-path }}
@@ -192,7 +195,7 @@ jobs:
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
           AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
           AGENT_RUNNER: ${{ inputs.runner || vars.AGENT_RUNNER || '"ubuntu-26.04"' }}
-          INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL || 'http://100.114.231.4:18080' }}
+          INFERENCE_URL: ${{ inputs.inference-url }}
           INFERENCE_AUDIENCE: ${{ inputs.inference-audience || vars.INFERENCE_AUDIENCE || 'praxis-credential-broker' }}
           INFERENCE_REGISTER: ${{ inputs.inference-register }}
           AGENT_CONFIG_REPO: ${{ inputs.agent-config-repo || vars.AGENT_CONFIG_REPO || 'cgwalters-forge/agenthome' }}
@@ -281,6 +284,15 @@ jobs:
               host = `agentic-job-${process.env.RUN_ID}-${process.env.RUN_ATTEMPT}`;
               endpoint = `wss://${host}.${domain}/`;
             }
+            // The agent job joins the tailnet for these, and the tailscale
+            // action takes the proxy from here too. With api-key that is the
+            // provider's API root, which the action only passes on.
+            const joins = real || session;
+            const inferenceURL = process.env.INFERENCE_URL?.trim() ?? '';
+            if (joins && !inferenceURL) {
+              throw new Error('The inference-url input is empty; pass the variable INFERENCE_URL');
+            }
+            core.setOutput('proxy', joins ? inferenceURL : '');
             core.setOutput('session', String(session));
             core.setOutput('idle-minutes', idleMinutes);
             core.setOutput('session-host', host);
@@ -289,7 +301,7 @@ jobs:
             core.setOutput('max-requests', real ? maxRequests : '0');
             core.setOutput('runner', runner);
             core.setOutput('model', real ? process.env.AGENT_MODEL : '');
-            core.setOutput('inference-url', real ? process.env.INFERENCE_URL : '');
+            core.setOutput('inference-url', real ? inferenceURL : '');
             // An audience is for the broker's identity token alone:
             // agentic-job refuses one with any other registration.
             core.setOutput('inference-audience', real && process.env.INFERENCE_REGISTER === 'github-oidc' ? process.env.INFERENCE_AUDIENCE : '');
@@ -477,6 +489,7 @@ jobs:
           # organization may already set for an OAuth client of another use.
           oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}
           tags: ${{ vars.AGENTIC_JOB_TAILSCALE_TAGS }}
+          proxy: ${{ needs.target.outputs.proxy }}
           # A session serves its bridge over HTTPS, and tailscaled makes and keeps
           # that certificate only with a state directory.
           statedir: ${{ needs.target.outputs.session == 'true' && '/var/lib/tailscale-session' || '' }}

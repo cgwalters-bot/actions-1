@@ -8,6 +8,8 @@ async function json(response) {
 }
 
 export async function check(env = process.env, request = fetch) {
+  // tailnets.json has no proxy: say so before an Invalid URL would.
+  if (!env.PROXY) throw new Error('check needs the proxy input, such as the variable INFERENCE_URL');
   const oidcURL = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL);
   oidcURL.searchParams.set('audience', env.AUDIENCE);
   const oidc = await json(await request(oidcURL, {

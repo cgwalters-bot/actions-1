@@ -1,9 +1,17 @@
 # Composed from agentic-job v0.6.2's review.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
-# No dispatcher inputs: identity/configuration comes from repository variables.
+# No dispatcher inputs: identity/configuration comes from repository
+# variables, and the one input from the caller's workflow file.
 name: cgwalters-review
 on:
   workflow_call:
+    inputs:
+      # The broker's address is the deployment's, not this public file's:
+      # the caller passes it from its configuration, its INFERENCE_URL.
+      inference-url:
+        description: "The inference proxy, such as the variable INFERENCE_URL"
+        type: string
+        required: true
     secrets:
       SAFE_OUTPUTS_PAT:
         required: false
@@ -45,7 +53,7 @@ jobs:
       # Repository names are configured by the owner, never dispatch inputs.
       agent-config-repo: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_REPO || '' }}
       agent-config-path: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_PATH || '' }}
-      inference-url: ${{ vars.INFERENCE_URL || 'http://100.114.231.4:18080' }}
+      inference-url: ${{ inputs.inference-url }}
       inference-audience: ${{ vars.INFERENCE_AUDIENCE || 'praxis-credential-broker' }}
       max-requests: '150'
       budget: '500'
@@ -110,6 +118,14 @@ jobs:
       # Let the submitted review's footer link the agent job, not just the run.
       job: ${{ job.check_run_id }}
     steps:
+      # A caller's unset variable passes the required input as empty; fail
+      # here, before the join and the agent, rather than later and unclearly.
+      - name: Require the inference URL
+        env:
+          INFERENCE_URL: ${{ inputs.inference-url }}
+        run: |
+          [[ "$INFERENCE_URL" =~ [^[:space:]] ]] ||
+            { echo "::error::the inference-url input is empty; pass the variable INFERENCE_URL"; exit 1; }
       # The trusted base, never the head; source actions come from policy's pin.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -149,6 +165,7 @@ jobs:
           # As in cgwalters-agentic-job.yml: unset, tailnets.json's entry.
           oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}
           tags: ${{ vars.AGENTIC_JOB_TAILSCALE_TAGS }}
+          proxy: ${{ inputs.inference-url }}
       # Fail on a missing proxy route before setup, not in its sandbox probes.
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability

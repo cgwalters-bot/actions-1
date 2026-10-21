@@ -20,6 +20,9 @@ jobs:
     # one, with no pin to move. The agentic-job tag it calls is checked
     # against the agent job's in review.test.mjs, as is passing no secret.
     uses: ./.github/workflows/cgwalters-review.yml
+    # The deployment's broker, from this repository's configuration.
+    with:
+      inference-url: ${{ vars.INFERENCE_URL }}
     # Exactly the union of the wrapper's job grants (review.test.mjs).
     permissions:
       contents: read

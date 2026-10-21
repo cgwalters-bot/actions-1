@@ -50,16 +50,23 @@ test('dependabot proposes new agentic-job tags as one group', () => {
   assert.match(config, /\n {6}exclude: \["cgwalters-forge\/agentic-job\*"\]\n/);
 });
 
-// A repository without INFERENCE_URL falls back to the broker its runner
-// joins the tailnet to reach: the wrappers and tailnets.json move together.
-test('the wrappers fall back to the cgwalters-forge tailnet broker', () => {
-  const tailnets = JSON.parse(readFileSync(new URL('../../tailscale/tailnets.json', import.meta.url), 'utf8'));
-  const broker = tailnets['cgwalters-forge'].proxy;
+// The broker's address is the deployment's: a required input of both
+// wrappers, with no variable or literal fallback, and the tailnet join is
+// given the same URL the run is. Our own caller passes its variable.
+test('the wrappers take the inference URL from their required input only', () => {
   for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
     const text = readFileSync(new URL(file, import.meta.url), 'utf8');
-    const fallbacks = [...text.matchAll(/vars\.INFERENCE_URL \|\| '([^']*)'/g)].map(match => match[1]);
-    assert.deepEqual(fallbacks, [broker], file);
+    assert.match(text, /\n {6}inference-url:\n {8}description: "[^"\n]*"\n {8}type: string\n {8}required: true\n/, file);
+    assert.doesNotMatch(text, /vars\.INFERENCE_URL|inference-url \|\|/, file);
   }
+  assert.match(workflow, /\n {10}INFERENCE_URL: \$\{\{ inputs\.inference-url \}\}\n/);
+  assert.match(workflow, /\n {10}proxy: \$\{\{ needs\.target\.outputs\.proxy \}\}\n/);
+  const review = readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8');
+  assert.match(review, /\n {6}inference-url: \$\{\{ inputs\.inference-url \}\}\n/);
+  assert.match(review, /\n {10}proxy: \$\{\{ inputs\.inference-url \}\}\n/);
+  assert.match(review, /- name: Require the inference URL\n {8}env:\n {10}INFERENCE_URL: \$\{\{ inputs\.inference-url \}\}\n/);
+  const caller = readFileSync(new URL('./review.yml', import.meta.url), 'utf8');
+  assert.match(caller, /\n {4}with:\n {6}inference-url: \$\{\{ vars\.INFERENCE_URL \}\}\n/);
 });
 
 // Third-party actions stay pinned by full commit; dependabot moves them.
@@ -208,6 +215,21 @@ test('a session without a usable domain, for review, or with idle-minutes out of
   }
   // Without session it would be ignored downstream; refuse it instead.
   await assert.rejects(target({ IDLE_MINUTES: '10' }), /idle-minutes/);
+});
+
+test('a run that joins the tailnet fails early without an inference URL', async () => {
+  for (const url of ['', ' ']) {
+    await assert.rejects(target({ INFERENCE_URL: url }), /the variable INFERENCE_URL/, JSON.stringify(url));
+    await assert.rejects(target({ INFERENCE_URL: url, AGENT: 'fake', SESSION: 'true', TAILNET_DOMAIN: 'a.ts.net' }),
+      /the variable INFERENCE_URL/);
+  }
+  const fake = await target({ INFERENCE_URL: '', AGENT: 'fake' });
+  assert.equal(fake.proxy, '');
+  assert.equal(fake['inference-url'], '');
+  const real = await target({ INFERENCE_URL: 'http://192.0.2.1:18080' });
+  assert.equal(real.proxy, 'http://192.0.2.1:18080');
+  assert.equal(real['inference-url'], 'http://192.0.2.1:18080');
+  assert.equal((await target({ AGENT: 'fake', SESSION: 'true', TAILNET_DOMAIN: 'a.ts.net' })).proxy, 'http://proxy');
 });
 
 test('the tailnet join is for a real agent or a session', () => {

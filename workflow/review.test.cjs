@@ -75,6 +75,7 @@ test('trusted source only, one network join before dropping root, no post-agent 
   const steps = [...jobs.agent.matchAll(/^      - (?:uses: ([^\s]+)|name: (.+)|id: (.+))/gm)]
     .map(([, uses, name, id]) => uses || name || id);
   assert.deepEqual(steps, [
+    'Require the inference URL',
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
     "The policy call's source repository",
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',

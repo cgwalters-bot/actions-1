@@ -12,10 +12,14 @@ export function settings(owner, overrides = {}) {
   if (!known && !(overrides['oauth-client-id'] && overrides.tags)) {
     throw new Error(`No tailnet settings for GitHub organization ${owner}; add an entry to tailscale/tailnets.json, or give both oauth-client-id and tags.`);
   }
-  const result = known ? { ...tailnets[owner] } : { 'oauth-client-id': '', tags: '', proxy: '' };
-  for (const key of ['oauth-client-id', 'tags', 'proxy']) {
+  const result = known ? { ...tailnets[owner] } : { 'oauth-client-id': '', tags: '' };
+  for (const key of ['oauth-client-id', 'tags']) {
     if (overrides[key]) result[key] = overrides[key];
   }
+  // The broker's address is the deployment's, not this public repository's:
+  // only the caller has it. Empty stays empty, so that a wrapper pinned
+  // before the caller passed it, and never read this output, still joins.
+  result.proxy = overrides.proxy?.trim() || '';
   result.audience = overrides.audience || `api.tailscale.com/${result['oauth-client-id']}`;
   for (const value of Object.values(result)) {
     if (/[\r\n]/.test(value)) throw new Error('Tailnet settings must be single-line values');

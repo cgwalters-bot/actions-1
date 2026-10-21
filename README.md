@@ -67,6 +67,7 @@ jobs:
       repo: ${{ inputs.repo }}
       item: ${{ inputs.item }}
       kind: ${{ inputs.kind }}
+      inference-url: ${{ vars.INFERENCE_URL }}
       apply-environment: agent-apply
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.CGWALTERS_BOT_PAT }}
@@ -82,9 +83,12 @@ caller's own network step instead (its #705), which callers have not moved
 to. It refuses private repositories, as the dispatch wrapper does. It adds
 our tailnet join and defaults: opencode,
 `praxis/gpt-6.1-sol`, `ubuntu-26.04`, and the dispatch wrapper's inference
-URL and audience. It has **no inputs**. Repository/organization variables
-`AGENT`, `AGENT_MODEL`, `AGENT_RUNNER` (JSON), `INFERENCE_URL`,
-`INFERENCE_AUDIENCE`, `AGENT_CONFIG`, `AGENT_CONFIG_REPO` and
+audience. Its one input is `inference-url`, which both wrappers require:
+the broker's address is the deployment's, not this repository's, so a
+caller passes it from its own configuration, as
+`inference-url: ${{ vars.INFERENCE_URL }}`, never as a literal. It also
+becomes the tailscale action's `proxy`. Repository/organization variables
+`AGENT`, `AGENT_MODEL`, `AGENT_RUNNER` (JSON), `INFERENCE_AUDIENCE`, `AGENT_CONFIG`, `AGENT_CONFIG_REPO` and
 `AGENT_CONFIG_PATH` select owner-controlled configuration. Set the last
 two for agents needing external configuration; there is no hard-coded
 configuration repository. `AGENT_CONFIG` otherwise uses the pinned
@@ -99,6 +103,8 @@ replacing the job's `uses` with:
 
 ```yaml
 uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@main
+with:
+  inference-url: ${{ vars.INFERENCE_URL }}
 ```
 
 Keep that caller's six permission grants. Optional `SAFE_OUTPUTS_PAT` is

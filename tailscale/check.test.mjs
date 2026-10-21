@@ -50,4 +50,5 @@ test('check rejects failed exchanges, missing fields and unexpected proxy respon
   for (const [responses, error] of cases) {
     await assert.rejects(check(env, async () => responses.shift()), error);
   }
+  await assert.rejects(check({ ...env, PROXY: '' }, async () => assert.fail('no request')), /needs the proxy input/);
 });

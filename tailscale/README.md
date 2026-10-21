@@ -21,6 +21,7 @@ user's processes start.
   id: tailnet
   with:
     hostname: cgwalters-devspace-${{ github.run_id }}
+    proxy: ${{ vars.INFERENCE_URL }}
 - run: your-command
   env:
     INFERENCE_PROXY: ${{ steps.tailnet.outputs.proxy }}
@@ -33,12 +34,15 @@ The job needs `permissions: id-token: write` for the OIDC login.
 What a join needs is in [tailnets.json](tailnets.json), keyed by
 `github.repository_owner`; none of it is secret. Another deployment's
 organization, which has no entry, must give both `oauth-client-id` and
-`tags` as inputs, or it fails before joining; its `proxy` is empty unless
-given. The reusable workflows pass the calling repository's variables
+`tags` as inputs, or it fails before joining. The reusable workflows pass the calling repository's variables
 `AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID` and `AGENTIC_JOB_TAILSCALE_TAGS`
 as those inputs. The audience is `api.tailscale.com/` followed by the
 client ID. The node always joins with `--accept-dns=false`, which leaves
 the runner's DNS alone.
+
+The inference proxy's address is not there: it is the deployment's, so
+the caller passes it as `proxy`, usually its `INFERENCE_URL` variable.
+Without it the `proxy` output is empty, and `check` fails.
 
 ## Inputs
 
@@ -49,7 +53,7 @@ A nonempty input overrides the organization's setting.
 | `oauth-client-id` | Client ID of the OIDC federated identity (the only login passed on; no OAuth secret or auth key) |
 | `audience` | Audience of the OIDC federated identity (default: from the client ID) |
 | `tags` | Comma-separated tags for the node |
-| `proxy` | Inference proxy URL |
+| `proxy` | Inference proxy URL (no default) |
 | `hostname` | Node name (default: from the runner name) |
 | `args` | Additional arguments to `tailscale up` |
 | `check` | `true` to also check the login and the proxy, see below |

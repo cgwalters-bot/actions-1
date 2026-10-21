@@ -34,7 +34,9 @@ inputs:
     required: false
     default: ""
   proxy:
-    description: Inference proxy URL; empty uses the organization's lookaside setting.
+    description: >-
+      Inference proxy URL, such as the caller's INFERENCE_URL variable;
+      tailnets.json has none, so empty leaves the proxy output empty.
     required: false
     default: ""
   check:

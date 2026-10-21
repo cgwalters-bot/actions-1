@@ -7,18 +7,41 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { settings } from './setup.mjs';
 
-// cgwalters-forge's broker moved; the others stay on the old host until
-// their tailnet membership of the new one is confirmed.
-test('known organizations supply join settings and proxy', () => {
-  for (const [owner, proxy] of [
-    ['bootc-dev', 'http://100.114.231.4:18080'],
-    ['cgwalters-forge-stage', 'http://100.114.231.4:18080'],
-    ['cgwalters-forge', 'http://100.114.231.4:18080'],
-  ]) {
-    const result = settings(owner);
+// TEST-NET-1: the real address is the deployment's, never in this repository.
+const proxy = 'http://192.0.2.1:18080';
+
+test('known organizations supply join settings, the caller the proxy', () => {
+  for (const owner of ['bootc-dev', 'cgwalters-forge-stage', 'cgwalters-forge']) {
+    const result = settings(owner, { proxy });
     assert.equal(result.audience, `api.tailscale.com/${result['oauth-client-id']}`);
     assert.equal(result.tags, 'tag:bootc-dev-sandbox');
     assert.equal(result.proxy, proxy);
+  }
+});
+
+// A wrapper pinned before it passed the proxy still joins, with no proxy.
+test('the proxy comes only from the caller', () => {
+  const tailnets = JSON.parse(readFileSync(new URL('./tailnets.json', import.meta.url), 'utf8'));
+  for (const [owner, entry] of Object.entries(tailnets)) {
+    assert.deepEqual(Object.keys(entry).sort(), ['oauth-client-id', 'tags'], owner);
+    for (const missing of [{}, { proxy: '' }, { proxy: ' ' }]) {
+      assert.equal(settings(owner, missing).proxy, '', owner);
+    }
+  }
+});
+
+// Tailscale gives nodes addresses in the shared address space of RFC 6598;
+// none belongs in this public repository, in code, tests or docs.
+test('no tailnet address is written in the repository', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const files = spawnSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' });
+  assert.ifError(files.error);
+  assert.equal(files.status, 0, files.stderr);
+  const tailnet = /\b100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b/;
+  for (const file of files.stdout.split('\0').filter(Boolean)) {
+    let text;
+    try { text = readFileSync(join(root, file), 'utf8'); } catch { continue; }
+    assert.ok(!tailnet.test(text), `${file} has a tailnet address`);
   }
 });
 
@@ -29,13 +52,13 @@ test('each setting can be overridden and audience follows an overridden client',
     'oauth-client-id': 'custom', audience: 'api.tailscale.com/custom',
     tags: 'tag:custom', proxy: 'http://example.test',
   });
-  assert.equal(settings('bootc-dev', { audience: 'custom' }).audience, 'custom');
-  assert.equal(settings('bootc-dev', { tags: '' }).tags, 'tag:bootc-dev-sandbox');
+  assert.equal(settings('bootc-dev', { audience: 'custom', proxy }).audience, 'custom');
+  assert.equal(settings('bootc-dev', { tags: '', proxy }).tags, 'tag:bootc-dev-sandbox');
 });
 
 test('unknown owners and output injection fail clearly', () => {
   for (const owner of ['unknown', '__proto__', 'constructor']) {
-    assert.throws(() => settings(owner), /No tailnet settings for GitHub organization/);
+    assert.throws(() => settings(owner, { proxy }), /No tailnet settings for GitHub organization/);
   }
   assert.throws(() => settings('bootc-dev', { proxy: 'url\ninjected=value' }), /single-line/);
 });
@@ -65,7 +88,7 @@ test('both wrappers join with the repository variables for the login', () => {
     const join = text.split('- name: Join the tailnet\n')[1].split(/\n {6}- /)[0];
     assert.match(join, /\n {10}oauth-client-id: \$\{\{ vars\.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID \}\}\n/, file);
     assert.match(join, /\n {10}tags: \$\{\{ vars\.AGENTIC_JOB_TAILSCALE_TAGS \}\}(\n|$)/, file);
-    assert.doesNotMatch(join, /inputs\./, file);
+    assert.doesNotMatch(join, /\n {10}(oauth-client-id|tags): .*inputs\./, file);
   }
 });
 
@@ -75,12 +98,13 @@ test('the setup subprocess appends outputs and rejects injection before writing'
   const prefix = 'existing=value\n';
   try {
     for (const scenario of [
+      { owner: 'bootc-dev', overrides: { PROXY: proxy }, status: 0 },
       { owner: 'bootc-dev', overrides: {}, status: 0 },
       { owner: 'cgwalters-forge', overrides: {
         OAUTH_CLIENT_ID: 'custom', AUDIENCE: 'custom-audience',
         TAGS: 'tag:custom', PROXY: 'http://example.test',
       }, status: 0 },
-      { owner: 'unknown', overrides: {}, status: 1, error: /No tailnet settings/ },
+      { owner: 'unknown', overrides: { PROXY: proxy }, status: 1, error: /No tailnet settings/ },
       { owner: 'unknown', overrides: { OAUTH_CLIENT_ID: 'other', TAGS: 'tag:other' }, status: 0 },
       { owner: 'unknown', overrides: { OAUTH_CLIENT_ID: 'other' }, status: 1, error: /No tailnet settings/ },
       ...['\n', '\r', '\r\n'].map(newline => ({

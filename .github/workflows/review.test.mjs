@@ -32,6 +32,8 @@ jobs:
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
     uses: ./.github/workflows/cgwalters-review.yml
+    with:
+      inference-url: \${{ vars.INFERENCE_URL }}
     permissions:
       contents: read
       issues: read
@@ -169,7 +171,7 @@ test('the task treats the head as hostile and defers to the merge policy', () =>
   }
 });
 
-// The review wrapper has no inputs and its caller passes no secret, so it
+// The review wrapper's one input is the URL and its caller passes no secret, so it
 // stays on the broker: agentic-job's provider-key mode (its #740) is not
 // wired here.
 test('the review wrapper stays on the inference broker', () => {
