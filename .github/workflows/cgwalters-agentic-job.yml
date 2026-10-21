@@ -471,6 +471,12 @@ jobs:
         uses: cgwalters-forge/actions/tailscale@main
         with:
           hostname: ${{ needs.target.outputs.session-host || format('agentic-job-{0}-{1}', github.run_id, github.run_attempt) }}
+          # The calling repository's tailnet login, for an organization
+          # tailnets.json doesn't list; set, it replaces a listed one's too.
+          # Not tailscale/github-action's usual TAILSCALE_* names, which an
+          # organization may already set for an OAuth client of another use.
+          oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}
+          tags: ${{ vars.AGENTIC_JOB_TAILSCALE_TAGS }}
           # A session serves its bridge over HTTPS, and tailscaled makes and keeps
           # that certificate only with a state directory.
           statedir: ${{ needs.target.outputs.session == 'true' && '/var/lib/tailscale-session' || '' }}
