@@ -16,6 +16,7 @@ test('agentic-job is called at one release commit, our own actions at main', () 
   const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)(?: # (\S+))?\n/g)];
   assert.deepEqual(refs.map(match => match[1]), [
     'actions/admit',
+    'actions/deployment',
     'agentic-job/.github/workflows/policy.yml',
     'actions/tailscale',
     'agentic-job/.github/workflows/check.yml',
@@ -61,6 +62,22 @@ test('the wrappers fall back to the cgwalters-forge tailnet broker', () => {
   const fallbacks = [...review.matchAll(/vars\.INFERENCE_URL \|\| '([^']*)'/g)].map(match => match[1]);
   assert.deepEqual(fallbacks, [broker]);
   assert.deepEqual([...workflow.matchAll(/\n {10}BROKER_URL: (\S+)\n/g)].map(match => match[1]), [broker]);
+});
+
+// A second deployment's copy sets its configuration repository in
+// deployment/deployment.json, not in the wrapper.
+test('the configuration repository defaults to deployment.json\'s, after the input and the variable', () => {
+  assert.doesNotMatch(workflow, /agenthome/);
+  assert.match(workflow, /\n {10}AGENT_CONFIG_REPO: \$\{\{ inputs\.agent-config-repo \|\| vars\.AGENT_CONFIG_REPO \|\| steps\.deployment\.outputs\.agent-config-repo \}\}\n/);
+  assert.match(job('target'), /\n {6}- uses: cgwalters-forge\/actions\/deployment@main\n {8}id: deployment\n/);
+  const action = readFileSync(new URL('../../deployment/action.yml', import.meta.url), 'utf8');
+  assert.match(action, /\n {2}agent-config-repo:\n.*\n {4}value: \$\{\{ steps\.read\.outputs\.agent-config-repo \}\}\n/);
+});
+
+test('opencode with no configuration repository fails in the target job', async () => {
+  await assert.rejects(target({ AGENT_CONFIG_REPO: '' }), /No agent configuration repository/);
+  const outputs = await target({ AGENT_CONFIG_REPO: '', AGENT: 'claude' });
+  assert.equal(outputs['agent-config-repo'], '');
 });
 
 // Any public repository can call the wrappers, and the tokens of its run

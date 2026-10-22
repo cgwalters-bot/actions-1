@@ -26,7 +26,8 @@
 #
 # What is the deployment's is decided in the target job and nowhere else:
 # an input, else the calling repository's variable of the name the input's
-# description gives, else the default written there. A new repository
+# description gives, else the default written there (one naming another
+# repository of ours, in deployment/deployment.json). A new repository
 # therefore sets nothing; a variable is for trying a model without
 # changing this file.
 #
@@ -182,6 +183,12 @@ jobs:
       # any audience: refuse an owner not ours here, on a hosted runner,
       # before that job is scheduled.
       - uses: cgwalters-forge/actions/admit@main
+      # The defaults below that name another repository of ours, from
+      # deployment/deployment.json, so that a second deployment's copy sets
+      # them there rather than in this file (its copy repoints these
+      # `uses:` lines at itself too, which GitHub requires be literal).
+      - uses: cgwalters-forge/actions/deployment@main
+        id: deployment
       # Trusted pinned code only; no target checkout and no write token.
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         id: target
@@ -199,7 +206,8 @@ jobs:
           TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
-          # The deployment's defaults: the one place they are written.
+          # The deployment's defaults: the one place they are written, but
+          # for AGENT_CONFIG_REPO's, which deployment.json holds.
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
           AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
           AGENT_RUNNER: ${{ inputs.runner || vars.AGENT_RUNNER || '"ubuntu-26.04"' }}
@@ -209,7 +217,7 @@ jobs:
           BROKER_URL: http://100.114.231.4:18080
           BROKER_AUDIENCE: praxis-credential-broker
           INFERENCE_REGISTER: ${{ inputs.inference-register }}
-          AGENT_CONFIG_REPO: ${{ inputs.agent-config-repo || vars.AGENT_CONFIG_REPO || 'cgwalters-forge/agenthome' }}
+          AGENT_CONFIG_REPO: ${{ inputs.agent-config-repo || vars.AGENT_CONFIG_REPO || steps.deployment.outputs.agent-config-repo }}
           AGENT_CONFIG_PATH: ${{ inputs.agent-config-path || vars.AGENT_CONFIG_PATH || 'opencode' }}
           APPLY_ENVIRONMENT: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
         with:
@@ -319,6 +327,9 @@ jobs:
             }
             core.setOutput('inference-url', real ? url : '');
             core.setOutput('inference-audience', oidc ? audience : '');
+            // No longer a literal here: a renamed step or output must fail
+            // now, not run opencode with no configuration.
+            if (agent === 'opencode' && !process.env.AGENT_CONFIG_REPO) throw new Error('No agent configuration repository: deployment.json gave none');
             core.setOutput('agent-config-repo', agent === 'opencode' ? process.env.AGENT_CONFIG_REPO : '');
             core.setOutput('agent-config-path', agent === 'opencode' ? process.env.AGENT_CONFIG_PATH : '');
             const [owner, name] = repo.split('/');

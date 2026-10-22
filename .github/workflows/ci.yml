@@ -41,6 +41,9 @@ jobs:
       - name: admit unit tests
         if: ${{ !cancelled() }}
         run: just test-admit
+      - name: deployment unit tests
+        if: ${{ !cancelled() }}
+        run: just test-deployment
       - name: secure-host unit tests
         if: ${{ !cancelled() }}
         run: just test-secure-host

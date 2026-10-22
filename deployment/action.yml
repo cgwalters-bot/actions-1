@@ -1,0 +1,16 @@
+name: Deployment
+description: >-
+  Output this deployment's defaults from this action's deployment.json, for
+  the wrappers to use where neither an input nor a variable sets them.
+outputs:
+  agent-config-repo:
+    description: The public repository, OWNER/NAME, of opencode's configuration.
+    value: ${{ steps.read.outputs.agent-config-repo }}
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: node "$ACTION_PATH/deployment.mjs"

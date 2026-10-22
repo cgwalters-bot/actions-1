@@ -13,6 +13,7 @@ this repository's issues.
 | [secure-host](secure-host/README.md) | Runs agentic-job's attested, digest-pinned image: no later step has root or the metadata service, world-write by owner only; CI runs the two-job example, the inputs and the world-write policy on ubuntu-26.04 | agentic-job's own action forwards here; opt-in egress (agentic-job#995) |
 | [app-token](app-token/README.md) | Mints and masks one role's GitHub App installation token, scoped to named repositories; `remint.mjs` mints again near expiry or after a 401; CI runs its unit tests, no real mint (no app here) | Move each role to its app (tracker#766) |
 | [admit](admit/README.md) | Fails unless the calling repository's owner id is in its owners.json; both reusable wrappers run it first; CI runs its unit tests | Brokers and tailnet federation match the same ids |
+| [deployment](deployment/README.md) | Outputs the deployment's defaults from its deployment.json (opencode's configuration repository); the dispatch wrapper uses them after its input and variable; CI runs its unit tests | More defaults that name our resources move there |
 | [tailscale](tailscale/README.md) | Settings by organization; CI runs its unit tests and checks the socket and CLI are closed after a join that fails, no real join (no tailnet credentials here) | Replace devspace.yml's and agent.yml's tailscale/github-action steps |
 
 ## cgwalters-agentic-job
