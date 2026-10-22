@@ -57,9 +57,9 @@ test('the wrapper calls agentic-job at the commit the agent job calls', () => {
 // for them, so a commit pin would never move: the review runs would keep
 // joining with an old client, upstream pin and hardening.
 test('both wrappers use our own actions at main', () => {
-  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
+  for (const [file, actions] of [['./cgwalters-agentic-job.yml', ['admit', 'deployment', 'tailscale']], ['./cgwalters-review.yml', ['admit', 'tailscale']]]) {
     const refs = [...read(file).matchAll(/uses: cgwalters-forge\/actions\/(\S+)@(\S+)/g)];
-    assert.deepEqual(refs.map(match => [match[1], match[2]]), [['admit', 'main'], ['tailscale', 'main']], file);
+    assert.deepEqual(refs.map(match => [match[1], match[2]]), actions.map(action => [action, 'main']), file);
   }
 });
 

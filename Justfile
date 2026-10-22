@@ -14,6 +14,10 @@ test-review:
 test-admit:
     node --test admit/*.test.mjs
 
+# The deployment's defaults file.
+test-deployment:
+    node --test deployment/*.test.mjs
+
 # secure-host's pin and signer checks.
 test-secure-host:
     node --test secure-host/*.test.mjs
