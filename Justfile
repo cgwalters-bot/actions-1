@@ -96,3 +96,34 @@ secure-host-world-write want:
     test "$(stat -c '%a %d' "$owned")" = "666 $(stat -c %d /)"
     echo control >> "$owned"
     grep -qx control "$owned"
+
+# The plain-CI example (.github/workflows/example-plain-ci.yml). The build
+# job's output: the commit it built, in DIR.
+example-build dir:
+    mkdir {{ quote(dir) }} && git rev-parse HEAD > {{ quote(dir / "commit") }}
+
+# The artifact ID the build job named has the digest it reported, so the
+# publish job downloads what that job uploaded and not another of the
+# run's artifacts. ID and DIGEST are the build job's outputs.
+example-verify-digest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! [[ "$ID" =~ ^[0-9]+$ && "$DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "::error::not an artifact ID and SHA-256 digest"; exit 1
+    fi
+    got=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ID" --jq .digest)
+    if [ "$got" != "sha256:$DIGEST" ]; then
+      echo "::error::artifact $ID has digest $got, not the build job's"; exit 1
+    fi
+
+# The build job's output, validated as data and never run: DIR holds one
+# file, `commit`, whose one line is a commit ID. download-artifact, given
+# one artifact ID, extracts that artifact straight into DIR.
+example-validate dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ quote(dir) }}
+    files=$(find . -mindepth 1 -printf '%y %P\n')
+    if [ "$files" != "f commit" ] || ! grep -qxE '[0-9a-f]{40}' commit || [ "$(wc -l < commit)" != 1 ]; then
+      echo "::error::$PWD is not one file holding a commit ID"; exit 1
+    fi
