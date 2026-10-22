@@ -104,6 +104,26 @@ fn passing() {
     assert!(out.contains("ci.yml\nworkflows.yml\n"), "{out}");
 }
 
+/// secure-host's plain-CI example, as a repository's pull request that adds
+/// it with no exemption: the rules here admit it, and it reaches the shape
+/// check unexempted. The stand-in judges nothing of its jobs; the shape
+/// check lint/shape-check.yml names does.
+#[test]
+fn plain_ci_example() {
+    let example = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../.github/workflows/example-plain-ci.yml"
+    ))
+    .unwrap();
+    let (code, out) = pull_request(
+        "plain-ci",
+        &[(".github/workflows/example-plain-ci.yml", Some(&example))],
+    );
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("example-plain-ci.yml\n"), "{out}");
+    assert!(out.contains("exemptions: \n"), "{out}");
+}
+
 #[test]
 fn forbidden_trigger() {
     let (code, out) = pull_request("trigger", &[(CI, Some("trigger.yml"))]);

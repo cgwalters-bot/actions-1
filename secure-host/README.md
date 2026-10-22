@@ -76,6 +76,11 @@ those to every step.
 [The CI workflow](../.github/workflows/secure-host.yml) runs this example,
 the inputs, and the world-write policy against the pinned image on
 `ubuntu-26.04`, with a positive control before the action for each claim.
+[example-plain-ci](../.github/workflows/example-plain-ci.yml) is the same
+example as a caller writes it, with the action named by commit and the
+checks as `just` recipes. It names the action through agentic-job's
+`secure-host` forwarder, with no inputs and so without the write policy,
+since that is what workflows-check's shape check admits for now.
 
 ## Caveats of running everything as the runner's user
 
