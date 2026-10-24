@@ -74,9 +74,13 @@ test('the configuration repository defaults to deployment.json\'s, after the inp
   assert.match(action, /\n {2}agent-config-repo:\n.*\n {4}value: \$\{\{ steps\.read\.outputs\.agent-config-repo \}\}\n/);
 });
 
-test('opencode with no configuration repository fails in the target job', async () => {
-  await assert.rejects(target({ AGENT_CONFIG_REPO: '' }), /No agent configuration repository/);
-  const outputs = await target({ AGENT_CONFIG_REPO: '', AGENT: 'claude' });
+test('opencode or claude with no configuration repository fails in the target job', async () => {
+  for (const agent of ['opencode', 'claude']) {
+    await assert.rejects(target({ AGENT_CONFIG_REPO: '', AGENT: agent }), /No agent configuration repository/, agent);
+    const outputs = await target({ AGENT: agent });
+    assert.notEqual(outputs['agent-config-repo'], '', agent);
+  }
+  const outputs = await target({ AGENT_CONFIG_REPO: '', AGENT: 'vibe', AGENT_MODEL: 'devstral-small-latest' });
   assert.equal(outputs['agent-config-repo'], '');
 });
 
@@ -174,7 +178,7 @@ test('skills are off by default and the task keeps its one-line contract', async
   assert.match(outputs.task, /^Profile: implement\. Implement proposes one draft pull request\./);
 });
 
-test('skills turn on only for implement with claude or opencode', async () => {
+test('skills turn on only for implement or fix with claude or opencode', async () => {
   for (const agent of ['claude', 'opencode']) {
     const outputs = await target({ SKILLS: 'true', AGENT: agent });
     assert.equal(outputs.skills, 'true');
@@ -187,7 +191,11 @@ test('skills turn on only for implement with claude or opencode', async () => {
     assert.equal(outputs.skills, 'false');
     assert.doesNotMatch(outputs.task, /skill/);
   }
-  for (const [profile, pull] of [['triage', false], ['research', false], ['review', true], ['fix', true]]) {
+  // Fix installs them for the commit-messages skill but names no procedure.
+  const fix = await target({ SKILLS: 'true', PROFILE: 'fix' }, { pull: true });
+  assert.equal(fix.skills, 'true');
+  assert.doesNotMatch(fix.task, /skill/);
+  for (const [profile, pull] of [['triage', false], ['research', false], ['review', true]]) {
     const outputs = await target({ SKILLS: 'true', PROFILE: profile }, { pull });
     assert.equal(outputs.skills, 'false', profile);
     assert.doesNotMatch(outputs.task, /skill/, profile);

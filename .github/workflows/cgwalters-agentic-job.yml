@@ -73,7 +73,7 @@ on:
         type: string
         default: ""
       skills:
-        description: "For implement with claude or opencode: install agentic-job's skills (its docs/skills.md) and have the agent follow its implement skill"
+        description: "For implement or fix with claude or opencode: install agentic-job's skills and the configuration repository's (agentic-job's docs/skills.md); implement follows its implement skill"
         type: boolean
         default: false
       apply-environment:
@@ -118,7 +118,7 @@ on:
         type: string
         default: ""
       agent-config-repo:
-        description: "Where opencode's configuration is; empty: the variable AGENT_CONFIG_REPO, else ours"
+        description: "Where opencode's or claude's configuration and skills are; empty: the variable AGENT_CONFIG_REPO, else ours"
         type: string
         default: ""
       agent-config-path:
@@ -328,10 +328,12 @@ jobs:
             core.setOutput('inference-url', real ? url : '');
             core.setOutput('inference-audience', oidc ? audience : '');
             // No longer a literal here: a renamed step or output must fail
-            // now, not run opencode with no configuration.
-            if (agent === 'opencode' && !process.env.AGENT_CONFIG_REPO) throw new Error('No agent configuration repository: deployment.json gave none');
-            core.setOutput('agent-config-repo', agent === 'opencode' ? process.env.AGENT_CONFIG_REPO : '');
-            core.setOutput('agent-config-path', agent === 'opencode' ? process.env.AGENT_CONFIG_PATH : '');
+            // now, not run opencode with no configuration. Claude takes the
+            // same repository's CLAUDE.md and, with skills, its skills/.
+            const configured = ['opencode', 'claude'].includes(agent);
+            if (configured && !process.env.AGENT_CONFIG_REPO) throw new Error('No agent configuration repository: deployment.json gave none');
+            core.setOutput('agent-config-repo', configured ? process.env.AGENT_CONFIG_REPO : '');
+            core.setOutput('agent-config-path', configured ? process.env.AGENT_CONFIG_PATH : '');
             const [owner, name] = repo.split('/');
             const { data } = await github.rest.issues.get({ owner, repo: name, issue_number: Number(item) });
             const onPull = ['review', 'fix'].includes(profile);
@@ -339,10 +341,11 @@ jobs:
               throw new Error(onPull ? `${profile} requires a pull request` : 'This profile requires an issue, not a pull request');
             }
             // As agentic-job's dispatch: the implement procedure is a skill
-            // the run installs, so the task only names it. agentic-job
-            // refuses skills for vibe and fake, and only implement has a
-            // procedure, so the input is ignored for anything else.
-            const skills = process.env.SKILLS === 'true' && profile === 'implement' && ['claude', 'opencode'].includes(agent);
+            // the run installs, so the task only names it. Fix has no
+            // procedure of its own but writes commits too, so it gets the
+            // configuration repository's skills (commit-messages). agentic-job
+            // refuses skills for vibe and fake.
+            const skills = process.env.SKILLS === 'true' && ['implement', 'fix'].includes(profile) && ['claude', 'opencode'].includes(agent);
             core.setOutput('skills', String(skills));
             const instructions = profile === 'review'
               ? 'Review the pinned head supplied by the runner. Return one add_comment with VERDICT: APPROVE, CHANGES or REJECT on its first line and REASON: on its second line (at most 200 characters), or noop. A verdict is not merge authority.'

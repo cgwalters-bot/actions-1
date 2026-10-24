@@ -12,7 +12,7 @@ repository's file.
 
 | Key | Output | Wrapper input, else variable |
 | --- | --- | --- |
-| `agent-config-repo` | opencode's configuration repository, `OWNER/NAME` | `agent-config-repo`, else `AGENT_CONFIG_REPO` |
+| `agent-config-repo` | the agent configuration repository (opencode's and claude's), `OWNER/NAME` | `agent-config-repo`, else `AGENT_CONFIG_REPO` |
 
 Every key is required and no other is accepted, so a misspelt key fails
 the run instead of leaving the setting at this deployment's value.
