@@ -7,6 +7,7 @@
 "cgwalters-review.yml" = "Reusable wrapper of agentic-job's review workflows, which run the agent in their own sandbox."
 "lock-new-items.yml" = "Reusable workflow whose one step locks the opened item by API, reading and running nothing of it."
 "lock.yml" = "This repository's caller of lock-new-items.yml, run from the base branch."
+"org-review.yml" = "Caller of cgwalters-review.yml at a pinned commit, required by an organization ruleset; runs nothing of the head."
 "review.yml" = "This repository's caller of cgwalters-review.yml, run from the base branch."
 "secure-host.yml" = "This repository's CI for the secure-host action: runs it by local path (./secure-host) on hosted runners, with a read-only token."
 "workflows-check.yml" = "The required check itself: reads a pull request's files as Git blobs, with a read-only token."

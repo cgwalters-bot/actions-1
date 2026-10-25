@@ -1,0 +1,38 @@
+# The review an organization ruleset requires of every pull request
+# (#129), in place of a review.yml in each repository. The ruleset targets
+# only the repositories whose custom property org-review is true: set it on
+# one once it has workflow/review.toml and workflow/review.md and has
+# dropped its own review.yml, whose run would share the wrapper's
+# concurrency group and cancel this one. GitHub runs it from
+# this repository at the ref the ruleset names
+# (.github/rulesets/org-review.json), so a pull request in the target
+# repository cannot change it. It passes when the wrapper skips the review
+# (a draft, an author not admitted), whatever the verdict. Its one job is review.yml's, calling
+# cgwalters-review.yml at the commit tracker's review.yml pins rather than
+# locally: that commit is the job_workflow_ref the tailnet and inference
+# broker admit, so move this pin and that admission together.
+# The called workflow reads its bounds (workflow/review.toml) and task
+# (workflow/review.md) from the target repository's base branch, and its
+# settings from variables, organization ones unless the repository sets
+# its own. A repository without the bounds fails policy: at this pin the
+# paths are fixed and read only from the target's checkout, so a default
+# task here needs a review-task input on the wrapper first.
+# A ruleset workflow runs only on opened, synchronize and reopened, so
+# `/review` comments still need a trigger in the repository.
+name: org-review
+on:
+  # Nothing here checks out or runs the head (org-review.test.mjs).
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, synchronize, reopened]
+permissions: {}
+jobs:
+  review:
+    uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@d8e22f71b2abbe5f41306a0c7ef1b6c3d2829cac # main, agentic-job v0.6.2 (actions#67)
+    # The union of the wrapper's job grants; no secret is passed.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+      actions: read
+      id-token: write
+      statuses: write
