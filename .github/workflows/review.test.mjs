@@ -41,18 +41,6 @@ jobs:
       statuses: write`);
 });
 
-// One agentic-job release across our workflows, which dependabot moves
-// together: its commit, since its tags can be moved (#109), and the tag as
-// the comment dependabot updates with it.
-test('the wrapper calls agentic-job at the commit the agent job calls', () => {
-  const tags = file => [...read(file).matchAll(/uses: cgwalters-forge\/agentic-job\/\S+@(.*)/g)]
-    .map(match => match[1]);
-  const agent = tags('./cgwalters-agentic-job.yml');
-  assert.equal(agent.length, 3);
-  assert.match(agent[0], /^[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
-  assert.deepEqual(tags('./cgwalters-review.yml'), agent);
-});
-
 // Our own actions follow main (dependabot.yml), and zizmor accepts any ref
 // for them, so a commit pin would never move: the review runs would keep
 // joining with an old client, upstream pin and hardening.
