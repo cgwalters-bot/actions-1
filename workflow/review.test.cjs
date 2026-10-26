@@ -98,6 +98,8 @@ test('both composed jobs retain the release pins and check the proxy between joi
     const source = readFileSync(`.github/workflows/${file}`, 'utf8');
     const calls = [...source.matchAll(/uses: (\S+\/(?:policy|check|apply)\.yml)@(.*)/g)];
     assert.equal(calls.length, 3, file);
+    assert.equal(source.split('uses: cgwalters-forge/agentic-job/').length - 1, 3, file);
+    for (const [, path] of calls) assert.match(path, /^cgwalters-forge\/agentic-job\//, file);
     for (const [, , ref] of calls) assert.equal(ref, PIN, file);
     const agent = source.split('\n  agent:\n')[1].split(/\n  [a-z]+:\n/)[0];
     const check = 'run: agentic-job secure-host inference .agentic-job/config.toml';

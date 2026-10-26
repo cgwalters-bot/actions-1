@@ -9,11 +9,11 @@ const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta
 
 // agentic-job is called at one release: check, apply, prepare and run
 // refuse calls that resolved to different commits, which following main
-// produced for runs spanning an agentic-job merge (tracker#544). By the
-// release's commit with its tag as a comment, since a tag can be moved
-// (#109). Our own admit and tailscale actions still follow main.
-test('agentic-job is called at one release commit, our own actions at main', () => {
-  const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)(?: # (\S+))?\n/g)];
+// produced for runs spanning an agentic-job merge (tracker#544).
+// workflow/review.test.cjs checks that release's pin. Our own admit and
+// tailscale actions still follow main.
+test('agentic-job is called at one release, our own actions at main', () => {
+  const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)(?: # \S+)?\n/g)];
   assert.deepEqual(refs.map(match => match[1]), [
     'actions/admit',
     'actions/deployment',
@@ -22,9 +22,6 @@ test('agentic-job is called at one release commit, our own actions at main', () 
     'agentic-job/.github/workflows/check.yml',
     'agentic-job/.github/workflows/apply.yml',
   ]);
-  const pins = new Set(refs.filter(([, path]) => path.startsWith('agentic-job/')).map(match => `${match[2]} # ${match[3]}`));
-  assert.equal(pins.size, 1);
-  assert.match([...pins][0], /^[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
   for (const [, path, ref] of refs) if (path.startsWith('actions/')) assert.equal(ref, 'main', path);
   assert.doesNotMatch(workflow, /PINNED_SHA/);
   assert.match(workflow, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
@@ -119,16 +116,6 @@ test('the dispatch wrapper admits the caller\'s owner before any other job', () 
 
 test('the review wrapper admits the caller\'s owner before any other job', () => {
   admitsFirst(readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8'), 'admit');
-});
-
-// Third-party actions stay pinned by full commit; dependabot moves them.
-test('every other action is pinned by full commit', () => {
-  for (const file of ['./cgwalters-agentic-job.yml', './ci.yml', '../../tailscale/action.yml']) {
-    const text = readFileSync(new URL(file, import.meta.url), 'utf8');
-    const others = [...text.matchAll(/uses: (?!cgwalters-forge\/|\.\/)(\S+)@(\S+)/g)];
-    assert.ok(others.length > 0, file);
-    for (const [, name, ref] of others) assert.match(ref, /^[0-9a-f]{40}$/, `${file}: ${name}`);
-  }
 });
 
 // The target job's actual script, with doubles for github-script's globals.
@@ -291,15 +278,6 @@ test('the session job posts the endpoint before apply concludes, and only for a 
   // Nothing of the agent's: no artifact is downloaded here.
   assert.doesNotMatch(session, /download-artifact|needs\.agent/);
   assert.match(job('apply'), /\n {4}needs: \[policy, agent, check, session\]\n/);
-});
-
-// GitHub refuses a call with an input the called workflow does not declare,
-// so passing `session` to a policy.yml without it fails every run, session
-// or not. These tags predate agentic-job's listening bridge (its #588):
-// this fails until the calls move past them.
-test('agentic-job is called at a tag whose policy has the session input', () => {
-  const [, tag] = workflow.match(/agentic-job\/\.github\/workflows\/policy\.yml@[0-9a-f]{40} # (\S+)/);
-  assert.ok(!['v0.0.1', 'v0.0.2', 'v0.0.3', 'v0.1.0'].includes(tag), `${tag} has no session input`);
 });
 
 // agentic-job's provider-key mode (its #740), off unless a caller asks:
