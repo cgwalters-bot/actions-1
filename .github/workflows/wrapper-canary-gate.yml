@@ -1,0 +1,63 @@
+# The `wrapper-canary` commit status for every pull request to main, so
+# that the ruleset can require it (README.md, "Wrapper canary"): success
+# when it changes no agent wrapper, else pending until wrapper-canary.yml
+# runs for its head. A file of its own: GitHub resolves every reusable
+# workflow a file calls when a run starts, so in wrapper-canary.yml this
+# would fail whenever the branch wrapper-canary does not hold a wrapper
+# that file's call accepts.
+name: wrapper-canary-gate
+
+on:
+  # Base-branch code that reads the pull request's file list by API and
+  # sets a status; nothing of the head is checked out or run. Not
+  # reopened, which would undo a canary's status on the same head; edited
+  # only for a new base, against which the files differ.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, synchronize, edited]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  gate:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
+    # One at a time per pull request, so that an older event's run cannot
+    # overwrite a newer one's status on the same head (a new base, say).
+    concurrency:
+      group: wrapper-canary-gate-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/workflows/wrapper-canary.cjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PULL: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const { STATUS_CONTEXT, needsCanary } = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/wrapper-canary.cjs`);
+            const { PULL, SHA } = process.env;
+            const pull_number = Number(PULL);
+            // The API lists the files of the pull request's current head, so
+            // a list read while it was not this event's head says nothing
+            // of SHA: then the canary is needed.
+            const { data: before } = await github.rest.pulls.get({ ...context.repo, pull_number });
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number, per_page: 100 });
+            const { data: after } = await github.rest.pulls.get({ ...context.repo, pull_number });
+            const changed = before.head.sha !== SHA || after.head.sha !== SHA || needsCanary(after, files);
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: SHA, context: STATUS_CONTEXT,
+              state: changed ? 'pending' : 'success',
+              description: changed ? 'May change an agent wrapper: run the wrapper canary' : 'Changes no agent wrapper',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}#wrapper-canary`,
+            });
