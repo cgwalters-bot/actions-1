@@ -1,0 +1,201 @@
+# The wrapper canary (README.md, "Wrapper canary"): before a pull request
+# that changes cgwalters-agentic-job.yml or cgwalters-review.yml merges, one
+# real dispatch and one real review run through its copies of them, in
+# cgwalters-forge-stage/board-test, and set the `wrapper-canary` commit
+# status that wrapper-canary-gate.yml left pending.
+#
+# The wrappers run with the inference identity and the bot's token, so the
+# pull request's head is never run on its own say. A maintainer reads it,
+# pushes the commit they read to the branch `wrapper-canary`, fork heads
+# included, and dispatches this file on main with that commit; it calls
+# the wrappers at that branch. What decides the status is therefore main's
+# copy of this file and never the pull request's, which can change the
+# wrappers but not this check.
+name: wrapper-canary
+run-name: wrapper canary for #${{ inputs.pull }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull:
+        description: The pull request to main
+        type: string
+        required: true
+      sha:
+        description: Its head commit, which you read and pushed to the branch wrapper-canary
+        type: string
+        required: true
+
+permissions: {}
+
+# One canary at a time: they share the branch and the scratch items.
+concurrency:
+  group: wrapper-canary
+  cancel-in-progress: false
+
+env:
+  HELPER: .github/workflows/wrapper-canary.cjs
+
+jobs:
+  # The commit read must be the pull request's head and the branch's, and
+  # the canary main's. The branch is checked again where it counts, in the
+  # runs: this check only fails early.
+  head:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+      issue: ${{ steps.head.outputs.issue }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: head
+        env:
+          PULL: ${{ inputs.pull }}
+          SHA: ${{ inputs.sha }}
+          ISSUE: ${{ vars.WRAPPER_CANARY_ISSUE }}
+          SCRATCH_PULL: ${{ vars.WRAPPER_CANARY_PULL }}
+        with:
+          script: |
+            const { PULL, SHA, ISSUE, SCRATCH_PULL } = process.env;
+            const main = context.payload.repository.default_branch;
+            if (context.ref !== `refs/heads/${main}`) {
+              throw new Error('Dispatch the canary on the default branch: the status is its copy\'s to decide');
+            }
+            for (const [name, value] of [['pull', PULL], ['WRAPPER_CANARY_ISSUE', ISSUE], ['WRAPPER_CANARY_PULL', SCRATCH_PULL]]) {
+              if (!/^[1-9][0-9]{0,8}$/.test(value ?? '')) throw new Error(`${name} must be an item number, not '${value}'`);
+            }
+            if (!/^[0-9a-f]{40}$/.test(SHA)) throw new Error(`sha must be a full commit ID, not '${SHA}'`);
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: Number(PULL) });
+            if (pull.state !== 'open' || pull.base.ref !== main) throw new Error(`#${PULL} is not an open pull request to ${main}`);
+            if (pull.head.sha !== SHA) throw new Error(`#${PULL}'s head is ${pull.head.sha}, not the ${SHA} you read`);
+            const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/wrapper-canary' });
+            if (ref.object.sha !== SHA) throw new Error(`The branch wrapper-canary is at ${ref.object.sha}, not ${SHA}: push it there first`);
+            core.setOutput('sha', SHA);
+            core.setOutput('issue', ISSUE);
+
+  # A real implement run through the head's dispatch wrapper, told to hand
+  # back a noop, so that it leaves only its status comment on the issue.
+  # The wrapper is resolved when this run starts; conclude checks that it
+  # was the head's commit.
+  dispatch:
+    needs: head
+    uses: cgwalters-forge/actions/.github/workflows/cgwalters-agentic-job.yml@wrapper-canary
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: read
+      id-token: write
+    with:
+      kind: implement
+      repo: cgwalters-forge-stage/board-test
+      item: ${{ needs.head.outputs.issue }}
+      task: "This is the wrapper canary, which checks only that an agent session starts and hands back a result. Change nothing and hand back one noop saying 'wrapper canary'."
+      allow: .github/agentic-job/canary.toml
+      config: .agentic-job-source/.github/agentic-job/hosted.toml
+      apply-environment: agent-apply
+      budget: "100"
+      max-requests: "30"
+    secrets:
+      SAFE_OUTPUTS_PAT: ${{ secrets.CGWALTERS_BOT_PAT }}
+
+  # A real review through the head's review wrapper: reopening the scratch
+  # pull request starts board-test's caller of it at the branch, and this
+  # job waits for that run.
+  review:
+    needs: head
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: ${{ env.HELPER }}
+          sparse-checkout-cone-mode: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SHA: ${{ needs.head.outputs.sha }}
+          # The dispatch job's repository too.
+          SCRATCH_REPO: cgwalters-forge-stage/board-test
+          SCRATCH_PULL: ${{ vars.WRAPPER_CANARY_PULL }}
+          REVIEW_WORKFLOW: wrapper-canary-review.yml
+          # The wait, within the job's timeout.
+          WAIT_MINUTES: "12"
+        with:
+          # The bot's token: the job token cannot write to board-test, and
+          # a reopen by it would start no workflow anyway.
+          github-token: ${{ secrets.CGWALTERS_BOT_PAT }}
+          script: |
+            const { problems } = require(`${process.env.GITHUB_WORKSPACE}/${process.env.HELPER}`);
+            const { SHA, SCRATCH_PULL, REVIEW_WORKFLOW, SCRATCH_REPO } = process.env;
+            const [owner, repo] = SCRATCH_REPO.split('/');
+            const pull_number = Number(SCRATCH_PULL);
+            const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number });
+            if (pull.state === 'open') await github.rest.pulls.update({ owner, repo, pull_number, state: 'closed' });
+            const { data: reopened } = await github.rest.pulls.update({ owner, repo, pull_number, state: 'open' });
+            const deadline = Date.now() + Number(process.env.WAIT_MINUTES) * 60_000;
+            const sleep = () => new Promise(resolve => setTimeout(resolve, 20_000));
+            // Any reopen in board-test starts the caller, so find the run of
+            // the scratch pull request at its head, then follow that run.
+            const ours = each => each.pull_requests.some(other => other.number === pull_number && other.head.sha === reopened.head.sha);
+            let run;
+            while (run?.status !== 'completed') {
+              if (Date.now() > deadline) throw new Error(`No completed ${REVIEW_WORKFLOW} run for #${pull_number} in ${SCRATCH_REPO} since ${reopened.updated_at}`);
+              await sleep();
+              if (run) {
+                ({ data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: run.id }));
+              } else {
+                const { data } = await github.rest.actions.listWorkflowRuns({
+                  owner, repo, workflow_id: REVIEW_WORKFLOW, event: 'pull_request_target', created: `>=${reopened.updated_at}`, per_page: 100,
+                });
+                run = data.workflow_runs.find(ours);
+              }
+              if (run) core.info(`${run.html_url}: ${run.status}`);
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { owner, repo, run_id: run.id, filter: 'latest', per_page: 100 });
+            const found = problems({ run, jobs, workflow: `${context.repo.owner}/${context.repo.repo}/.github/workflows/cgwalters-review.yml`, job: 'review', sha: SHA });
+            if (run.conclusion !== 'success') found.push(`run ${run.id}: ${run.conclusion}`);
+            if (found.length) core.setFailed(found.join('\n'));
+
+  # The status: success only when both runs used the head's wrappers and
+  # each handed back a result that check accepted.
+  conclude:
+    needs: [head, dispatch, review]
+    if: ${{ !cancelled() && needs.head.result == 'success' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: ${{ env.HELPER }}
+          sparse-checkout-cone-mode: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SHA: ${{ needs.head.outputs.sha }}
+          DISPATCH: ${{ needs.dispatch.result }}
+          REVIEW: ${{ needs.review.result }}
+        with:
+          script: |
+            const { STATUS_CONTEXT, problems } = require(`${process.env.GITHUB_WORKSPACE}/${process.env.HELPER}`);
+            const { SHA, DISPATCH, REVIEW } = process.env;
+            const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.runId });
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...context.repo, run_id: context.runId, filter: 'latest', per_page: 100 });
+            const found = problems({ run, jobs, workflow: `${context.repo.owner}/${context.repo.repo}/.github/workflows/cgwalters-agentic-job.yml`, job: 'dispatch', sha: SHA });
+            if (DISPATCH !== 'success') found.push(`the dispatch call: ${DISPATCH}`);
+            if (REVIEW !== 'success') found.push(`the review job: ${REVIEW}`);
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: SHA, context: STATUS_CONTEXT, state: found.length ? 'failure' : 'success',
+              description: found.length ? 'The wrapper canary failed' : 'A dispatch and a review ran through these wrappers',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+            if (found.length) core.setFailed(found.join('\n'));

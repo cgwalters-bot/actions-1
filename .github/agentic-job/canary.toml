@@ -1,0 +1,14 @@
+# Bounds of the wrapper canary's dispatch (wrapper-canary.yml): an
+# implement run on the scratch issue in board-test, which hands back a noop.
+hosts = ["github.com"]
+repos = ["cgwalters-forge-stage/board-test"]
+bases = ["main"]
+max_outputs = 3
+max_patch_bytes = 1024
+max_patch_files = 1
+
+[outputs]
+create_pull_request = { max = 1 }
+noop = { max = 1 }
+missing_tool = { max = 1 }
+missing_data = { max = 1 }

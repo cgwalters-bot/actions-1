@@ -9,4 +9,6 @@
 "lock.yml" = "This repository's caller of lock-new-items.yml, run from the base branch."
 "review.yml" = "This repository's caller of cgwalters-review.yml, run from the base branch."
 "secure-host.yml" = "This repository's CI for the secure-host action: runs it by local path (./secure-host) on hosted runners, with a read-only token."
+"wrapper-canary.yml" = "The wrapper canary: on a maintainer's dispatch on main, calls the reusable wrappers at the branch they pushed a pull request's head to, and sets its status."
+"wrapper-canary-gate.yml" = "Sets the wrapper canary's status from a pull request's file list, read by API from the base branch's code; nothing of the head is checked out or run."
 "workflows-check.yml" = "The required check itself: reads a pull request's files as Git blobs, with a read-only token."

@@ -169,6 +169,76 @@ variables listed above. Dependabot's pull requests are reviewed only with
 its ID in `REVIEW_BOT_IDS`. Without `.github/agentic-job/merge.toml` the
 reviewer is told a person approves after it.
 
+## Wrapper canary
+
+A pull request that changes either wrapper above is reviewed by the base
+branch's copy (the review runs `pull_request_target`), and nothing else
+runs an agent through it, so before it merges
+[wrapper-canary](.github/workflows/wrapper-canary.yml) runs one real
+dispatch and one real review through its copies, in
+cgwalters-forge-stage/board-test. The ruleset on `main` is to require the
+`wrapper-canary` commit status, which
+[wrapper-canary-gate](.github/workflows/wrapper-canary-gate.yml) sets on
+every pull request to `main`: success when it changes neither
+`cgwalters-agentic-job.yml` nor `cgwalters-review.yml`, pending until a
+canary run otherwise, and also when it cannot read every file of that
+head (the API lists at most 3,000, and a push can move it). A head brought up to date with `main` is a new
+commit, so it needs a new canary run; a pull request with no status
+gets one with its next push. The wrappers call `admit`,
+`deployment` and `tailscale` at main, so a pull request's copies of those
+are not what runs before it merges, and changing them does not ask for a
+canary.
+
+The run has the inference identity and the bot's token, so the head is
+never run on its own say. A maintainer reads the pull request, pushes the
+commit they read to the branch `wrapper-canary` (which works for a fork's
+pull request too), and dispatches the canary on main with it:
+
+```sh
+SHA=...  # the commit you read, never one fetched after reading
+git fetch origin "pull/$PR/head" && test "$(git rev-parse FETCH_HEAD)" = "$SHA"
+git push --force origin "$SHA:refs/heads/wrapper-canary"
+gh workflow run wrapper-canary.yml --ref main -f pull="$PR" -f sha="$SHA"
+```
+
+The push runs that commit's own `push` workflows with this repository's
+secrets, so read every workflow change in it, not only the wrappers'. The
+canary refuses to start unless the pull request's head, the branch and
+`sha` are the same commit. The canary is main's copy, so a pull request
+cannot change what decides its status; nor what main's call of the
+dispatch wrapper passes and grants, so a pull request that drops an input
+that call passes, or gives a job of the wrapper a permission it does not
+grant, cannot pass it: change main's call first, in a pull request of its
+own.
+It calls the dispatch wrapper at `wrapper-canary`, for an
+implement run on the scratch issue `WRAPPER_CANARY_ISSUE` within
+[canary.toml](.github/agentic-job/canary.toml), told to hand back a noop;
+and it reopens the scratch pull request `WRAPPER_CANARY_PULL` with the
+bot's token, which starts board-test's `wrapper-canary-review.yml`, a caller
+of the review wrapper at `wrapper-canary`. It passes only when each run
+called its wrapper at the pull request's head commit (GitHub resolves the
+branch when a run starts, and the run records the commit) and succeeded,
+its `agent` and `check` jobs included: an agent session started and
+handed back a result that check accepted. A healthy run takes a few minutes. The
+review gets 12 before the canary fails; the dispatch has only the
+wrapper's own limits, so cancel a run that hangs.
+
+Its settings are outside this repository, and in this order, since the
+gate leaves wrapper pull requests pending from its merge: board-test's
+caller, `.github/workflows/wrapper-canary-review.yml` there, which on
+`pull_request_target` `reopened` of the scratch pull request calls the
+review wrapper at `@wrapper-canary` from a job keyed `review` with the
+six grants of [this repository's caller](.github/workflows/review.yml), the tailnet federation and
+inference broker admitting both wrappers' `job_workflow_ref` at
+`refs/heads/wrapper-canary` (recorded in the private wiki), the branch
+itself at `main` with a ruleset that lets only maintainers update it, as
+that admission makes it as trusted as `main`; then the variables
+`WRAPPER_CANARY_ISSUE` and `WRAPPER_CANARY_PULL` here, naming a scratch
+issue and a non-draft scratch pull request in board-test opened by a
+collaborator from a branch there (a fork's would leave the review run
+unmatched to it), the `agent-apply` environment and `CGWALTERS_BOT_PAT` as
+tracker's dispatch has them; and last the ruleset's required status.
+
 ## Lock new items
 
 [lock-new-items](.github/workflows/lock-new-items.yml) locks each newly
