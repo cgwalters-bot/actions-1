@@ -1,6 +1,5 @@
-# Composed from agentic-job v0.6.4's review.yml and agent.yml: keep event
-# policy and publication semantics there in sync when updating the three
-# pinned calls.
+# Composed from agentic-job v0.6.2's review.yml: keep event policy and
+# publication semantics there in sync when updating the three pinned calls.
 # They name the release's commit, not its tag, for the reason
 # cgwalters-agentic-job.yml's header gives.
 # No dispatcher inputs: identity/configuration comes from repository variables.
@@ -39,7 +38,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     permissions:
       contents: read
     with:
@@ -169,21 +168,15 @@ jobs:
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability
         run: agentic-job secure-host inference .agentic-job/config.toml
-      # As upstream's agent.yml with `agent-user: sandbox`: the policy
-      # job's host configuration with `setup.script`, which the forwarder's
-      # image runs as the sandbox user, the agent below.
-      - name: The host's configuration
-        run: agentic-job config --host --from .agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
-      - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
+      # internal, as upstream's review.yml: the public action now refuses `binary`.
+      - uses: ./.agentic-job-source/secure-host/internal # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
-          config: ${{ runner.temp }}/agentic-job-host.toml
-      # The sandbox user, with no runner-home: `run` refuses the runner's
-      # own user as the agent of a job with `id-token: write`.
+          binary: /usr/local/bin/agentic-job
+          config: .agentic-job/config.toml
       - id: run
         timeout-minutes: 340
         uses: ./.agentic-job-source/run # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
-          agent-user: sandbox
           github-token: ${{ github.token }}
 
   check:
@@ -195,7 +188,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -259,7 +252,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:

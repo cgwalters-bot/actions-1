@@ -40,16 +40,12 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
-Both wrappers pin agentic-job v0.6.4, by its commit, and check inference
-reachability after the tailnet join, before securing the host. They secure
-it with that tag's `secure-host`, which forwards to this repository's
-[secure-host](secure-host/README.md) image action, given the host
-configuration `agentic-job config --host` writes, `setup.script` included,
-and run the agent as the sandbox user the image makes, as agentic-job's
-agent.yml does with `agent-user: sandbox`. That user, not the runner's,
-because the job holds `id-token: write`; v0.6.4's `run` sets up the
-scripted `fake` agent only for the runner's user, so the dispatch wrapper
-no longer runs it. Since v0.6.0 the agent's home no longer copies the
+Both wrappers pin agentic-job v0.6.2, by its commit, and check inference
+reachability after the tailnet join, before securing the host. They still compose that tag's
+`secure-host/internal` action, which runs `sandbox setup` on the host, not
+this repository's [secure-host](secure-host/README.md) image action that the
+tag's public `secure-host` now forwards to, so its egress
+proxy stays a host unit. Since v0.6.0 the agent's home no longer copies the
 runner image's `/etc/skel`, toolchains and dotfiles included. The pinned `run` action publishes
 the session endpoint itself; no extra endpoint step is needed here.
 Mid-run steering stays off unless the caller's runner configuration enables

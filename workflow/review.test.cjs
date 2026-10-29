@@ -6,7 +6,7 @@ const { runInNewContext } = require('node:vm');
 // The agentic-job release both wrappers call, by commit with its tag as a
 // comment (a tag can be moved, #109): a bump changes it here, in the six
 // calls, the review wrapper's header and the README.
-const PIN = '732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4';
+const PIN = '258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2';
 
 const workflow = readFileSync('.github/workflows/cgwalters-review.yml', 'utf8');
 const jobs = Object.fromEntries([...workflow.matchAll(/^  ([a-z]+):\n([\s\S]*?)(?=^  [a-z]+:\n|$(?![\s\S]))/gm)]
@@ -80,7 +80,7 @@ test('trusted source only, one network join before dropping root, no post-agent 
     "The policy call's source repository",
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
     './.agentic-job-source/prepare', 'Join the tailnet', 'Check inference proxy reachability',
-    "The host's configuration", './.agentic-job-source/secure-host', 'run',
+    './.agentic-job-source/secure-host/internal', 'run',
   ]);
   assert.match(jobs.agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);
   assert.doesNotMatch(jobs.agent, /(?:pull-requests|contents|issues): write|secrets\./);
@@ -105,30 +105,23 @@ test('both composed jobs retain the release pins and check the proxy between joi
     const check = 'run: agentic-job secure-host inference .agentic-job/config.toml';
     assert.equal(agent.split(check).length - 1, 1, file);
     assert.ok(agent.indexOf('name: Join the tailnet') < agent.indexOf(check), file);
-    const secureHost = 'uses: ./.agentic-job-source/secure-host';
+    const secureHost = 'uses: ./.agentic-job-source/secure-host/internal';
     assert.ok(agent.indexOf(check) < agent.indexOf(secureHost), file);
     assert.ok(agent.indexOf(secureHost) < agent.indexOf('uses: ./.agentic-job-source/run'), file);
     assert.doesNotMatch(agent, /steps\.secure-host\.outputs\.session-endpoint/);
   }
 });
 
-// Since v0.6.4 secure-host/internal is gone: the forwarder takes the host
-// configuration `agentic-job config --host` writes, with `setup.script`,
-// and the agent is the sandbox user, as agent.yml's `agent-user: sandbox`;
-// `run` refuses the runner's user as the agent of a job with `id-token`.
-// Check needs the proposals upload's digest (its grant: review.test.mjs).
-test('both agent jobs run the agent as the sandbox user and hand the proposals digest to check', () => {
+// Since v0.6.2 the public secure-host action forwards to the image action
+// and fails on `binary`; internal keeps the second user `run` expects. Its
+// check needs the proposals upload's digest (its grant: review.test.mjs).
+test('both agent jobs use secure-host/internal and hand the proposals digest to check', () => {
   for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
     const source = readFileSync(`.github/workflows/${file}`, 'utf8');
     const job = name => source.split(`\n  ${name}:\n`)[1].split(/\n  [a-z]+:\n/)[0];
     const agent = job('agent');
-    const host = '"$RUNNER_TEMP/agentic-job-host.toml"';
-    assert.ok(agent.includes(`run: agentic-job config --host --from .agentic-job/config.toml > ${host}\n`), file);
     assert.deepEqual([...agent.matchAll(/uses: (\.\/\.agentic-job-source\/secure-host\S*)/g)].map(m => m[1]),
-      ['./.agentic-job-source/secure-host'], file);
-    assert.match(agent, /\n {10}config: \$\{\{ runner\.temp \}\}\/agentic-job-host\.toml\n/, file);
-    assert.match(agent, /\n {10}agent-user: sandbox\n/, file);
-    assert.doesNotMatch(agent, /\n {10}runner-home:|--no-script/, file);
+      ['./.agentic-job-source/secure-host/internal'], file);
     assert.match(agent, /\n {6}safe-outputs-artifact-digest: \$\{\{ steps\.run\.outputs\.safe-outputs-artifact-digest \}\}\n/, file);
     assert.match(job('check'), /\n {6}safe-outputs-artifact-digest: \$\{\{ needs\.agent\.outputs\.safe-outputs-artifact-digest \}\}/, file);
   }
