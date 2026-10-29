@@ -290,7 +290,7 @@ test('provider-key mode passes through with broker defaults, the key to run alon
   assert.match(job('policy'), /\n {6}inference-register: \$\{\{ inputs\.inference-register \}\}\n {6}inference-provider: \$\{\{ inputs\.inference-provider \}\}\n/);
   const uses = [...workflow.matchAll(/secrets\.INFERENCE_API_KEY/g)];
   assert.equal(uses.length, 1);
-  assert.match(job('agent'), /\n {8}uses: \.\/\.agentic-job-source\/run\n {8}with:\n {10}github-token: \$\{\{ github\.token \}\}\n {10}inference-api-key: \$\{\{ secrets\.INFERENCE_API_KEY \}\}\n/);
+  assert.match(job('agent'), /\n {8}uses: \.\/\.agentic-job-source\/run\n {8}with:\n {10}agent-user: sandbox\n {10}github-token: \$\{\{ github\.token \}\}\n {10}inference-api-key: \$\{\{ secrets\.INFERENCE_API_KEY \}\}\n/);
 });
 
 test('the broker audience goes to policy only with the broker registration', async () => {

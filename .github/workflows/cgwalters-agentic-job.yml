@@ -364,7 +364,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -438,7 +438,7 @@ jobs:
     # Read only, and nothing more: `run` hands this job's token to the agent
     # for GitHub reads, and no check sees what it was granted. The identity
     # token is for the tailnet join and the run's registration at the
-    # inference proxy; `sandbox setup` keeps it from the agent's user.
+    # inference proxy; `run` keeps it from the agent, the sandbox user.
     permissions:
       contents: read
       issues: read
@@ -453,11 +453,10 @@ jobs:
       # The bootc-dev RHEL 10 runners lack what the steps below assume: git,
       # without which checkout falls back to the REST API and prepare sees
       # no commit; node, for the .mjs steps and the tailscale action; gh,
-      # from EPEL, for run's public-repository check. And sudo's
-      # secure_path omits /usr/local/bin, where prepare installs
+      # from EPEL, for secure-host's attestation check of its image. And
+      # sudo's secure_path omits /usr/local/bin, where prepare installs
       # agentic-job; the link dangles until it does. Elsewhere, Ubuntu
-      # included, nothing runs. Shrinks once agentic-job calls itself by
-      # absolute path under sudo and stops needing gh.
+      # included, nothing runs.
       - name: Install RHEL prerequisites
         env:
           OS_RELEASE: /etc/os-release
@@ -524,20 +523,30 @@ jobs:
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability
         run: agentic-job secure-host inference .agentic-job/config.toml
-      # The last step with root. Since v0.6.2 the public secure-host action
-      # forwards to this repository's image action and refuses `binary`;
-      # internal keeps `sandbox setup` and the second user that run expects,
-      # as agentic-job's own review workflow does.
-      - uses: ./.agentic-job-source/secure-host/internal
+      # The policy job's configuration for the host, by its binary, with
+      # `setup.script`: the image runs it as its second user, the sandbox
+      # user, who is the agent below (agentic-job's docs/secure-host.md,
+      # "The agent job").
+      - name: The host's configuration
+        run: agentic-job config --host --from .agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+      # The last step with root: the forwarder runs this repository's
+      # secure-host image at the digest it pins, which makes the sandbox
+      # user and puts its own agentic-job in /usr/local/bin (`run` starts
+      # the policy job's, from the job directory).
+      - uses: ./.agentic-job-source/secure-host
         with:
-          binary: /usr/local/bin/agentic-job
-          config: .agentic-job/config.toml
-      # The agent's GH_TOKEN is this job's read-only token. No step follows:
+          config: ${{ runner.temp }}/agentic-job-host.toml
+      # The agent as the sandbox user, with no runner-home: `run` refuses
+      # to give the runner's own user an agent while this job holds
+      # `id-token: write` or an inference key. So the scripted agent fails
+      # here: since v0.6.4 `run` installs its session for the runner's user
+      # only. Its GH_TOKEN is this job's read-only token. No step follows:
       # nothing here touches what the agent left.
       - id: run
         timeout-minutes: 340
         uses: ./.agentic-job-source/run
         with:
+          agent-user: sandbox
           github-token: ${{ github.token }}
           inference-api-key: ${{ secrets.INFERENCE_API_KEY }}
 
@@ -602,7 +611,7 @@ jobs:
       actions: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -611,7 +620,7 @@ jobs:
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
