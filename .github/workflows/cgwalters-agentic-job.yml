@@ -26,8 +26,8 @@
 #
 # What is the deployment's is decided in the target job and nowhere else:
 # an input, else the calling repository's variable of the name the input's
-# description gives, else the default written there (one naming another
-# repository of ours, in deployment/deployment.json). A new repository
+# description gives, else the default written there (the model and the
+# configuration repository, in deployment/deployment.json). A new repository
 # therefore sets nothing; a variable is for trying a model without
 # changing this file.
 #
@@ -183,7 +183,7 @@ jobs:
       # any audience: refuse an owner not ours here, on a hosted runner,
       # before that job is scheduled.
       - uses: cgwalters-forge/actions/admit@main
-      # The defaults below that name another repository of ours, from
+      # The model and configuration repository defaults below, from
       # deployment/deployment.json, so that a second deployment's copy sets
       # them there rather than in this file (its copy repoints these
       # `uses:` lines at itself too, which GitHub requires be literal).
@@ -207,9 +207,9 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           # The deployment's defaults: the one place they are written, but
-          # for AGENT_CONFIG_REPO's, which deployment.json holds.
+          # for AGENT_MODEL's and AGENT_CONFIG_REPO's, which deployment.json holds.
           AGENT: ${{ inputs.agent || vars.AGENT || 'opencode' }}
-          AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
+          AGENT_MODEL: ${{ inputs.model || vars.AGENT_MODEL || steps.deployment.outputs.agent-model }}
           AGENT_RUNNER: ${{ inputs.runner || vars.AGENT_RUNNER || '"ubuntu-26.04"' }}
           # The broker's URL and audience default together, in the script.
           INFERENCE_URL: ${{ inputs.inference-url || vars.INFERENCE_URL }}

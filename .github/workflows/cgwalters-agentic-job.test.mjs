@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { defaults } from '../../deployment/deployment.mjs';
 
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
 
@@ -69,6 +70,21 @@ test('the configuration repository defaults to deployment.json\'s, after the inp
   assert.match(job('target'), /\n {6}- uses: cgwalters-forge\/actions\/deployment@main\n {8}id: deployment\n/);
   const action = readFileSync(new URL('../../deployment/action.yml', import.meta.url), 'utf8');
   assert.match(action, /\n {2}agent-config-repo:\n.*\n {4}value: \$\{\{ steps\.read\.outputs\.agent-config-repo \}\}\n/);
+});
+
+// Likewise the model, in both wrappers; the review wrapper has no steps
+// before policy, so its admit job reads it.
+test('the model defaults to deployment.json\'s, after the input and the variable', () => {
+  const review = readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8');
+  const { 'agent-model': model } = defaults();
+  for (const text of [workflow, review]) assert.ok(!text.includes(model), model);
+  assert.match(workflow, /\n {10}AGENT_MODEL: \$\{\{ inputs\.model \|\| vars\.AGENT_MODEL \|\| steps\.deployment\.outputs\.agent-model \}\}\n/);
+  const admit = needsGraph(review).admit.body;
+  assert.match(admit, /\n {6}agent-model: \$\{\{ steps\.deployment\.outputs\.agent-model \}\}\n/);
+  assert.match(admit, /\n {6}- uses: cgwalters-forge\/actions\/deployment@main\n {8}id: deployment\n/);
+  assert.match(review, /\n {6}model: \$\{\{ vars\.AGENT_MODEL \|\| needs\.admit\.outputs\.agent-model \}\}\n/);
+  const action = readFileSync(new URL('../../deployment/action.yml', import.meta.url), 'utf8');
+  assert.match(action, /\n {2}agent-model:\n.*\n {4}value: \$\{\{ steps\.read\.outputs\.agent-model \}\}\n/);
 });
 
 test('opencode or claude with no configuration repository fails in the target job', async () => {

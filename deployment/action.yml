@@ -6,6 +6,9 @@ outputs:
   agent-config-repo:
     description: The public repository, OWNER/NAME, of opencode's configuration.
     value: ${{ steps.read.outputs.agent-config-repo }}
+  agent-model:
+    description: The agent's model, as the inference proxy serves it.
+    value: ${{ steps.read.outputs.agent-model }}
 runs:
   using: composite
   steps:

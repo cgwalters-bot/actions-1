@@ -15,12 +15,17 @@ jobs:
   # runner's owner could mint identity tokens with this file's
   # `job_workflow_ref` for any audience: refuse an owner not ours on a
   # hosted runner first (admit/README.md). Everything else needs policy.
+  # Then the deployment's defaults (deployment/README.md), for policy.
   admit:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
+    outputs:
+      agent-model: ${{ steps.deployment.outputs.agent-model }}
     steps:
       - uses: cgwalters-forge/actions/admit@main
+      - uses: cgwalters-forge/actions/deployment@main
+        id: deployment
 
   policy:
     needs: admit
@@ -55,7 +60,7 @@ jobs:
       allow: ${{ github.event_name == 'issue_comment' && 'workflow/review-command.toml' || 'workflow/review.toml' }}
       config: ${{ vars.AGENT_CONFIG || '.agentic-job-source/.github/agentic-job/hosted.toml' }}
       agent: ${{ vars.AGENT || 'opencode' }}
-      model: ${{ vars.AGENT_MODEL || 'praxis/gpt-6.1-sol' }}
+      model: ${{ vars.AGENT_MODEL || needs.admit.outputs.agent-model }}
       # Repository names are configured by the owner, never dispatch inputs.
       agent-config-repo: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_REPO || '' }}
       agent-config-path: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_PATH || '' }}

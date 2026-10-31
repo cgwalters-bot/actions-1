@@ -45,7 +45,7 @@ jobs:
 // for them, so a commit pin would never move: the review runs would keep
 // joining with an old client, upstream pin and hardening.
 test('both wrappers use our own actions at main', () => {
-  for (const [file, actions] of [['./cgwalters-agentic-job.yml', ['admit', 'deployment', 'tailscale']], ['./cgwalters-review.yml', ['admit', 'tailscale']]]) {
+  for (const [file, actions] of [['./cgwalters-agentic-job.yml', ['admit', 'deployment', 'tailscale']], ['./cgwalters-review.yml', ['admit', 'deployment', 'tailscale']]]) {
     const refs = [...read(file).matchAll(/uses: cgwalters-forge\/actions\/(\S+)@(\S+)/g)];
     assert.deepEqual(refs.map(match => [match[1], match[2]]), actions.map(action => [action, 'main']), file);
   }
