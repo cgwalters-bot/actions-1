@@ -14,6 +14,7 @@ this repository's issues.
 | [app-token](app-token/README.md) | Mints and masks one role's GitHub App installation token, scoped to named repositories; `remint.mjs` mints again near expiry or after a 401; CI runs its unit tests, no real mint (no app here) | Move each role to its app (tracker#766) |
 | [admit](admit/README.md) | Fails unless the calling repository's owner id is in its owners.json; both reusable wrappers run it first; CI runs its unit tests | Brokers and tailnet federation match the same ids |
 | [deployment](deployment/README.md) | Outputs the deployment's defaults from its deployment.json (the agent configuration repository and model); the wrappers use them after their input and variable; CI runs its unit tests | More defaults that name our resources move there |
+| [renovate](renovate/README.md) | A Renovate preset that moves GitHub-hosted Ubuntu runner labels and nothing else; this repository extends it; `just test-renovate` validates it and dry-runs fixtures, not in CI | Each forge repository extends it, once the Renovate app is installed for it |
 | [tailscale](tailscale/README.md) | Settings by organization; CI runs its unit tests and checks the socket and CLI are closed after a join that fails, no real join (no tailnet credentials here) | Replace devspace.yml's and agent.yml's tailscale/github-action steps |
 
 ## cgwalters-agentic-job

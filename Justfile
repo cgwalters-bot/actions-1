@@ -22,6 +22,15 @@ test-deployment:
 test-secure-host:
     node --test secure-host/*.test.mjs
 
+renovate := "renovate@44.198.3"
+
+# The runner preset and this repository's use of it (renovate/README.md):
+# Renovate's validator, then its offline dry run over the fixtures. npx
+# downloads Renovate, so CI does not run this.
+test-renovate:
+    npx --yes --package {{ renovate }} -- renovate-config-validator --strict --no-global renovate/runners.json .github/renovate.json
+    npx --yes --package {{ renovate }} -- node renovate/dry-run.mjs
+
 # The proxy, not an origin error or timeout, must refuse the write; and
 # with ALLOWED, a path of example.com an `egress-policy` rule allows, let
 # that POST through.
