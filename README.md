@@ -13,7 +13,7 @@ this repository's issues.
 | [secure-host](secure-host/README.md) | Runs agentic-job's attested, digest-pinned image: no later step has root or the metadata service, world-write by owner only; CI runs the two-job example, the inputs and the world-write policy on ubuntu-26.04 | agentic-job's own action forwards here; opt-in egress (agentic-job#995) |
 | [app-token](app-token/README.md) | Mints and masks one role's GitHub App installation token, scoped to named repositories; `remint.mjs` mints again near expiry or after a 401; CI runs its unit tests, no real mint (no app here) | Move each role to its app (tracker#766) |
 | [admit](admit/README.md) | Fails unless the calling repository's owner id is in its owners.json; both reusable wrappers run it first; CI runs its unit tests | Brokers and tailnet federation match the same ids |
-| [deployment](deployment/README.md) | Outputs the deployment's defaults from its deployment.json (the agent configuration repository); the dispatch wrapper uses them after its input and variable; CI runs its unit tests | More defaults that name our resources move there |
+| [deployment](deployment/README.md) | Outputs the deployment's defaults from its deployment.json (the agent configuration repository and model); the wrappers use them after their input and variable; CI runs its unit tests | More defaults that name our resources move there |
 | [tailscale](tailscale/README.md) | Settings by organization; CI runs its unit tests and checks the socket and CLI are closed after a join that fails, no real join (no tailnet credentials here) | Replace devspace.yml's and agent.yml's tailscale/github-action steps |
 
 ## cgwalters-agentic-job
@@ -89,9 +89,9 @@ apply and review helpers, so that the tailnet and the inference broker admit
 this file's `job_workflow_ref`; agentic-job's review workflow can now run a
 caller's own network step instead (its #705), which callers have not moved
 to. It refuses private repositories, as the dispatch wrapper does. It adds
-our tailnet join and defaults: opencode,
-`praxis/gpt-6.1-sol`, `ubuntu-26.04`, and the dispatch wrapper's inference
-URL and audience. It has **no inputs**. Repository/organization variables
+our tailnet join and defaults: opencode, the model from
+[deployment.json](deployment/README.md), `ubuntu-26.04`, and the dispatch
+wrapper's inference URL and audience. It has **no inputs**. Repository/organization variables
 `AGENT`, `AGENT_MODEL`, `AGENT_RUNNER` (JSON), `INFERENCE_URL`,
 `INFERENCE_AUDIENCE`, `AGENT_CONFIG`, `AGENT_CONFIG_REPO` and
 `AGENT_CONFIG_PATH` select owner-controlled configuration. Set the last

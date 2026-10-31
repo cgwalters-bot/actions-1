@@ -1,3 +1,4 @@
 {
-  "agent-config-repo": "cgwalters-forge/agenthome"
+  "agent-config-repo": "cgwalters-forge/agenthome",
+  "agent-model": "praxis/gpt-6.1-sol"
 }
