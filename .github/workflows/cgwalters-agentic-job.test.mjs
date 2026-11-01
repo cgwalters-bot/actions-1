@@ -144,7 +144,7 @@ async function target(env, { pull = false, caller = { private: false, visibility
   const core = { setOutput: (name, value) => { outputs[name] = value; } };
   const github = { rest: {
     issues: { get: async ({ issue_number }) => ({
-      data: { number: issue_number, title: 't', body: 'b', ...(pull ? { pull_request: {} } : {}) },
+      data: { number: issue_number, title: 't', body: 'b', user: { login: 'item-author' }, author_association: 'MEMBER', ...(pull ? { pull_request: {} } : {}) },
     }) },
     repos: { get: async ({ owner, repo }) => {
       assert.equal(`${owner}/${repo}`, 'caller/repo');
@@ -164,6 +164,18 @@ async function target(env, { pull = false, caller = { private: false, visibility
     core, github, context, { env: environment });
   return outputs;
 }
+
+test('the event includes the item author and association for issues and pull requests', async () => {
+  for (const [profile, pull] of [['implement', false], ['review', true], ['fix', true]]) {
+    const outputs = await target({ PROFILE: profile }, { pull });
+    const event = outputs.task.match(/\n<agentic-job-event>\n([^\n]+)\n<\/agentic-job-event>$/);
+    assert.ok(event, profile);
+    assert.deepEqual(JSON.parse(event[1]), {
+      repository: 'example/repo', number: 7, title: 't', body: 'b',
+      author: 'item-author', association: 'MEMBER',
+    }, profile);
+  }
+});
 
 // agentic-job's opt-in for private repositories (its #739) admits only the
 // calling repository, so a public caller keeps it off whatever its bounds say.
