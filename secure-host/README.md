@@ -148,7 +148,7 @@ creating the user is planned
 Exactly **Ubuntu 26.04** and **RHEL 10**, by `ID` and `VERSION_ID` of
 `/etc/os-release`; the image refuses any other host before it changes
 anything. Only GitHub's hosted `ubuntu-26.04` is tested here. The action
-needs `node`, `gh` and podman, and installs podman with apt where it is
+needs `jq`, `gh` and podman, and installs podman with apt where it is
 missing. A load, setup or probe failure fails the step and can leave the
 host partly changed: the job must not continue with untrusted code, and
 reuse of that host is unsupported ([setup](docs/setup.md#supported-hosts)).

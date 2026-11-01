@@ -18,7 +18,7 @@ test-admit:
 test-deployment:
     node --test deployment/*.test.mjs
 
-# secure-host's pin and signer checks.
+# secure-host's egress probe; lint/tests/secure_host_action.rs tests the action's steps.
 test-secure-host:
     node --test secure-host/*.test.mjs
 

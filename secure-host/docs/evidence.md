@@ -20,7 +20,7 @@ run with `before`, and the same check after it with `after`:
 | --- | --- | --- |
 | no sudo, no docker | `just secure-host-root` | `build` |
 | no metadata service, while `github.com` answers | `just secure-host-metadata` | `build` |
-| no read of an earlier step's process environment, which stays alive | [`reads-probe.mjs`](../reads-probe.mjs) | `build` |
+| no read of an earlier step's process environment, which stays alive | two steps of [`secure-host.yml`](../../.github/workflows/secure-host.yml) | `build` |
 | a POST refused by the proxy, a GET through | `just secure-host-egress` | `build` |
 | the artifact handed over by ID and digest, validated as data | `publish` | `publish` |
 | a caller's `config` is taken whole (one that keeps sudo) | `just secure-host-options` | `options` |
