@@ -1,55 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { defaults } from '../../deployment/deployment.mjs';
 
+// The wrappers' tests that execute no JavaScript are in lint/tests/wrappers.rs.
+const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
-
-// agentic-job is called at one release: check, apply, prepare and run
-// refuse calls that resolved to different commits, which following main
-// produced for runs spanning an agentic-job merge (tracker#544).
-// workflow/review.test.cjs checks that release's pin. Our own admit and
-// tailscale actions still follow main.
-test('agentic-job is called at one release, our own actions at main', () => {
-  const refs = [...workflow.matchAll(/uses: cgwalters-forge\/(\S+)@(\S+)(?: # \S+)?\n/g)];
-  assert.deepEqual(refs.map(match => match[1]), [
-    'actions/admit',
-    'actions/deployment',
-    'agentic-job/.github/workflows/policy.yml',
-    'actions/tailscale',
-    'agentic-job/.github/workflows/check.yml',
-    'agentic-job/.github/workflows/apply.yml',
-  ]);
-  for (const [, path, ref] of refs) if (path.startsWith('actions/')) assert.equal(ref, 'main', path);
-  assert.doesNotMatch(workflow, /PINNED_SHA/);
-  assert.match(workflow, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
-});
-
-// Without `issue`, apply opens an implement pull request with no closing
-// reference, so its merge leaves the issue open (agentic-job#877), and
-// policy selects no watcher for opt-in steering. Only the dispatched item,
-// never another target: a merge must not close a tracking issue. Only
-// implement opens a new pull request, so the other kinds close nothing.
-test('policy is given the dispatched item as issue, and nothing else', () => {
-  const issues = [...workflow.matchAll(/\n {6}issue: (.*)\n/g)];
-  assert.deepEqual(issues.map(match => match[1]), ['${{ inputs.item }}']);
-  assert.match(job('policy'), /\n {6}issue: /);
-  // With the item in `repo` itself apply writes `Closes`; an `item-repo`
-  // would make it a mere `Refs`.
-  assert.doesNotMatch(workflow, /item-repo:/);
-});
-
-// Dependabot moves the tag, all three calls in one pull request, without
-// the third-party cooldown.
-test('dependabot proposes new agentic-job tags as one group', () => {
-  const config = readFileSync(new URL('../dependabot.yml', import.meta.url), 'utf8');
-  assert.match(config, /\n {6}interval: daily\n/);
-  assert.match(config, /\n {6}agentic-job:\n {8}patterns: \["cgwalters-forge\/agentic-job\*"\]\n/);
-  assert.match(config, /\n {6}exclude: \["cgwalters-forge\/agentic-job\*"\]\n/);
-});
 
 // A repository without INFERENCE_URL falls back to the broker its runner
 // joins the tailnet to reach: the wrappers and tailnets.json move together.
@@ -62,29 +17,39 @@ test('the wrappers fall back to the cgwalters-forge tailnet broker', () => {
   assert.deepEqual([...workflow.matchAll(/\n {10}BROKER_URL: (\S+)\n/g)].map(match => match[1]), [broker]);
 });
 
-// A second deployment's copy sets its configuration repository in
-// deployment/deployment.json, not in the wrapper.
-test('the configuration repository defaults to deployment.json\'s, after the input and the variable', () => {
-  assert.doesNotMatch(workflow, /agenthome/);
-  assert.match(workflow, /\n {10}AGENT_CONFIG_REPO: \$\{\{ inputs\.agent-config-repo \|\| vars\.AGENT_CONFIG_REPO \|\| steps\.deployment\.outputs\.agent-config-repo \}\}\n/);
-  assert.match(job('target'), /\n {6}- uses: cgwalters-forge\/actions\/deployment@main\n {8}id: deployment\n/);
-  const action = readFileSync(new URL('../../deployment/action.yml', import.meta.url), 'utf8');
-  assert.match(action, /\n {2}agent-config-repo:\n.*\n {4}value: \$\{\{ steps\.read\.outputs\.agent-config-repo \}\}\n/);
+// The review wrapper has no inputs and its caller passes no secret, so it
+// stays on the broker: agentic-job's provider-key mode (its #740) is not
+// wired here.
+test('the review wrapper stays on the inference broker', () => {
+  assert.doesNotMatch(read('./cgwalters-review.yml'), /INFERENCE_API_KEY|inference-register|inference-provider|inference-api-key/);
 });
 
-// Likewise the model, in both wrappers; the review wrapper has no steps
-// before policy, so its admit job reads it.
-test('the model defaults to deployment.json\'s, after the input and the variable', () => {
-  const review = readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8');
-  const { 'agent-model': model } = defaults();
-  for (const text of [workflow, review]) assert.ok(!text.includes(model), model);
-  assert.match(workflow, /\n {10}AGENT_MODEL: \$\{\{ inputs\.model \|\| vars\.AGENT_MODEL \|\| steps\.deployment\.outputs\.agent-model \}\}\n/);
-  const admit = needsGraph(review).admit.body;
-  assert.match(admit, /\n {6}agent-model: \$\{\{ steps\.deployment\.outputs\.agent-model \}\}\n/);
-  assert.match(admit, /\n {6}- uses: cgwalters-forge\/actions\/deployment@[0-9a-f]{40} # main\n {8}id: deployment\n/);
-  assert.match(review, /\n {6}model: \$\{\{ vars\.AGENT_MODEL \|\| needs\.admit\.outputs\.agent-model \}\}\n/);
-  const action = readFileSync(new URL('../../deployment/action.yml', import.meta.url), 'utf8');
-  assert.match(action, /\n {2}agent-model:\n.*\n {4}value: \$\{\{ steps\.read\.outputs\.agent-model \}\}\n/);
+// Renovate's matchStrings are JavaScript regular expressions, so this one
+// runs them here rather than in lint/tests/wrappers.rs.
+test('Renovate tracks all three review pins from main, without automerge or dispatch updates', () => {
+  const config = JSON.parse(read('../renovate.json'));
+  assert.equal(config.customManagers.length, 1);
+  const manager = config.customManagers[0];
+  assert.equal(manager.customType, 'regex');
+  assert.deepEqual(manager.managerFilePatterns, ['/^\\.github/workflows/cgwalters-review\\.yml$/']);
+  assert.equal(manager.datasourceTemplate, 'git-refs');
+  assert.equal(manager.packageNameTemplate, 'https://github.com/cgwalters-forge/actions');
+  assert.equal(manager.currentValueTemplate, 'main');
+  const pattern = new RegExp(manager.matchStrings[0], 'g');
+  const wrapper = read('./cgwalters-review.yml');
+  const pins = [...wrapper.matchAll(pattern)];
+  assert.equal(pins.length, 3);
+  for (const pin of pins) assert.match(pin.groups.currentDigest, /^[0-9a-f]{40}$/);
+  // Exercise the digest-only replacement: preserve the action paths and branch.
+  const updated = wrapper.replace(pattern, match => match.replace(/[0-9a-f]{40}/, 'a'.repeat(40)));
+  assert.equal([...updated.matchAll(pattern)].filter(pin => pin.groups.currentDigest === 'a'.repeat(40)).length, 3);
+  assert.equal([...read('./cgwalters-agentic-job.yml').matchAll(pattern)].length, 0);
+  assert.deepEqual(config.packageRules, [{
+    description: "Update the review wrapper's own-action commits together through review, even without release tags",
+    matchManagers: ['custom.regex'], matchDatasources: ['git-refs'],
+    matchPackageNames: [manager.packageNameTemplate], enabled: true,
+    groupName: 'review actions', automerge: false,
+  }]);
 });
 
 test('opencode or claude with no configuration repository fails in the target job', async () => {
@@ -95,43 +60,6 @@ test('opencode or claude with no configuration repository fails in the target jo
   }
   const outputs = await target({ AGENT_CONFIG_REPO: '', AGENT: 'vibe', AGENT_MODEL: 'devstral-small-latest' });
   assert.equal(outputs['agent-config-repo'], '');
-});
-
-// Any public repository can call the wrappers, and the tokens of its run
-// carry their `job_workflow_ref`; the agent job runs on a runner the caller
-// picks, whose owner could mint tokens for any audience there. So every
-// job waits for the admit action, run first on a hosted runner.
-function needsGraph(text) {
-  const section = text.split('\njobs:\n')[1];
-  const keys = [...section.matchAll(/^ {2}([a-z-]+):$/gm)];
-  return Object.fromEntries(keys.map((key, index) => {
-    const name = key[1];
-    const body = section.slice(key.index, keys[index + 1]?.index);
-    const needs = body.match(/\n {4}needs: (\[[^\]]*\]|\S+)\n/)?.[1] ?? '';
-    return [name, { body, needs: needs.replace(/[[\]]/g, '').split(',').map(need => need.trim()).filter(Boolean) }];
-  }));
-}
-
-function admitsFirst(text, gate) {
-  const graph = needsGraph(text);
-  assert.match(graph[gate].body, /\n {4}runs-on: ubuntu-[0-9.]+\n/, `${gate} runs on a hosted runner`);
-  assert.match(graph[gate].body, /\n {4}steps:\n(?: {6}#[^\n]*\n)* {6}- uses: cgwalters-forge\/actions\/admit@(?:main|[0-9a-f]{40} # main)\n/);
-  assert.equal(graph[gate].needs.length, 0);
-  assert.doesNotMatch(graph[gate].body, /\n {4}if:/);
-  const reaches = name => name === gate || graph[name].needs.some(reaches);
-  for (const name of Object.keys(graph)) assert.ok(reaches(name), `${name} waits for ${gate}`);
-}
-
-test('the dispatch wrapper admits the caller\'s owner before any other job', () => {
-  admitsFirst(workflow, 'target');
-  // The issue's case: an owner of no organization of ours fails that step.
-  const admit = new URL('../../admit/admit.mjs', import.meta.url).pathname;
-  const run = spawnSync(process.execPath, [admit], { encoding: 'utf8', env: { ...process.env, OWNER: 'caller', OWNER_ID: '424242' } });
-  assert.equal(run.status, 1, run.stdout);
-});
-
-test('the review wrapper admits the caller\'s owner before any other job', () => {
-  admitsFirst(readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8'), 'admit');
 });
 
 // The target job's actual script, with doubles for github-script's globals.
@@ -217,12 +145,6 @@ test('skills turn on only for implement or fix with claude or opencode', async (
   }
 });
 
-test('policy is given skills only from the target job', () => {
-  assert.match(workflow, /\n {10}SKILLS: \$\{\{ inputs\.skills \}\}\n/);
-  assert.match(workflow, /\n {6}agent-skills: \$\{\{ needs\.target\.outputs\.skills == 'true' \}\}\n/);
-  assert.match(workflow, /\n {6}skills: \$\{\{ steps\.target\.outputs\.skills \}\}\n/);
-});
-
 test('max-requests defaults to 400 and passes through for a real agent', async () => {
   assert.match(workflow, /\n {6}max-requests:\n {8}description: [^\n]*\n {8}type: string\n {8}default: "400"\n/);
   assert.equal((await target({}))['max-requests'], '400');
@@ -235,12 +157,6 @@ test('max-requests outside 1 to 1000 fails the run', async () => {
   for (const value of ['', '0', '1001', '-1', '01', '4e2', ' 400', '400 ']) {
     await assert.rejects(target({ MAX_REQUESTS: value }), /max-requests must be/, JSON.stringify(value));
   }
-});
-
-test('policy is given max-requests only from the target job', () => {
-  assert.match(workflow, /\n {10}MAX_REQUESTS: \$\{\{ inputs\.max-requests \}\}\n/);
-  assert.match(workflow, /\n {6}max-requests: \$\{\{ needs\.target\.outputs\.max-requests \}\}\n/);
-  assert.match(workflow, /\n {6}max-requests: \$\{\{ steps\.target\.outputs\.max-requests \}\}\n/);
 });
 
 // The text of one job, from its key to the next job's.
@@ -289,25 +205,6 @@ test('a session without a usable domain, for review, or with idle-minutes out of
   await assert.rejects(target({ IDLE_MINUTES: '10' }), /idle-minutes/);
 });
 
-test('the tailnet join is for a real agent or a session', () => {
-  assert.match(job('agent'), /- name: Join the tailnet\n {8}if: \$\{\{ needs\.target\.outputs\.agent != 'fake' \|\| needs\.target\.outputs\.session == 'true' \}\}\n/);
-});
-
-test('the session job posts the endpoint before apply concludes, and only for a session', () => {
-  const session = job('session');
-  assert.match(session, /\n {4}needs: \[target, policy\]\n/);
-  assert.match(session, /\n {4}if: \$\{\{ needs\.policy\.outputs\.admitted == 'true' && needs\.target\.outputs\.session == 'true' && needs\.policy\.outputs\.notified == 'true' && needs\.policy\.outputs\.notify == 'comment' && needs\.policy\.outputs\.binary-artifact-id != '' \}\}\n/);
-  assert.match(session, /\n {4}concurrency:\n {6}group: agentic-job-status-\$\{\{ needs\.policy\.outputs\.notify-repo \}\}-\$\{\{ needs\.policy\.outputs\.notify-item \}\}\n {6}cancel-in-progress: false\n/);
-  assert.match(session, /\n {4}runs-on: ubuntu-26\.04\n/);
-  assert.match(session, /\n {4}continue-on-error: true\n/);
-  assert.match(session, /`\$\{\{ needs\.target\.outputs\.session-endpoint \}\}`/);
-  assert.match(session, /\n {10}artifact-ids: \$\{\{ needs\.policy\.outputs\.binary-artifact-id \}\}\n {10}path: \$\{\{ runner\.temp \}\}\/bin\n/);
-  assert.match(session, /\n {10}chmod \+x "\$RUNNER_TEMP\/bin\/agentic-job"\n {10}"\$RUNNER_TEMP\/bin\/agentic-job" status\n/);
-  // Only the policy binary, never an agent-uploaded executable.
-  assert.doesNotMatch(session, /actions\/checkout|\.agentic-job-source|needs\.agent/);
-  assert.match(job('apply'), /\n {4}needs: \[policy, agent, check, session\]\n/);
-});
-
 // agentic-job's provider-key mode (its #740), off unless a caller asks:
 // the defaults are its broker's, and the key, which `run` holds outside
 // the agent's sandbox, is handed to that one step and to nothing else.
@@ -347,56 +244,4 @@ test('our broker\'s audience is the default only with our broker\'s URL', async 
   // one without the other.
   assert.match(workflow, /\n {10}INFERENCE_URL: \$\{\{ inputs\.inference-url \|\| vars\.INFERENCE_URL \}\}\n/);
   assert.match(workflow, /\n {10}INFERENCE_AUDIENCE: \$\{\{ inputs\.inference-audience \|\| vars\.INFERENCE_AUDIENCE \}\}\n/);
-});
-
-// Execute the agent job's first step against stub os-release files with a
-// recording sudo double: only RHEL 10 installs or links anything, and it
-// does so before the first checkout, which needs git.
-test('only RHEL 10 installs git, node and gh and links agentic-job into sudo\'s PATH', () => {
-  const agent = job('agent');
-  const step = agent.split('      - name: Install RHEL prerequisites\n')[1]?.split('\n      - ')[0];
-  assert.ok(step, 'the agent job has no RHEL prerequisites step');
-  assert.match(agent, /\n {4}steps:\n(?: {6}#[^\n]*\n)* {6}- name: Install RHEL prerequisites\n/);
-  assert.match(step, /\n {10}OS_RELEASE: \/etc\/os-release\n/);
-  assert.doesNotMatch(step, /\n {8}if:/);
-  const script = step.split('        run: |\n')[1]
-    .split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
-  const directory = mkdtempSync(join(homedir(), 'agent-prerequisites-'));
-  const log = join(directory, 'calls');
-  const osRelease = join(directory, 'os-release');
-  try {
-    writeFileSync(join(directory, 'sudo'), `#!${process.execPath}
-require('node:fs').appendFileSync(process.env.CALL_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
-`, { mode: 0o700 });
-    const rhel = [
-      ['dnf', 'install', '-y', 'git', 'nodejs', 'podman'],
-      ['dnf', 'install', '-y', 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm'],
-      ['dnf', 'install', '-y', 'gh'],
-      ['ln', '-sfn', '/usr/local/bin/agentic-job', '/usr/bin/agentic-job'],
-    ];
-    for (const [release, expected] of [
-      ['NAME="Red Hat Enterprise Linux"\nID="rhel"\nID_LIKE="centos fedora"\nVERSION_ID="10.0"\n', rhel],
-      ['ID=rhel\nVERSION_ID=10\n', rhel],
-      ['NAME="Ubuntu"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID="26.04"\n', []],
-      ['ID="rhel"\nVERSION_ID="9.6"\n', []],
-      ['ID="rhel"\nVERSION_ID="100"\n', []],
-      ['ID="centos"\nID_LIKE="rhel fedora"\nVERSION_ID="10"\n', []],
-      ['', []],
-      [null, []],
-    ]) {
-      if (release === null) rmSync(osRelease, { force: true });
-      else writeFileSync(osRelease, release);
-      writeFileSync(log, '');
-      const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
-        encoding: 'utf8',
-        env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, CALL_LOG: log, OS_RELEASE: osRelease },
-      });
-      assert.ifError(result.error);
-      assert.equal(result.status, 0, result.stderr);
-      const calls = readFileSync(log, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
-      assert.deepEqual(calls, expected, release);
-    }
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
 });

@@ -131,7 +131,7 @@ jobs:
       # Fail closed before running anything of the source: an empty output
       # would make checkout fall back to the calling repository or to the
       # default branch, unreleased code run as root here. The expected
-      # repository is the one policy's `uses:` names (review.test.mjs).
+      # repository is the one policy's `uses:` names (lint/tests/wrappers.rs).
       - name: The policy call's source repository
         env:
           SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
