@@ -41,12 +41,30 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
-Both wrappers pin agentic-job v0.6.2, by its commit, and check inference
-reachability after the tailnet join, before securing the host. They still compose that tag's
-`secure-host/internal` action, which runs `sandbox setup` on the host, not
-this repository's [secure-host](secure-host/README.md) image action that the
-tag's public `secure-host` now forwards to, so its egress
-proxy stays a host unit. Since v0.6.0 the agent's home no longer copies the
+Both wrappers pin agentic-job v0.6.4, by its commit, and check inference
+reachability after the unchanged tailnet join, before securing the host.
+As upstream's agent.yml with `agent-user: sandbox`, they write the host
+configuration with `agentic-job config --host`, retaining `setup.script`,
+and pass it to the public `secure-host` forwarder. Its pinned image runs
+the script and creates the second user. The agent must be that sandbox
+user, not the runner's: the job retains `id-token: write` for the tailnet
+and inference registration. The dispatch wrapper rejects `fake` before
+provisioning because v0.6.4 supports its scripted profile only as the
+runner's user.
+
+Both `prepare` and `run` use `/var/tmp/agentic-job`, outside the private
+workspace, with a traversable, non-listable directory (0711), private
+inputs (0600) and an executable binary (0755). This is the policy binary
+`run` actually starts, not `/usr/local/bin/agentic-job`, which the image
+replaces with its own version. The `wrapper-sandbox` CI job in
+[secure-host.yml](.github/workflows/secure-host.yml) runs policy, prepare,
+host configuration and the pinned forwarder on a fresh runner, then
+executes that exact binary as the sandbox user. It does not run inference,
+join a tailnet or upload agent results. The forwarder's v0.6.3 image still
+cannot parse configuration fields introduced in v0.6.4 (such as
+`inference.front`); callers must not use those until the image is updated.
+
+Since v0.6.0 the agent's home no longer copies the
 runner image's `/etc/skel`, toolchains and dotfiles included. The pinned `run` action publishes
 the session endpoint itself; no extra endpoint step is needed here.
 Mid-run steering stays off unless the caller's runner configuration enables
@@ -85,7 +103,7 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.6.2**'s policy, check,
+event-review wrapper. It composes agentic-job **v0.6.4**'s policy, check,
 apply and review helpers, so that the tailnet and the inference broker admit
 this file's `job_workflow_ref`; agentic-job's review workflow can now run a
 caller's own network step instead (its #705), which callers have not moved

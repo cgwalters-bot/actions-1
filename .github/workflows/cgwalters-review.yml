@@ -1,4 +1,4 @@
-# Composed from agentic-job v0.6.2's review.yml: keep event policy and
+# Composed from agentic-job v0.6.4's review.yml and agent.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
 # They name the release's commit, not its tag, for the reason
 # cgwalters-agentic-job.yml's header gives.
@@ -43,7 +43,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     permissions:
       contents: read
     with:
@@ -153,10 +153,19 @@ jobs:
           ref: ${{ needs.policy.outputs.source-sha }}
           path: .agentic-job-source
           persist-credentials: false
+      # The sandbox must execute run's policy binary, outside the workspace;
+      # the image replaces /usr/local/bin. Only the binary is public.
+      - name: Create the job directory
+        run: install -d -m 0711 /var/tmp/agentic-job
       - uses: ./.agentic-job-source/prepare # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
+          job-dir: /var/tmp/agentic-job
           binary-artifact-id: ${{ needs.policy.outputs.binary-artifact-id }}
           policy-artifact-id: ${{ needs.policy.outputs.policy-artifact-id }}
+      - name: Keep the job inputs private
+        run: |
+          chmod 0600 /var/tmp/agentic-job/*
+          chmod 0755 /var/tmp/agentic-job/agentic-job
       # One privileged network step, before secure-host drops root. The
       # tailnet and broker must admit this wrapper's job_workflow_ref with
       # an owner id admit/owners.json lists. Our own
@@ -172,16 +181,20 @@ jobs:
       # Fail on a missing proxy route before setup, not in its sandbox probes.
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability
-        run: agentic-job secure-host inference .agentic-job/config.toml
-      # internal, as upstream's review.yml: the public action now refuses `binary`.
-      - uses: ./.agentic-job-source/secure-host/internal # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
+        run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml
+      # As agent.yml with agent-user: sandbox: retain setup.script for
+      # the image to run as the second user.
+      - name: The host's configuration
+        run: agentic-job config --host --from /var/tmp/agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+      - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
-          binary: /usr/local/bin/agentic-job
-          config: .agentic-job/config.toml
+          config: ${{ runner.temp }}/agentic-job-host.toml
       - id: run
         timeout-minutes: 340
         uses: ./.agentic-job-source/run # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
+          job-dir: /var/tmp/agentic-job
+          agent-user: sandbox
           github-token: ${{ github.token }}
 
   check:
@@ -193,7 +206,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -257,7 +270,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:

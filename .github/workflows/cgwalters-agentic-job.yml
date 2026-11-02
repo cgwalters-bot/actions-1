@@ -77,12 +77,12 @@ on:
         type: boolean
         default: false
       apply-environment:
-        description: "The caller's environment whose token applies the outputs; empty: the variable APPLY_ENVIRONMENT. Needed by every agent but fake"
+        description: "The caller's environment whose token applies the outputs; empty: the variable APPLY_ENVIRONMENT. Required"
         type: string
         default: ""
       # Deployment settings, for a caller that must differ; see the header.
       agent:
-        description: "fake, opencode, claude or vibe; empty: the variable AGENT, else opencode"
+        description: "opencode, claude or vibe; empty: the variable AGENT, else opencode. fake is unsupported with the sandbox user"
         type: string
         default: ""
       model:
@@ -94,7 +94,7 @@ on:
         type: string
         default: "500"
       max-requests:
-        description: "The most inference requests the run may make, 1 to 1000 (checked for every agent; fake, which makes none, is given 0)"
+        description: "The most inference requests the run may make, 1 to 1000"
         type: string
         default: "400"
       session:
@@ -243,6 +243,9 @@ jobs:
               throw new Error('Unknown dispatch profile');
             }
             const agent = process.env.AGENT;
+            // v0.6.4 installs fake-profile only for the runner's user;
+            // that user must not receive this job's OIDC capability.
+            if (agent === 'fake') throw new Error('fake is unsupported with agent-user sandbox');
             if (!['fake', 'opencode', 'claude', 'vibe'].includes(agent)) throw new Error('AGENT must be fake, opencode, claude or vibe');
             const runner = process.env.AGENT_RUNNER;
             try { JSON.parse(runner); } catch { throw new Error('The runner label must be JSON, such as "ubuntu-26.04"'); }
@@ -364,7 +367,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -438,7 +441,7 @@ jobs:
     # Read only, and nothing more: `run` hands this job's token to the agent
     # for GitHub reads, and no check sees what it was granted. The identity
     # token is for the tailnet join and the run's registration at the
-    # inference proxy; `sandbox setup` keeps it from the agent's user.
+    # inference proxy; `run` keeps it from the agent, the sandbox user.
     permissions:
       contents: read
       issues: read
@@ -469,7 +472,7 @@ jobs:
             "rhel 10" | "rhel 10."*) ;;
             *) exit 0 ;;
           esac
-          sudo dnf install -y git nodejs
+          sudo dnf install -y git nodejs podman
           sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm
           sudo dnf install -y gh
           sudo ln -sfn /usr/local/bin/agentic-job /usr/bin/agentic-job
@@ -496,10 +499,20 @@ jobs:
           ref: ${{ needs.policy.outputs.source-sha }}
           path: .agentic-job-source
           persist-credentials: false
+      # run starts the policy binary from job-dir, not /usr/local/bin,
+      # which the host image replaces. Keep it outside the private workspace
+      # so the sandbox user can execute it; only the binary is public.
+      - name: Create the job directory
+        run: install -d -m 0711 /var/tmp/agentic-job
       - uses: ./.agentic-job-source/prepare
         with:
+          job-dir: /var/tmp/agentic-job
           binary-artifact-id: ${{ needs.policy.outputs.binary-artifact-id }}
           policy-artifact-id: ${{ needs.policy.outputs.policy-artifact-id }}
+      - name: Keep the job inputs private
+        run: |
+          chmod 0600 /var/tmp/agentic-job/*
+          chmod 0755 /var/tmp/agentic-job/agentic-job
       # Our one privileged step, this repository's own action at main, before anything of the agent's is on the
       # machine. The action picks the client id and tags by organization,
       # joins with --accept-dns=false and makes tailscaled's socket root's
@@ -523,21 +536,22 @@ jobs:
       # Fail on a missing proxy route before setup, not in its sandbox probes.
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability
-        run: agentic-job secure-host inference .agentic-job/config.toml
-      # The last step with root. Since v0.6.2 the public secure-host action
-      # forwards to this repository's image action and refuses `binary`;
-      # internal keeps `sandbox setup` and the second user that run expects,
-      # as agentic-job's own review workflow does.
-      - uses: ./.agentic-job-source/secure-host/internal
+        run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml
+      # As agent.yml with agent-user: sandbox: retain setup.script for
+      # the image to run as the second user. This is the last step with root.
+      - name: The host's configuration
+        run: agentic-job config --host --from /var/tmp/agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+      - uses: ./.agentic-job-source/secure-host
         with:
-          binary: /usr/local/bin/agentic-job
-          config: .agentic-job/config.toml
+          config: ${{ runner.temp }}/agentic-job-host.toml
       # The agent's GH_TOKEN is this job's read-only token. No step follows:
       # nothing here touches what the agent left.
       - id: run
         timeout-minutes: 340
         uses: ./.agentic-job-source/run
         with:
+          job-dir: /var/tmp/agentic-job
+          agent-user: sandbox
           github-token: ${{ github.token }}
           inference-api-key: ${{ secrets.INFERENCE_API_KEY }}
 
@@ -602,7 +616,7 @@ jobs:
       actions: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -611,7 +625,7 @@ jobs:
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@258dc11ca7fe1798836976c0424274d1498e22cb # v0.6.2
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches

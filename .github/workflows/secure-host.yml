@@ -17,6 +17,67 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Exercise the wrappers' actual prepare -> config --host -> forwarder
+  # sequence on a fresh VM. No inference, tailnet credentials or agent
+  # uploads: only prove the policy binary can start as the sandbox user.
+  wrapper-policy:
+    permissions:
+      contents: read
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    with:
+      id: wrapper-smoke
+      runner: '"ubuntu-26.04"'
+      repo: cgwalters-forge/actions
+      allow: workflow/review.toml
+      kind: analysis
+      outputs: noop
+      max-outputs: '1'
+      max-requests: '0'
+      budget: '0'
+      task: Prove the installed binary can execute as the sandbox user.
+      config: .agentic-job-source/secure-host/hosted.toml
+      artifact-prefix: wrapper-smoke-
+
+  wrapper-sandbox:
+    needs: wrapper-policy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cgwalters-forge/agentic-job
+          ref: 732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+          path: .agentic-job-source
+          persist-credentials: false
+      - name: Create the job directory
+        run: install -d -m 0711 /var/tmp/agentic-job
+      - uses: ./.agentic-job-source/prepare
+        with:
+          job-dir: /var/tmp/agentic-job
+          binary-artifact-id: ${{ needs.wrapper-policy.outputs.binary-artifact-id }}
+          policy-artifact-id: ${{ needs.wrapper-policy.outputs.policy-artifact-id }}
+      - name: Keep the job inputs private
+        run: |
+          chmod 0600 /var/tmp/agentic-job/*
+          chmod 0755 /var/tmp/agentic-job/agentic-job
+      - name: Check inference proxy reachability
+        run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml
+      - name: The host's configuration
+        run: agentic-job config --host --from /var/tmp/agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+      - uses: ./.agentic-job-source/secure-host
+        with:
+          config: ${{ runner.temp }}/agentic-job-host.toml
+      # The same path run/action.yml executes with the wrappers' job-dir,
+      # through v0.6.4's narrow helper, not unrestricted sudo.
+      - name: The sandbox user can execute the policy binary
+        run: python3 workflow/sandbox-binary-check.py
+
   # The README's example: an untrusted job with nothing worth stealing,
   # whose output a second job takes by artifact ID and digest, as data.
   build:
