@@ -41,7 +41,7 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
-Both wrappers pin agentic-job v0.6.2, by its commit, and check inference
+Both wrappers pin agentic-job v0.6.4, by its commit, and check inference
 reachability after the tailnet join, before securing the host. They still compose that tag's
 `secure-host/internal` action, which runs `sandbox setup` on the host, not
 this repository's [secure-host](secure-host/README.md) image action that the
@@ -85,7 +85,7 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.6.2**'s policy, check,
+event-review wrapper. It composes agentic-job **v0.6.4**'s policy, check,
 apply and review helpers, so that the tailnet and the inference broker admit
 this file's `job_workflow_ref`; agentic-job's review workflow can now run a
 caller's own network step instead (its #705), which callers have not moved
