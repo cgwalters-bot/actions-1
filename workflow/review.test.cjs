@@ -149,6 +149,11 @@ test('runner smoke uses the same public policy binary and host sequence as the w
   const source = readFileSync('.github/workflows/secure-host.yml', 'utf8');
   const smoke = source.split('\n  wrapper-sandbox:\n')[1].split('\n  build:\n')[0];
   assert.ok(source.includes(`policy.yml@${PIN}`));
+  const policy = source.split('\n  wrapper-policy:\n')[1].split('\n  wrapper-sandbox:\n')[0];
+  // Without an inference proxy a request cap cannot bind; even this
+  // agent-free smoke needs a budget for bounded-run validation.
+  assert.match(policy, /max-requests: '0'/);
+  assert.match(policy, /budget: '1'/);
   const sequence = [
     'install -d -m 0711 /var/tmp/agentic-job',
     'uses: ./.agentic-job-source/prepare',
