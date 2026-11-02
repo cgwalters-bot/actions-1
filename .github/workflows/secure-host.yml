@@ -33,7 +33,7 @@ jobs:
       outputs: noop
       max-outputs: '1'
       max-requests: '0'
-      budget: '0'
+      budget: '1'
       task: Prove the installed binary can execute as the sandbox user.
       config: .agentic-job-source/secure-host/hosted.toml
       artifact-prefix: wrapper-smoke-
