@@ -81,7 +81,7 @@ test('the model defaults to deployment.json\'s, after the input and the variable
   assert.match(workflow, /\n {10}AGENT_MODEL: \$\{\{ inputs\.model \|\| vars\.AGENT_MODEL \|\| steps\.deployment\.outputs\.agent-model \}\}\n/);
   const admit = needsGraph(review).admit.body;
   assert.match(admit, /\n {6}agent-model: \$\{\{ steps\.deployment\.outputs\.agent-model \}\}\n/);
-  assert.match(admit, /\n {6}- uses: cgwalters-forge\/actions\/deployment@main\n {8}id: deployment\n/);
+  assert.match(admit, /\n {6}- uses: cgwalters-forge\/actions\/deployment@[0-9a-f]{40} # main\n {8}id: deployment\n/);
   assert.match(review, /\n {6}model: \$\{\{ vars\.AGENT_MODEL \|\| needs\.admit\.outputs\.agent-model \}\}\n/);
   const action = readFileSync(new URL('../../deployment/action.yml', import.meta.url), 'utf8');
   assert.match(action, /\n {2}agent-model:\n.*\n {4}value: \$\{\{ steps\.read\.outputs\.agent-model \}\}\n/);
@@ -115,7 +115,7 @@ function needsGraph(text) {
 function admitsFirst(text, gate) {
   const graph = needsGraph(text);
   assert.match(graph[gate].body, /\n {4}runs-on: ubuntu-[0-9.]+\n/, `${gate} runs on a hosted runner`);
-  assert.match(graph[gate].body, /\n {4}steps:\n(?: {6}#[^\n]*\n)* {6}- uses: cgwalters-forge\/actions\/admit@main\n/);
+  assert.match(graph[gate].body, /\n {4}steps:\n(?: {6}#[^\n]*\n)* {6}- uses: cgwalters-forge\/actions\/admit@(?:main|[0-9a-f]{40} # main)\n/);
   assert.equal(graph[gate].needs.length, 0);
   assert.doesNotMatch(graph[gate].body, /\n {4}if:/);
   const reaches = name => name === gate || graph[name].needs.some(reaches);

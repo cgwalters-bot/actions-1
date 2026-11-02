@@ -41,14 +41,44 @@ jobs:
       statuses: write`);
 });
 
-// Our own actions follow main (dependabot.yml), and zizmor accepts any ref
-// for them, so a commit pin would never move: the review runs would keep
-// joining with an old client, upstream pin and hardening.
-test('both wrappers use our own actions at main', () => {
-  for (const [file, actions] of [['./cgwalters-agentic-job.yml', ['admit', 'deployment', 'tailscale']], ['./cgwalters-review.yml', ['admit', 'deployment', 'tailscale']]]) {
-    const refs = [...read(file).matchAll(/uses: cgwalters-forge\/actions\/(\S+)@(\S+)/g)];
-    assert.deepEqual(refs.map(match => [match[1], match[2]]), actions.map(action => [action, 'main']), file);
-  }
+// Moving main must not change privileged review code behind a caller's
+// reviewed wrapper pin. Check every own-repository call, not just tailscale.
+test('the review wrapper pins its own actions by full commit', () => {
+  const refs = [...read('./cgwalters-review.yml').matchAll(/uses: cgwalters-forge\/actions\/(\S+)@(\S+)/g)];
+  assert.deepEqual(refs.map(match => match[1]), ['admit', 'deployment', 'tailscale']);
+  for (const [, action, ref] of refs) assert.match(ref, /^[0-9a-f]{40}$/, action);
+});
+
+test('the dispatch wrapper still follows main for its own actions', () => {
+  const refs = [...read('./cgwalters-agentic-job.yml').matchAll(/uses: cgwalters-forge\/actions\/(\S+)@(\S+)/g)];
+  assert.deepEqual(refs.map(match => [match[1], match[2]]),
+    ['admit', 'deployment', 'tailscale'].map(action => [action, 'main']));
+});
+
+test('Renovate tracks all three review pins from main, without automerge or dispatch updates', () => {
+  const config = JSON.parse(read('../renovate.json'));
+  assert.equal(config.customManagers.length, 1);
+  const manager = config.customManagers[0];
+  assert.equal(manager.customType, 'regex');
+  assert.deepEqual(manager.managerFilePatterns, ['/^\\.github/workflows/cgwalters-review\\.yml$/']);
+  assert.equal(manager.datasourceTemplate, 'git-refs');
+  assert.equal(manager.packageNameTemplate, 'https://github.com/cgwalters-forge/actions');
+  assert.equal(manager.currentValueTemplate, 'main');
+  const pattern = new RegExp(manager.matchStrings[0], 'g');
+  const wrapper = read('./cgwalters-review.yml');
+  const pins = [...wrapper.matchAll(pattern)];
+  assert.equal(pins.length, 3);
+  for (const pin of pins) assert.match(pin.groups.currentDigest, /^[0-9a-f]{40}$/);
+  // Exercise the digest-only replacement: preserve the action paths and branch.
+  const updated = wrapper.replace(pattern, match => match.replace(/[0-9a-f]{40}/, 'a'.repeat(40)));
+  assert.equal([...updated.matchAll(pattern)].filter(pin => pin.groups.currentDigest === 'a'.repeat(40)).length, 3);
+  assert.equal([...read('./cgwalters-agentic-job.yml').matchAll(pattern)].length, 0);
+  assert.deepEqual(config.packageRules, [{
+    description: "Update the review wrapper's own-action commits together through review, even without release tags",
+    matchManagers: ['custom.regex'], matchDatasources: ['git-refs'],
+    matchPackageNames: [manager.packageNameTemplate], enabled: true,
+    groupName: 'review actions', automerge: false,
+  }]);
 });
 
 // From v0.5.0 check.yml's detect job asks for `id-token: write`, and GitHub
