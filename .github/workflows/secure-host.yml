@@ -19,7 +19,7 @@ concurrency:
 jobs:
   # Exercise the wrappers' actual prepare -> config --host -> forwarder
   # sequence on a fresh VM. No inference, tailnet credentials or agent
-  # uploads: only prove the policy binary can start as the sandbox user.
+  # uploads: prove the sandbox's CLI matches the policy binary too.
   wrapper-policy:
     permissions:
       contents: read
@@ -69,13 +69,13 @@ jobs:
       - name: Check inference proxy reachability
         run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml
       - name: The host's configuration
-        run: agentic-job config --host --from /var/tmp/agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+        run: agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin > "$RUNNER_TEMP/agentic-job-host.toml"
       - uses: ./.agentic-job-source/secure-host
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
       # The same path run/action.yml executes with the wrappers' job-dir,
       # through v0.6.4's narrow helper, not unrestricted sudo.
-      - name: The sandbox user can execute the policy binary
+      - name: The sandbox CLI matches the policy binary
         run: python3 workflow/sandbox-binary-check.py
 
   # The README's example: an untrusted job with nothing worth stealing,

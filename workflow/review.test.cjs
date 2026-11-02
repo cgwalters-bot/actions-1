@@ -124,7 +124,7 @@ test('both agent jobs use the forwarder, a public binary and private inputs, and
     assert.ok(agent.includes('run: install -d -m 0711 /var/tmp/agentic-job'), file);
     assert.ok(agent.includes('chmod 0600 /var/tmp/agentic-job/*\n          chmod 0755 /var/tmp/agentic-job/agentic-job'), file);
     assert.equal([...agent.matchAll(/job-dir: \/var\/tmp\/agentic-job\n/g)].length, 2, file);
-    assert.ok(agent.includes('run: agentic-job config --host --from /var/tmp/agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"'), file);
+    assert.ok(agent.includes('run: agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin > "$RUNNER_TEMP/agentic-job-host.toml"'), file);
     assert.deepEqual([...agent.matchAll(/uses: (\.\/\.agentic-job-source\/secure-host\S*)/g)].map(m => m[1]),
       ['./.agentic-job-source/secure-host'], file);
     assert.match(agent, /config: \$\{\{ runner\.temp \}\}\/agentic-job-host\.toml/);
@@ -161,7 +161,7 @@ test('runner smoke uses the same public policy binary and host sequence as the w
     'chmod 0600 /var/tmp/agentic-job/*',
     'chmod 0755 /var/tmp/agentic-job/agentic-job',
     'agentic-job secure-host inference /var/tmp/agentic-job/config.toml',
-    'agentic-job config --host --from /var/tmp/agentic-job/config.toml',
+    'agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin',
     'uses: ./.agentic-job-source/secure-host',
     'python3 workflow/sandbox-binary-check.py',
   ];
@@ -174,7 +174,7 @@ test('runner smoke uses the same public policy binary and host sequence as the w
   assert.doesNotMatch(smoke, /continue-on-error:|check: .?false|secrets\./);
   const probe = readFileSync('workflow/sandbox-binary-check.py', 'utf8');
   assert.match(probe, /"helper", "enter"/);
-  assert.match(probe, /exec \/var\/tmp\/agentic-job\/agentic-job --version/);
+  assert.match(probe, /exec agentic-job --version/);
   assert.match(probe, /test "\$\(id -u\)" = "\$1"/);
 });
 

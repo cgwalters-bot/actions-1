@@ -184,8 +184,10 @@ jobs:
         run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml
       # As agent.yml with agent-user: sandbox: retain setup.script for
       # the image to run as the second user.
+      # The image's CLI predates policy's handback format; commands inside
+      # the sandbox must find the same binary as run, not the image's copy.
       - name: The host's configuration
-        run: agentic-job config --host --from /var/tmp/agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+        run: agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin > "$RUNNER_TEMP/agentic-job-host.toml"
       - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
