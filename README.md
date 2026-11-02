@@ -59,7 +59,12 @@ inputs (0600) and an executable binary (0755). This is the policy binary
 replaces with its own version. The `wrapper-sandbox` CI job in
 [secure-host.yml](.github/workflows/secure-host.yml) runs policy, prepare,
 host configuration and the pinned forwarder on a fresh runner, then
-executes that exact binary as the sandbox user. It does not run inference,
+executes `agentic-job --version` through the sandbox user's PATH and compares
+it to the policy binary's version. Both wrappers set `sandbox.env.PATH` in
+the host configuration to `/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin`,
+so the agent's handback CLI uses the policy release too, not the older
+image's CLI. This changes only the sandbox user's command search path,
+not root's or the helper's binary. The job does not run inference,
 join a tailnet or upload agent results. The forwarder's v0.6.3 image still
 cannot parse configuration fields introduced in v0.6.4 (such as
 `inference.front`); callers must not use those until the image is updated.

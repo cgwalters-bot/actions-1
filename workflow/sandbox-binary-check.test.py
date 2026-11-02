@@ -28,6 +28,7 @@ class ProbeTests(unittest.TestCase):
                 "helper", "enter", "--chdir",
             ])
             self.assertEqual(command[-1], str(uid))
+            self.assertIn('exec agentic-job --version', command[-3])
             self.assertEqual(kwargs["timeout"], 60)
             self.assertIs(kwargs["stdin"], kwargs["stdout"])
             self.assertIs(kwargs["stderr"], kwargs["stdout"])
@@ -37,9 +38,13 @@ class ProbeTests(unittest.TestCase):
 
         with patch("builtins.open", mock_open(read_data=b"")), \
                 patch.object(probe.pwd, "getpwnam", return_value=user), \
+                patch.object(probe.subprocess, "check_output", return_value="agentic-job 0.6.4\n") as version, \
                 patch.object(probe.subprocess, "run", side_effect=run), \
                 contextlib.redirect_stdout(io.StringIO()):
             probe.main()
+            version.assert_called_once_with(
+                ["/var/tmp/agentic-job/agentic-job", "--version"], timeout=10, text=True
+            )
 
     def test_success(self):
         self.run_probe()
@@ -49,8 +54,12 @@ class ProbeTests(unittest.TestCase):
             self.run_probe(status=1, output=b"permission denied\n")
 
     def test_wrong_binary(self):
-        with self.assertRaisesRegex(SystemExit, "did not execute"):
+        with self.assertRaisesRegex(SystemExit, "does not match policy binary"):
             self.run_probe(output=b"agentic-job 0.6.3\n")
+
+    def test_version_must_match_exactly(self):
+        with self.assertRaisesRegex(SystemExit, "does not match policy binary"):
+            self.run_probe(output=b"unexpected output\nagentic-job 0.6.4\n")
 
     def test_output_bound(self):
         with self.assertRaisesRegex(SystemExit, "exceeded 4096"):

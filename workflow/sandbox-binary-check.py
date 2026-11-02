@@ -13,6 +13,9 @@ import tomllib
 
 
 def main():
+    expected = subprocess.check_output(
+        ["/var/tmp/agentic-job/agentic-job", "--version"], timeout=10, text=True
+    ).strip()
     with open("/etc/agentic-job/config.toml", "rb") as stream:
         config = tomllib.load(stream)
     user = pwd.getpwnam(config.get("sandbox", {}).get("user", "runner-sandbox"))
@@ -24,7 +27,7 @@ def main():
         'test "$(id -u)" = "$1"; '
         'test ! -r /var/tmp/agentic-job/policy.json; '
         'test ! -w /var/tmp/agentic-job/agentic-job; '
-        'exec /var/tmp/agentic-job/agentic-job --version',
+        'exec agentic-job --version',
         "wrapper-smoke", str(user.pw_uid),
     ]
     parent, child = socket.socketpair()
@@ -44,8 +47,8 @@ def main():
     print(output, end="")
     if result.returncode != 0:
         raise SystemExit(f"sandbox binary check failed: exit {result.returncode}")
-    if "agentic-job 0.6.4" not in output:
-        raise SystemExit("sandbox did not execute the v0.6.4 policy binary")
+    if output.strip() != expected:
+        raise SystemExit(f"sandbox CLI version does not match policy binary: expected {expected!r}")
 
 
 if __name__ == "__main__":
