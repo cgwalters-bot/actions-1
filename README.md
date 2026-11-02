@@ -189,6 +189,16 @@ deployment-specific pieces from agentic-job is a separate follow-up.
 `just test-review` checks the wrapper's admission and publication boundaries;
 live tailnet joins and GitHub review writes are not exercised locally.
 
+The review wrapper pins this repository's `admit`, `deployment` and
+`tailscale` actions by full commit too, so moving `main` cannot change
+privileged code behind a caller's reviewed wrapper pin. Renovate's scoped
+`git-refs` manager in [.github/renovate.json](.github/renovate.json) proposes
+updates from `main`, grouped as `review actions` with automerge off. Unlike
+release-tag updates, this works without this repository publishing tags. These
+updates must merge through review here; a caller pinned to the wrapper's
+commit gets them only by reviewing an update to that pin. The dispatch
+wrapper continues to use these actions at `main`.
+
 Runs may edit `.github/` here, so pull requests are reviewed by
 [this repository's caller](.github/workflows/review.yml) of the wrapper
 above, referenced locally so that it runs as on the base branch, never as

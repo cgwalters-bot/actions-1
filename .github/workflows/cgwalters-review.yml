@@ -25,8 +25,8 @@ jobs:
     outputs:
       agent-model: ${{ steps.deployment.outputs.agent-model }}
     steps:
-      - uses: cgwalters-forge/actions/admit@main
-      - uses: cgwalters-forge/actions/deployment@main
+      - uses: cgwalters-forge/actions/admit@c9a9501729bc306f3efdc188056b51149c1c9398 # main
+      - uses: cgwalters-forge/actions/deployment@c9a9501729bc306f3efdc188056b51149c1c9398 # main
         id: deployment
 
   policy:
@@ -162,11 +162,11 @@ jobs:
           chmod 0755 /var/tmp/agentic-job/agentic-job
       # One privileged network step, before secure-host drops root. The
       # tailnet and broker must admit this wrapper's job_workflow_ref with
-      # an owner id admit/owners.json lists. Our own
-      # action at main, as in cgwalters-agentic-job.yml: nothing moves a
-      # commit pin here, so it would keep a retired client or hardening.
+      # an owner id admit/owners.json lists. Pin our own actions too: main
+      # must not change privileged code behind a caller's reviewed wrapper
+      # pin. Renovate proposes updates to these commits (renovate.json).
       - name: Join the tailnet
-        uses: cgwalters-forge/actions/tailscale@main
+        uses: cgwalters-forge/actions/tailscale@c9a9501729bc306f3efdc188056b51149c1c9398 # main
         with:
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
           # As in cgwalters-agentic-job.yml: unset, tailnets.json's entry.
