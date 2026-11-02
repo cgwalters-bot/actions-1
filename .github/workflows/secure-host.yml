@@ -24,7 +24,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@dcf977235badcc5d826c77a9482eb26dd29d7678 # v0.6.6
     with:
       id: wrapper-smoke
       runner: '"ubuntu-26.04"'
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cgwalters-forge/agentic-job
-          ref: d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
+          ref: dcf977235badcc5d826c77a9482eb26dd29d7678 # v0.6.6
           path: .agentic-job-source
           persist-credentials: false
       - name: Create the job directory

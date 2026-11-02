@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 // The agentic-job release both wrappers call, by commit with its tag as a
 // comment (a tag can be moved, #109): a bump changes it here, in the six
 // calls, the review wrapper's header and the README.
-const PIN = 'd7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5';
+const PIN = 'dcf977235badcc5d826c77a9482eb26dd29d7678 # v0.6.6';
 
 const workflow = readFileSync('.github/workflows/cgwalters-review.yml', 'utf8');
 const jobs = Object.fromEntries([...workflow.matchAll(/^  ([a-z]+):\n([\s\S]*?)(?=^  [a-z]+:\n|$(?![\s\S]))/gm)]
