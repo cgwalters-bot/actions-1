@@ -201,7 +201,7 @@ test('skills turn on only for implement or fix with claude or opencode', async (
   }
   // agentic-job refuses skills for these agents: the input must not fail
   // their runs.
-  for (const agent of ['fake', 'vibe']) {
+  for (const agent of ['vibe']) {
     const outputs = await target({ SKILLS: 'true', AGENT: agent, AGENT_MODEL: 'devstral-small-latest' });
     assert.equal(outputs.skills, 'false');
     assert.doesNotMatch(outputs.task, /skill/);
@@ -223,12 +223,12 @@ test('policy is given skills only from the target job', () => {
   assert.match(workflow, /\n {6}skills: \$\{\{ steps\.target\.outputs\.skills \}\}\n/);
 });
 
-test('max-requests defaults to 400, passes through for a real agent and is 0 for fake', async () => {
+test('max-requests defaults to 400 and passes through for a real agent', async () => {
   assert.match(workflow, /\n {6}max-requests:\n {8}description: [^\n]*\n {8}type: string\n {8}default: "400"\n/);
   assert.equal((await target({}))['max-requests'], '400');
   assert.equal((await target({ MAX_REQUESTS: '1000', AGENT: 'claude' }))['max-requests'], '1000');
   assert.equal((await target({ MAX_REQUESTS: '1', AGENT: 'vibe', AGENT_MODEL: 'devstral-small-latest' }))['max-requests'], '1');
-  assert.equal((await target({ MAX_REQUESTS: '900', AGENT: 'fake' }))['max-requests'], '0');
+  await assert.rejects(target({ AGENT: 'fake' }), /fake is unsupported with agent-user sandbox/);
 });
 
 test('max-requests outside 1 to 1000 fails the run', async () => {
@@ -261,7 +261,7 @@ test('a run is no session unless asked, and passes policy nothing new', async ()
 });
 
 test('a session names its endpoint from the join hostname and the repository variable', async () => {
-  for (const [agent, idle] of [['opencode', '60'], ['fake', '1'], ['claude', '']]) {
+  for (const [agent, idle] of [['opencode', '60'], ['claude', '1'], ['claude', '']]) {
     const outputs = await target({ SESSION: 'true', IDLE_MINUTES: idle, TAILNET_DOMAIN: 'tail-1.ts.net', AGENT: agent });
     assert.equal(outputs.session, 'true');
     assert.equal(outputs['idle-minutes'], idle);
@@ -318,12 +318,11 @@ test('provider-key mode passes through with broker defaults, the key to run alon
   assert.match(job('policy'), /\n {6}inference-register: \$\{\{ inputs\.inference-register \}\}\n {6}inference-provider: \$\{\{ inputs\.inference-provider \}\}\n/);
   const uses = [...workflow.matchAll(/secrets\.INFERENCE_API_KEY/g)];
   assert.equal(uses.length, 1);
-  assert.match(job('agent'), /\n {8}uses: \.\/\.agentic-job-source\/run\n {8}with:\n {10}github-token: \$\{\{ github\.token \}\}\n {10}inference-api-key: \$\{\{ secrets\.INFERENCE_API_KEY \}\}\n/);
+  assert.match(job('agent'), /\n {8}uses: \.\/\.agentic-job-source\/run\n {8}with:\n {10}job-dir: \/var\/tmp\/agentic-job\n {10}agent-user: sandbox\n {10}github-token: \$\{\{ github\.token \}\}\n {10}inference-api-key: \$\{\{ secrets\.INFERENCE_API_KEY \}\}\n/);
 });
 
 test('the broker audience goes to policy only with the broker registration', async () => {
   assert.equal((await target({}))['inference-audience'], 'aud');
-  assert.equal((await target({ AGENT: 'fake' }))['inference-audience'], '');
   assert.equal((await target({ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }))['inference-audience'], '');
   assert.match(workflow, /\n {10}INFERENCE_REGISTER: \$\{\{ inputs\.inference-register \}\}\n/);
 });
@@ -344,7 +343,6 @@ test('our broker\'s audience is the default only with our broker\'s URL', async 
   }
   // No identity token is minted for the proxy otherwise: nothing to refuse.
   assert.deepEqual(await pick({ INFERENCE_URL: 'https://api.example', INFERENCE_AUDIENCE: '', INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }), ['https://api.example', '']);
-  assert.deepEqual(await pick({ INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: '', AGENT: 'fake' }), ['', '']);
   // Neither has a default of its own in the expressions, which would set
   // one without the other.
   assert.match(workflow, /\n {10}INFERENCE_URL: \$\{\{ inputs\.inference-url \|\| vars\.INFERENCE_URL \}\}\n/);
@@ -371,7 +369,7 @@ test('only RHEL 10 installs git, node and gh and links agentic-job into sudo\'s 
 require('node:fs').appendFileSync(process.env.CALL_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
 `, { mode: 0o700 });
     const rhel = [
-      ['dnf', 'install', '-y', 'git', 'nodejs'],
+      ['dnf', 'install', '-y', 'git', 'nodejs', 'podman'],
       ['dnf', 'install', '-y', 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm'],
       ['dnf', 'install', '-y', 'gh'],
       ['ln', '-sfn', '/usr/local/bin/agentic-job', '/usr/bin/agentic-job'],
