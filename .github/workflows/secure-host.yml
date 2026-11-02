@@ -22,8 +22,9 @@ jobs:
   # uploads: prove the sandbox's CLI matches the policy binary too.
   wrapper-policy:
     permissions:
+      actions: read
       contents: read
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
     with:
       id: wrapper-smoke
       runner: '"ubuntu-26.04"'
@@ -52,7 +53,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cgwalters-forge/agentic-job
-          ref: 732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+          ref: d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
           path: .agentic-job-source
           persist-credentials: false
       - name: Create the job directory
@@ -74,7 +75,7 @@ jobs:
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
       # The same path run/action.yml executes with the wrappers' job-dir,
-      # through v0.6.4's narrow helper, not unrestricted sudo.
+      # through the forwarder's v0.6.4 image helper, not unrestricted sudo.
       - name: The sandbox CLI matches the policy binary
         run: python3 workflow/sandbox-binary-check.py
 

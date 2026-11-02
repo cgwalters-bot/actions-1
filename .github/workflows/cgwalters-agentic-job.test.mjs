@@ -296,15 +296,15 @@ test('the tailnet join is for a real agent or a session', () => {
 test('the session job posts the endpoint before apply concludes, and only for a session', () => {
   const session = job('session');
   assert.match(session, /\n {4}needs: \[target, policy\]\n/);
-  assert.match(session, /\n {4}if: \$\{\{ needs\.policy\.outputs\.admitted == 'true' && needs\.target\.outputs\.session == 'true' && needs\.policy\.outputs\.notified == 'true' && needs\.policy\.outputs\.notify == 'comment' \}\}\n/);
+  assert.match(session, /\n {4}if: \$\{\{ needs\.policy\.outputs\.admitted == 'true' && needs\.target\.outputs\.session == 'true' && needs\.policy\.outputs\.notified == 'true' && needs\.policy\.outputs\.notify == 'comment' && needs\.policy\.outputs\.binary-artifact-id != '' \}\}\n/);
   assert.match(session, /\n {4}concurrency:\n {6}group: agentic-job-status-\$\{\{ needs\.policy\.outputs\.notify-repo \}\}-\$\{\{ needs\.policy\.outputs\.notify-item \}\}\n {6}cancel-in-progress: false\n/);
   assert.match(session, /\n {4}runs-on: ubuntu-26\.04\n/);
   assert.match(session, /\n {4}continue-on-error: true\n/);
-  assert.match(session, /\n {10}EXPECTED_REPOSITORY: cgwalters-forge\/agentic-job\n/);
   assert.match(session, /`\$\{\{ needs\.target\.outputs\.session-endpoint \}\}`/);
-  assert.match(session, /\n {8}run: node \.agentic-job-source\/workflow\/status\.cjs\n/);
-  // Nothing of the agent's: no artifact is downloaded here.
-  assert.doesNotMatch(session, /download-artifact|needs\.agent/);
+  assert.match(session, /\n {10}artifact-ids: \$\{\{ needs\.policy\.outputs\.binary-artifact-id \}\}\n {10}path: \$\{\{ runner\.temp \}\}\/bin\n/);
+  assert.match(session, /\n {10}chmod \+x "\$RUNNER_TEMP\/bin\/agentic-job"\n {10}"\$RUNNER_TEMP\/bin\/agentic-job" status\n/);
+  // Only the policy binary, never an agent-uploaded executable.
+  assert.doesNotMatch(session, /actions\/checkout|\.agentic-job-source|needs\.agent/);
   assert.match(job('apply'), /\n {4}needs: \[policy, agent, check, session\]\n/);
 });
 

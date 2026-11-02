@@ -1,5 +1,7 @@
-# Composed from agentic-job v0.6.4's review.yml and agent.yml: keep event policy and
+# Composed from agentic-job v0.6.5's review.yml and agent.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
+# Optional review-history, failure-class/cost outputs, paced dispatches and
+# approval carry-forward are not adopted by this event-only composition.
 # They name the release's commit, not its tag, for the reason
 # cgwalters-agentic-job.yml's header gives.
 # No dispatcher inputs: identity/configuration comes from repository variables.
@@ -43,8 +45,9 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
     permissions:
+      actions: read
       contents: read
     with:
       id: review-${{ github.event.pull_request.number || github.event.issue.number }}
@@ -72,7 +75,7 @@ jobs:
 
   refusal:
     needs: policy
-    if: ${{ !cancelled() && needs.policy.result == 'success' && needs.policy.outputs.admitted == 'false' }}
+    if: ${{ !cancelled() && needs.policy.result == 'success' && needs.policy.outputs.admitted == 'false' && needs.policy.outputs.binary-artifact-id != '' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     concurrency:
@@ -82,29 +85,20 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      # As in the agent job: the helper must be the pinned source's.
-      - name: The policy call's source repository
-        env:
-          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
-          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
-          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
-        run: |
-          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
-            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Only the policy job's binary, never an agent-uploaded executable.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          repository: ${{ needs.policy.outputs.source-repository }}
-          ref: ${{ needs.policy.outputs.source-sha }}
-          path: .agentic-job-source
-          sparse-checkout: workflow
-          persist-credentials: false
+          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}
+          path: ${{ runner.temp }}/bin
       - name: Report the policy refusal
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           ITEM: ${{ github.event.pull_request.number || github.event.issue.number }}
-          REASON: ${{ needs.policy.outputs.reason }}
-        run: node .agentic-job-source/workflow/review.cjs refusal
+          TEXT: ${{ needs.policy.outputs.refusal }}
+        run: |
+          chmod +x "$RUNNER_TEMP/bin/agentic-job"
+          "$RUNNER_TEMP/bin/agentic-job" status
 
   agent:
     needs: policy
@@ -208,7 +202,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -218,6 +212,7 @@ jobs:
     needs: [policy, agent, check]
     if: >-
       ${{ !cancelled() && vars.AGENT_REAL_REVIEWS == 'true' && needs.policy.outputs.review-head != '' &&
+          needs.policy.outputs.binary-artifact-id != '' &&
           needs.check.result == 'success' && needs.check.outputs.artifact-id != '' &&
           contains(fromJSON('["APPROVE", "CHANGES"]'), needs.check.outputs.verdict) }}
     runs-on: ubuntu-26.04
@@ -226,25 +221,12 @@ jobs:
       contents: read
       pull-requests: write
     outputs:
-      review-url: ${{ steps.submit.outputs.result }}
+      review-url: ${{ steps.submit.outputs.review-url }}
     steps:
-      # As in the agent job: the helper must be the pinned source's.
-      - name: The policy call's source repository
-        env:
-          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
-          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
-          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
-        run: |
-          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
-            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          repository: ${{ needs.policy.outputs.source-repository }}
-          ref: ${{ needs.policy.outputs.source-sha }}
-          path: .agentic-job-source
-          sparse-checkout: workflow/review.cjs
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}
+          path: ${{ runner.temp }}/bin
       # Only check's upload from this run, never an agent-uploaded verdict.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -252,8 +234,8 @@ jobs:
           path: ${{ runner.temp }}/checked
       - name: Submit the checked verdict at the admitted head
         id: submit
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          GH_TOKEN: ${{ github.token }}
           PULL: ${{ github.event.pull_request.number || github.event.issue.number }}
           HEAD_SHA: ${{ needs.policy.outputs.review-head }}
           CHECK_RESULT: ${{ needs.check.result }}
@@ -261,18 +243,14 @@ jobs:
           AGENT_EXIT: ${{ needs.agent.outputs.exit }}
           AGENT_JOB: ${{ needs.agent.outputs.job }}
           REAL_REVIEWS: ${{ vars.AGENT_REAL_REVIEWS }}
-        with:
-          result-encoding: string
-          script: |
-            const fs = require('node:fs');
-            const { submitReview } = require(`${process.env.GITHUB_WORKSPACE}/.agentic-job-source/workflow/review.cjs`);
-            const output = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/checked/agent_output.json`, 'utf8'));
-            return await submitReview(process.env, output, github, core);
+        run: |
+          chmod +x "$RUNNER_TEMP/bin/agentic-job"
+          "$RUNNER_TEMP/bin/agentic-job" review submit --accepted "$RUNNER_TEMP/checked/agent_output.json" --output "$GITHUB_OUTPUT"
 
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
@@ -287,7 +265,7 @@ jobs:
 
   status:
     needs: [policy, agent, check, submit, apply]
-    if: ${{ !cancelled() && needs.policy.outputs.review-head != '' && needs.agent.result != 'cancelled' }}
+    if: ${{ !cancelled() && needs.policy.outputs.review-head != '' && needs.policy.outputs.binary-artifact-id != '' && needs.agent.result != 'cancelled' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
@@ -295,26 +273,13 @@ jobs:
       pull-requests: read
       statuses: write
     steps:
-      # As in the agent job: the helper must be the pinned source's.
-      - name: The policy call's source repository
-        env:
-          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
-          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
-          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
-        run: |
-          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
-            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          repository: ${{ needs.policy.outputs.source-repository }}
-          ref: ${{ needs.policy.outputs.source-sha }}
-          path: .agentic-job-source
-          sparse-checkout: workflow/review.cjs
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}
+          path: ${{ runner.temp }}/bin
       - name: Report the compatibility status
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          GH_TOKEN: ${{ github.token }}
           PULL: ${{ github.event.pull_request.number || github.event.issue.number }}
           HEAD_SHA: ${{ needs.policy.outputs.review-head }}
           CHECK_RESULT: ${{ needs.check.result }}
@@ -322,8 +287,8 @@ jobs:
           APPLY_RESULT: ${{ needs.apply.result }}
           RESULT_URL: ${{ needs.apply.outputs.result-url }}
           REVIEW_URL: ${{ needs.submit.outputs.review-url }}
+          REAL_REVIEWS: ${{ vars.AGENT_REAL_REVIEWS }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        with:
-          script: |
-            const { reportStatus } = require(`${process.env.GITHUB_WORKSPACE}/.agentic-job-source/workflow/review.cjs`);
-            await reportStatus(process.env, github, core);
+        run: |
+          chmod +x "$RUNNER_TEMP/bin/agentic-job"
+          "$RUNNER_TEMP/bin/agentic-job" review status

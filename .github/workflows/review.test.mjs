@@ -87,7 +87,7 @@ test('every job checks the policy call\'s source before checking it out', () => 
     assert.ok(called, `${file}: policy call`);
     const jobs = workflow.split(/\n {2}(?=[a-z-]+:\n)/).slice(1);
     const checked = jobs.filter(job => job.includes('repository: ${{ needs.policy.outputs.source-repository }}'));
-    assert.ok(checked.length >= 2, `${file}: jobs checking out the source`);
+    assert.deepEqual(checked.map(job => job.split(':')[0]), ['agent'], `${file}: jobs checking out the source`);
     for (const job of checked) {
       const name = job.split(':')[0];
       const steps = job.split(/\n {6}- /);
@@ -122,10 +122,10 @@ bases = ["main"]
 max_outputs = 1
 max_patch_bytes = 1024
 max_patch_files = 1
-[outputs]
+[github.outputs]
 add_comment = { max = 1 }
 noop = { max = 1 }
-[trigger]`;
+[github.trigger]`;
 
 test('the bounds admit one comment on this repository only', () => {
   const review = bounds('review');

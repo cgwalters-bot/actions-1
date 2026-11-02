@@ -41,7 +41,14 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
-Both wrappers pin agentic-job v0.6.4, by its commit, and check inference
+Before adopting v0.6.5, callers must migrate every bounds file (`allow`,
+`fix-allow` and both review bounds): move `[outputs]`, `[trigger]`,
+`[memory]` and `[secondary_pull_request]`, when present, under `[github]`
+(for example, `[github.outputs]`). Keep shared limits and repository
+selectors at the top level; exactly one forge section is required.
+Policy calls also require `actions: read` in the caller's permissions.
+
+Both wrappers pin agentic-job v0.6.5, by its commit, and check inference
 reachability after the unchanged tailnet join, before securing the host.
 As upstream's agent.yml with `agent-user: sandbox`, they write the host
 configuration with `agentic-job config --host`, retaining `setup.script`,
@@ -49,7 +56,7 @@ and pass it to the public `secure-host` forwarder. Its pinned image runs
 the script and creates the second user. The agent must be that sandbox
 user, not the runner's: the job retains `id-token: write` for the tailnet
 and inference registration. The dispatch wrapper rejects `fake` before
-provisioning because v0.6.4 supports its scripted profile only as the
+provisioning because v0.6.5 supports its scripted profile only as the
 runner's user.
 
 Both `prepare` and `run` use `/var/tmp/agentic-job`, outside the private
@@ -65,9 +72,9 @@ the host configuration to `/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin`,
 so the agent's handback CLI uses the policy release too, not the older
 image's CLI. This changes only the sandbox user's command search path,
 not root's or the helper's binary. The job does not run inference,
-join a tailnet or upload agent results. The forwarder's v0.6.3 image still
-cannot parse configuration fields introduced in v0.6.4 (such as
-`inference.front`); callers must not use those until the image is updated.
+join a tailnet or upload agent results. The v0.6.5 forwarder uses a
+v0.6.4 image; the sandbox's PATH override remains necessary to select the
+v0.6.5 policy CLI instead of the image's CLI.
 
 Since v0.6.0 the agent's home no longer copies the
 runner image's `/etc/skel`, toolchains and dotfiles included. The pinned `run` action publishes
@@ -108,7 +115,7 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.6.4**'s policy, check,
+event-review wrapper. It composes agentic-job **v0.6.5**'s policy, check,
 apply and review helpers, so that the tailnet and the inference broker admit
 this file's `job_workflow_ref`; agentic-job's review workflow can now run a
 caller's own network step instead (its #705), which callers have not moved
