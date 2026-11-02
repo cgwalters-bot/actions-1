@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 // The agentic-job release both wrappers call, by commit with its tag as a
 // comment (a tag can be moved, #109): a bump changes it here, in the six
 // calls, the review wrapper's header and the README.
-const PIN = '732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4';
+const PIN = 'd7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5';
 
 const workflow = readFileSync('.github/workflows/cgwalters-review.yml', 'utf8');
 const jobs = Object.fromEntries([...workflow.matchAll(/^  ([a-z]+):\n([\s\S]*?)(?=^  [a-z]+:\n|$(?![\s\S]))/gm)]
@@ -103,6 +103,8 @@ test('both composed jobs retain the release pins and check the proxy between joi
     assert.equal(source.split('uses: cgwalters-forge/agentic-job/').length - 1, 3, file);
     for (const [, path] of calls) assert.match(path, /^cgwalters-forge\/agentic-job\//, file);
     for (const [, , ref] of calls) assert.equal(ref, PIN, file);
+    const policy = source.split('\n  policy:\n')[1].split(/\n  [a-z]+:\n/)[0];
+    assert.match(policy, /permissions:\n(?:      [^\n]+\n)*      actions: read\n/, file);
     const agent = source.split('\n  agent:\n')[1].split(/\n  [a-z]+:\n/)[0];
     const check = 'run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml';
     assert.equal(agent.split(check).length - 1, 1, file);
@@ -154,6 +156,8 @@ test('runner smoke uses the same public policy binary and host sequence as the w
   // agent-free smoke needs a budget for bounded-run validation.
   assert.match(policy, /max-requests: '0'/);
   assert.match(policy, /budget: '1'/);
+  assert.match(policy, /permissions:\n(?:      [^\n]+\n)*      actions: read\n/);
+  assert.ok(smoke.includes(`ref: ${PIN}`));
   const sequence = [
     'install -d -m 0711 /var/tmp/agentic-job',
     'uses: ./.agentic-job-source/prepare',
@@ -178,6 +182,21 @@ test('runner smoke uses the same public policy binary and host sequence as the w
   assert.match(probe, /test "\$\(id -u\)" = "\$1"/);
 });
 
+test('review bounds scope forge-specific tables to GitHub for v0.6.5', () => {
+  for (const file of ['review.toml', 'review-command.toml']) {
+    const result = spawnSync('python3', ['-c',
+      'import json, sys, tomllib; print(json.dumps(tomllib.load(sys.stdin.buffer)))'],
+    { input: readFileSync(`workflow/${file}`), encoding: 'utf8' });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    const bounds = JSON.parse(result.stdout);
+    assert.equal(bounds.outputs, undefined, file);
+    assert.equal(bounds.trigger, undefined, file);
+    assert.deepEqual(bounds.github.outputs, { add_comment: { max: 1 }, noop: { max: 1 } }, file);
+    assert.ok(bounds.github.trigger.events.length > 0, file);
+  }
+});
+
 test('runner probe checks identity, binary execution, output bounds and failures', () => {
   const result = spawnSync('python3', ['-B', 'workflow/sandbox-binary-check.test.py'], { encoding: 'utf8' });
   assert.ifError(result.error);
@@ -189,8 +208,22 @@ test('real reviews are opt-in and use only the checked artifact at the admitted 
   assert.match(jobs.submit, /needs.check.result == 'success' && needs.check.outputs.artifact-id != ''/);
   assert.match(jobs.submit, /artifact-ids: \$\{\{ needs.check.outputs.artifact-id \}\}/);
   assert.match(jobs.submit, /HEAD_SHA: \$\{\{ needs.policy.outputs.review-head \}\}/);
-  assert.match(jobs.submit, /return await submitReview\(process.env, output, github, core\)/);
+  assert.match(jobs.submit, /review submit --accepted "\$RUNNER_TEMP\/checked\/agent_output.json" --output "\$GITHUB_OUTPUT"/);
+  assert.match(jobs.submit, /review-url: \$\{\{ steps.submit.outputs.review-url \}\}/);
   assert.match(jobs.apply, /!cancelled\(\)[^\n]+needs.submit.outputs.review-url == ''/);
   assert.match(jobs.status, /needs.agent.result != 'cancelled'/);
-  assert.match(jobs.status, /await reportStatus\(process.env, github, core\)/);
+  assert.match(jobs.status, /"\$RUNNER_TEMP\/bin\/agentic-job" review status/);
+});
+
+test('publication uses the policy binary instead of removed JavaScript helpers', () => {
+  const dispatch = readFileSync('.github/workflows/cgwalters-agentic-job.yml', 'utf8');
+  const session = dispatch.split('\n  session:\n')[1].split('\n  check:\n')[0];
+  for (const body of [jobs.refusal, jobs.submit, jobs.status, session]) {
+    assert.match(body, /needs.policy.outputs.binary-artifact-id != ''/);
+    assert.match(body, /artifact-ids: \$\{\{ needs.policy.outputs.binary-artifact-id \}\}/);
+    assert.match(body, /chmod \+x "\$RUNNER_TEMP\/bin\/agentic-job"/);
+    assert.doesNotMatch(body, /actions\/checkout|actions\/github-script|workflow\/.*\.cjs/);
+  }
+  assert.match(jobs.refusal, /TEXT: \$\{\{ needs.policy.outputs.refusal \}\}/);
+  for (const body of [jobs.refusal, session]) assert.match(body, /"\$RUNNER_TEMP\/bin\/agentic-job" status/);
 });

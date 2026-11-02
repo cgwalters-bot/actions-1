@@ -243,7 +243,7 @@ jobs:
               throw new Error('Unknown dispatch profile');
             }
             const agent = process.env.AGENT;
-            // v0.6.4 installs fake-profile only for the runner's user;
+            // v0.6.5 requires the runner's user for fake-profile;
             // that user must not receive this job's OIDC capability.
             if (agent === 'fake') throw new Error('fake is unsupported with agent-user sandbox');
             if (!['fake', 'opencode', 'claude', 'vibe'].includes(agent)) throw new Error('AGENT must be fake, opencode, claude or vibe');
@@ -367,7 +367,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -375,6 +375,7 @@ jobs:
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
+      actions: read
       contents: read
       issues: write
       pull-requests: write
@@ -559,12 +560,12 @@ jobs:
 
   # A session's endpoint on the dispatch issue, as a line of the run's one
   # status comment, while the agent job runs. As policy's notify job does,
-  # with agentic-job's own status script and the apply token for an item of
+  # with agentic-job's policy binary and the apply token for an item of
   # another repository; nothing of the agent's runs here. Apply waits for
   # this job, so its conclusion is never overwritten by this line.
   session:
     needs: [target, policy]
-    if: ${{ needs.policy.outputs.admitted == 'true' && needs.target.outputs.session == 'true' && needs.policy.outputs.notified == 'true' && needs.policy.outputs.notify == 'comment' }}
+    if: ${{ needs.policy.outputs.admitted == 'true' && needs.target.outputs.session == 'true' && needs.policy.outputs.notified == 'true' && needs.policy.outputs.notify == 'comment' && needs.policy.outputs.binary-artifact-id != '' }}
     # notify's group, so that two runs on one item edit one comment.
     concurrency:
       group: agentic-job-status-${{ needs.policy.outputs.notify-repo }}-${{ needs.policy.outputs.notify-item }}
@@ -577,20 +578,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - name: The policy call's source repository
-        env:
-          SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}
-          SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}
-          EXPECTED_REPOSITORY: cgwalters-forge/agentic-job
-        run: |
-          [[ "$SOURCE_REPOSITORY" == "$EXPECTED_REPOSITORY" && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
-            { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          repository: ${{ needs.policy.outputs.source-repository }}
-          ref: ${{ needs.policy.outputs.source-sha }}
-          path: .agentic-job-source
-          persist-credentials: false
+          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}
+          path: ${{ runner.temp }}/bin
       - name: The session's endpoint in the status comment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -598,7 +589,9 @@ jobs:
           REPO: ${{ needs.policy.outputs.notify-repo }}
           ITEM: ${{ needs.policy.outputs.notify-item }}
           TEXT: "⏳ [${{ github.workflow }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) is running. Session: after the task's turn the operator attaches at `${{ needs.target.outputs.session-endpoint }}`, once the agent job's summary shows it served."
-        run: node .agentic-job-source/workflow/status.cjs
+        run: |
+          chmod +x "$RUNNER_TEMP/bin/agentic-job"
+          "$RUNNER_TEMP/bin/agentic-job" status
 
   check:
     needs: [policy, agent]
@@ -618,7 +611,7 @@ jobs:
       actions: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -627,7 +620,7 @@ jobs:
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@732db8c24295ee8d4a79de19f588e6f871d35fe0 # v0.6.4
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@d7b6ec097488346b71fd4a528cb929186ed63906 # v0.6.5
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
