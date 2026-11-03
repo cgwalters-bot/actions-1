@@ -1,4 +1,4 @@
-# Composed from agentic-job v0.6.7's review.yml and agent.yml: keep event policy and
+# Composed from agentic-job v0.6.8's review.yml and agent.yml: keep event policy and
 # publication semantics there in sync when updating the three pinned calls.
 # Optional review-history, failure-class/cost outputs, paced dispatches and
 # approval carry-forward are not adopted by this event-only composition.
@@ -45,7 +45,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@196c8c47a5ca18e9acd7901862bec6ab87ce259d # v0.6.7
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@6490172e315fd38fc763a74c106b70ad65dbb107 # v0.6.8
     permissions:
       actions: read
       contents: read
@@ -202,7 +202,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@196c8c47a5ca18e9acd7901862bec6ab87ce259d # v0.6.7
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@6490172e315fd38fc763a74c106b70ad65dbb107 # v0.6.8
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -250,7 +250,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@196c8c47a5ca18e9acd7901862bec6ab87ce259d # v0.6.7
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@6490172e315fd38fc763a74c106b70ad65dbb107 # v0.6.8
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
