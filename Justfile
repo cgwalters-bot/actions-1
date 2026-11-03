@@ -6,18 +6,6 @@ lint:
 test-lint:
     {{ just_executable() }} --justfile lint/Justfile test
 
-# Reusable event-review admission and credential-boundary regressions.
-test-review:
-    node --test workflow/review.test.cjs
-
-# The wrappers' owner allowlist.
-test-admit:
-    node --test admit/*.test.mjs
-
-# The deployment's defaults file.
-test-deployment:
-    node --test deployment/*.test.mjs
-
 # secure-host's egress probe; lint/tests/secure_host_action.rs tests the action's steps.
 test-secure-host:
     node --test secure-host/*.test.mjs

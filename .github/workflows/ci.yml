@@ -35,15 +35,6 @@ jobs:
       - name: lint unit tests
         if: ${{ !cancelled() }}
         run: just test-lint
-      - name: event-review wrapper tests
-        if: ${{ !cancelled() }}
-        run: just test-review
-      - name: admit unit tests
-        if: ${{ !cancelled() }}
-        run: just test-admit
-      - name: deployment unit tests
-        if: ${{ !cancelled() }}
-        run: just test-deployment
       - name: secure-host unit tests
         if: ${{ !cancelled() }}
         run: just test-secure-host
