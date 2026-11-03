@@ -367,7 +367,7 @@ jobs:
   # on no event here.
   policy:
     needs: target
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@dcf977235badcc5d826c77a9482eb26dd29d7678 # v0.6.6
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@196c8c47a5ca18e9acd7901862bec6ab87ce259d # v0.6.7
     # The write scopes are for the notify job alone, which posts the one
     # status comment; the policy job itself downscopes to read. The apply
     # token lets notify post it on an item of another repository, which the
@@ -611,7 +611,7 @@ jobs:
       actions: read
       id-token: write
     # No secret crosses this boundary.
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@dcf977235badcc5d826c77a9482eb26dd29d7678 # v0.6.6
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@196c8c47a5ca18e9acd7901862bec6ab87ce259d # v0.6.7
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -620,7 +620,7 @@ jobs:
   apply:
     needs: [policy, agent, check, session]
     if: ${{ always() && needs.policy.result == 'success' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@dcf977235badcc5d826c77a9482eb26dd29d7678 # v0.6.6
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@196c8c47a5ca18e9acd7901862bec6ab87ce259d # v0.6.7
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment
     # `apply-environment` names. Named, never inherited. No secret reaches
