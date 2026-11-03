@@ -9,7 +9,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 // The release both wrappers call, by immutable commit with its tag as a
 // comment. A bump changes this, the six calls, the header and the README.
-const PIN: &str = "6490172e315fd38fc763a74c106b70ad65dbb107 # v0.6.8";
+const PIN: &str = "57119eeffa17ea41b383cfdaf8370b8abeba8868 # v0.6.9";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
 
