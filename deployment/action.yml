@@ -16,4 +16,16 @@ runs:
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-      run: node "$ACTION_PATH/deployment.mjs"
+      run: |
+        jq -ser '
+          if length != 1 or (.[0] | type) != "object" then error("deployment.json must be an object") else .[0] end |
+          {"agent-config-repo": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\z",
+           "agent-model": "^[A-Za-z0-9_.:-]+(/[A-Za-z0-9_.:-]+)?\\z"} as $patterns |
+          (keys - ($patterns | keys)) as $unknown |
+          if ($unknown | length) > 0 then error("deployment.json: unknown setting \($unknown[0])") else . end |
+          reduce ($patterns | keys[]) as $key (.;
+            if has($key) | not then error("deployment.json: missing setting \($key)")
+            elif (.[$key] | type) != "string" then error("deployment.json: \($key) must match \($patterns[$key])")
+            elif (.[$key] | test($patterns[$key]) | not) then error("deployment.json: \($key) must match \($patterns[$key])")
+            else . end) | to_entries[] | "\(.key)=\(.value)"
+        ' "$ACTION_PATH/deployment.json" >> "$GITHUB_OUTPUT"
