@@ -37,5 +37,5 @@ release binary is available; see the
 [delivery checkpoint](../tailscale/README.md#rust-migration-checkpoint).
 The Rust implementation requires Linux 5.6 or later: it opens sources with
 `openat2` without following symlinks, then copies from the opened descriptors.
-This also refuses source-path swaps during copying, which could otherwise
-redirect the root process to a private file after a pathname check.
+A source path swapped after it is opened therefore cannot redirect the root
+process to a private file; the copy reads only what was checked.
