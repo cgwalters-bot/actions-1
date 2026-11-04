@@ -38,6 +38,13 @@ jobs:
       - name: secure-host unit tests
         if: ${{ !cancelled() }}
         run: just test-secure-host
+      # Build only in CI, not in composite actions on each agent job. The
+      # release binary and checked-in SHA-256 pin are needed before cutover.
+      - name: Rust action helper tests
+        if: ${{ !cancelled() }}
+        run: just test-action-scripts
+      - name: Rust sandbox-share dry run
+        run: cargo test --locked --manifest-path action-scripts/Cargo.toml --test cli root_share_dry_run -- --ignored
       # sandbox-share on this runner: content, a file and a directory are
       # shared root-owned and read-only, and a symlink is refused.
       - name: Make files to share
