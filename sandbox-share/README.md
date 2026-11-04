@@ -29,3 +29,13 @@ root with 0644 files and 0755 directories. A symlink or special file in
 the source, or a `path` that goes through a symlink, is refused: a
 checkout can hold a symlink to `/etc/shadow`, and following it as root
 would publish the target to every user.
+
+The Rust replacement and its result checker are in `action-scripts/`, with
+an unprivileged test suite and a disposable-runner sudo dry run in CI. The
+action remains on its current implementation until the first verified
+release binary is available; see the
+[delivery checkpoint](../tailscale/README.md#rust-migration-checkpoint).
+The Rust implementation requires Linux 5.6 or later: it opens sources with
+`openat2` without following symlinks, then copies from the opened descriptors.
+This also refuses source-path swaps during copying, which could otherwise
+redirect the root process to a private file after a pathname check.
