@@ -10,6 +10,12 @@ test-lint:
 test-secure-host:
     node --test secure-host/*.test.mjs
 
+# Rust replacements, before the first pinned release is wired into actions.
+test-action-scripts:
+    cargo test --locked --manifest-path action-scripts/Cargo.toml
+    cargo clippy --locked --manifest-path action-scripts/Cargo.toml --all-targets -- -D warnings
+    cargo fmt --manifest-path action-scripts/Cargo.toml --check
+
 renovate := "renovate@44.198.3"
 
 # The runner preset and this repository's use of it (renovate/README.md):
