@@ -299,7 +299,7 @@ fn configure(
 
 /// The fake sudo's record of the configuration command.
 fn podman(temp: &TempDir, settings: &[&str]) -> String {
-    let volume = format!("{}/secure-host/in:/in:ro", temp.0.display());
+    let volume = format!("{}/secure-host/in:/in:ro,z", temp.0.display());
     let user = format!("sandbox.runner-user={}", runner_user());
     let mut args = vec![
         "podman",
