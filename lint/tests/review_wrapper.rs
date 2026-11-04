@@ -12,6 +12,31 @@ use yaml_rust2::{Yaml, YamlLoader};
 const PIN: &str = "57119eeffa17ea41b383cfdaf8370b8abeba8868 # v0.6.9";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
+const LOCAL_HOST: &str = "./.agentic-job-source/secure-host";
+
+// Moving a tag or substituting another action must not change privileged setup.
+// Normalize only the validated host call so all existing assertions cover both forms.
+fn host_source(text: &str, name: &str) -> String {
+    let source = yaml(text);
+    let hosts: Vec<_> = source["jobs"][name]["steps"]
+        .as_vec()
+        .unwrap()
+        .iter()
+        .filter(|step| {
+            step["with"]["config"].as_str() == Some("${{ runner.temp }}/agentic-job-host.toml")
+        })
+        .collect();
+    assert_eq!(hosts.len(), 1);
+    let host = hosts[0]["uses"].as_str().unwrap();
+    assert!(
+        host == LOCAL_HOST
+            || host
+                .strip_prefix("cgwalters-forge/actions/secure-host@")
+                .is_some_and(|sha| sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())),
+        "untrusted or mutable host reference: {host}"
+    );
+    text.replace(host, LOCAL_HOST)
+}
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -452,7 +477,11 @@ fn only_admitted_agents_compete_and_only_pushes_cancel() {
 
 #[test]
 fn trusted_source_one_network_join_before_dropping_root_no_post_agent_steps() {
-    let text = read(REVIEW);
+    review_source(&read(REVIEW));
+}
+
+fn review_source(text: &str) {
+    let text = host_source(text, "agent");
     excludes(
         &text,
         &[
@@ -532,83 +561,92 @@ fn both_wrappers_retain_release_pins_and_check_proxy_between_join_and_setup() {
             .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
     );
     for file in [DISPATCH, REVIEW] {
-        let text = read(file);
-        let calls: Vec<_> = text
-            .lines()
-            .filter_map(|line| line.trim().strip_prefix("uses: "))
-            .filter(|call| {
-                ["/policy.yml@", "/check.yml@", "/apply.yml@"]
-                    .iter()
-                    .any(|part| call.contains(part))
-            })
-            .collect();
-        assert_eq!(calls.len(), 3, "{file}");
-        assert_eq!(
-            text.matches("uses: cgwalters-forge/agentic-job/").count(),
-            3,
-            "{file}"
-        );
-        for call in calls {
-            assert!(call.starts_with("cgwalters-forge/agentic-job/"), "{file}");
-            assert_eq!(call.split_once('@').unwrap().1, PIN, "{file}");
-        }
-        let source = yaml(&text);
-        assert_eq!(
-            source["jobs"]["policy"]["permissions"]["actions"].as_str(),
-            Some("read")
-        );
-        let agent = job(&text, "agent");
-        let check = "run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml";
-        assert_eq!(agent.matches(check).count(), 1);
-        let join = agent.find("name: Join the tailnet").unwrap();
-        let inference = agent.find(check).unwrap();
-        let host = agent
-            .find("uses: ./.agentic-job-source/secure-host")
-            .unwrap();
-        let run = agent.find("uses: ./.agentic-job-source/run").unwrap();
-        assert!(join < inference && inference < host && host < run, "{file}");
-        excludes(agent, &["steps.secure-host.outputs.session-endpoint"]);
+        wrapper_release_and_order(&read(file));
     }
+}
+
+fn wrapper_release_and_order(text: &str) {
+    let file = "wrapper fixture";
+    let text = host_source(text, "agent");
+    let calls: Vec<_> = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("uses: "))
+        .filter(|call| {
+            ["/policy.yml@", "/check.yml@", "/apply.yml@"]
+                .iter()
+                .any(|part| call.contains(part))
+        })
+        .collect();
+    assert_eq!(calls.len(), 3, "{file}");
+    assert_eq!(
+        text.matches("uses: cgwalters-forge/agentic-job/").count(),
+        3,
+        "{file}"
+    );
+    for call in calls {
+        assert!(call.starts_with("cgwalters-forge/agentic-job/"), "{file}");
+        assert_eq!(call.split_once('@').unwrap().1, PIN, "{file}");
+    }
+    let source = yaml(&text);
+    assert_eq!(
+        source["jobs"]["policy"]["permissions"]["actions"].as_str(),
+        Some("read")
+    );
+    let agent = job(&text, "agent");
+    let check = "run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml";
+    assert_eq!(agent.matches(check).count(), 1);
+    let join = agent.find("name: Join the tailnet").unwrap();
+    let inference = agent.find(check).unwrap();
+    let host = agent
+        .find("uses: ./.agentic-job-source/secure-host")
+        .unwrap();
+    let run = agent.find("uses: ./.agentic-job-source/run").unwrap();
+    assert!(join < inference && inference < host && host < run, "{file}");
+    excludes(agent, &["steps.secure-host.outputs.session-endpoint"]);
 }
 
 // A second user prevents the agent minting tokens using the runner's OIDC capability.
 #[test]
-fn both_agents_use_forwarder_public_binary_private_inputs_and_proposals_digest() {
+fn both_agents_use_trusted_host_public_binary_private_inputs_and_proposals_digest() {
     for file in [DISPATCH, REVIEW] {
-        let text = read(file);
-        let agent = job(&text, "agent");
-        includes(
-            agent,
-            &[
-                "run: install -d -m 0711 /var/tmp/agentic-job",
-                "chmod 0600 /var/tmp/agentic-job/*\n          chmod 0755 /var/tmp/agentic-job/agentic-job",
-                "run: agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin > \"$RUNNER_TEMP/agentic-job-host.toml\"",
-                "config: ${{ runner.temp }}/agentic-job-host.toml",
-                "agent-user: sandbox\n",
-                "\n      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}\n",
-            ],
-        );
-        assert_eq!(agent.matches("job-dir: /var/tmp/agentic-job\n").count(), 2);
-        let source = yaml(&text);
-        let hosts: Vec<_> = source["jobs"]["agent"]["steps"]
-            .as_vec()
-            .unwrap()
-            .iter()
-            .filter_map(|step| step["uses"].as_str())
-            .filter(|uses| uses.starts_with("./.agentic-job-source/secure-host"))
-            .collect();
-        assert_eq!(hosts, ["./.agentic-job-source/secure-host"]);
-        excludes(
-            agent,
-            &["runner-home:", "--no-script", "secure-host/internal"],
-        );
-        includes(
-            job(&text, "check"),
-            &[
-                "\n      safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}",
-            ],
-        );
+        wrapper_inputs(&read(file));
     }
+}
+
+fn wrapper_inputs(text: &str) {
+    let text = host_source(text, "agent");
+    let agent = job(&text, "agent");
+    includes(
+        agent,
+        &[
+            "run: install -d -m 0711 /var/tmp/agentic-job",
+            "chmod 0600 /var/tmp/agentic-job/*\n          chmod 0755 /var/tmp/agentic-job/agentic-job",
+            "run: agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin > \"$RUNNER_TEMP/agentic-job-host.toml\"",
+            "config: ${{ runner.temp }}/agentic-job-host.toml",
+            "agent-user: sandbox\n",
+            "\n      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}\n",
+        ],
+    );
+    assert_eq!(agent.matches("job-dir: /var/tmp/agentic-job\n").count(), 2);
+    let source = yaml(&text);
+    let hosts: Vec<_> = source["jobs"]["agent"]["steps"]
+        .as_vec()
+        .unwrap()
+        .iter()
+        .filter_map(|step| step["uses"].as_str())
+        .filter(|uses| uses.starts_with("./.agentic-job-source/secure-host"))
+        .collect();
+    assert_eq!(hosts, ["./.agentic-job-source/secure-host"]);
+    excludes(
+        agent,
+        &["runner-home:", "--no-script", "secure-host/internal"],
+    );
+    includes(
+        job(&text, "check"),
+        &[
+            "\n      safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}",
+        ],
+    );
 }
 
 #[test]
@@ -630,7 +668,11 @@ fn steering_receives_dispatch_item_through_policy_metadata_or_review_event() {
 
 #[test]
 fn runner_smoke_uses_same_policy_binary_and_host_sequence_as_wrappers() {
-    let text = read(".github/workflows/secure-host.yml");
+    smoke_source(&read(".github/workflows/secure-host.yml"));
+}
+
+fn smoke_source(text: &str) {
+    let text = host_source(text, "wrapper-sandbox");
     includes(&text, &[&format!("policy.yml@{PIN}")]);
     let policy = job(&text, "wrapper-policy");
     includes(policy, &["max-requests: '0'", "budget: '1'"]);
@@ -674,6 +716,54 @@ fn runner_smoke_uses_same_policy_binary_and_host_sequence_as_wrappers() {
             "test \"$(id -u)\" = \"$1\"",
         ],
     );
+}
+
+#[test]
+fn separate_immutable_host_pin_retains_wrapper_and_smoke_contracts() {
+    let direct = format!("cgwalters-forge/actions/secure-host@{}", "a".repeat(40));
+    assert!(!PIN.starts_with(&"a".repeat(40)));
+    for file in [DISPATCH, REVIEW, ".github/workflows/secure-host.yml"] {
+        let text = read(file);
+        let name = if file == ".github/workflows/secure-host.yml" {
+            "wrapper-sandbox"
+        } else {
+            "agent"
+        };
+        // Also works after production has moved from the forwarder to a direct pin.
+        let local = host_source(&text, name);
+        let fixture = local.replace(LOCAL_HOST, &direct);
+        if name == "agent" {
+            wrapper_release_and_order(&fixture);
+            wrapper_inputs(&fixture);
+            if file == REVIEW {
+                review_source(&fixture);
+            }
+            for call in ["policy", "check", "apply"] {
+                let changed = fixture.replace(
+                    &format!("/{call}.yml@{PIN}"),
+                    &format!("/{call}.yml@{} # v0.6.9", "b".repeat(40)),
+                );
+                assert!(std::panic::catch_unwind(|| wrapper_release_and_order(&changed)).is_err());
+            }
+        } else {
+            smoke_source(&fixture);
+        }
+        for invalid in [
+            "cgwalters-forge/actions/secure-host@main".to_owned(),
+            "cgwalters-forge/actions/secure-host@v0.6.9".to_owned(),
+            format!("cgwalters-forge/actions/secure-host@{}", "a".repeat(39)),
+            format!("cgwalters-forge/actions/secure-host@{}g", "a".repeat(39)),
+            format!(
+                "cgwalters-forge/actions/secure-host/extra@{}",
+                "a".repeat(40)
+            ),
+            format!("other/actions/secure-host@{}", "a".repeat(40)),
+            format!("{LOCAL_HOST}/extra"),
+        ] {
+            let changed = local.replace(LOCAL_HOST, &invalid);
+            assert!(std::panic::catch_unwind(|| host_source(&changed, name)).is_err());
+        }
+    }
 }
 
 #[test]

@@ -59,6 +59,17 @@ and inference registration. The dispatch wrapper rejects `fake` before
 provisioning because v0.6.5 supports its scripted profile only as the
 runner's user.
 
+The release train may replace only the local `secure-host` forwarder in both
+wrappers and the wrapper smoke job with
+`cgwalters-forge/actions/secure-host@<full immutable commit>`: the verified
+image PR's merge commit, independently of the agentic-job release commit.
+Mutable refs and other action sources are not accepted by the contract tests.
+Policy, check, apply and the policy-source checkout/prepare/run sequence stay
+on the agentic-job release; private inputs, host configuration projection and
+join/probe/host/run ordering remain unchanged. This prepares tests, not an
+image update or train enablement. Hosted matching-image and successful handback
+proof remain unverified.
+
 Both `prepare` and `run` use `/var/tmp/agentic-job`, outside the private
 workspace, with a traversable, non-listable directory (0711), private
 inputs (0600) and an executable binary (0755). This is the policy binary
