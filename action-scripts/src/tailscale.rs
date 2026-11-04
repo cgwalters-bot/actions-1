@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, env, fs, io::Write, path::Path, time::Duration}
 const TIMEOUT: Duration = Duration::from_secs(30);
 const EXCHANGE: &str = "https://api.tailscale.com/api/v2/oauth/token-exchange";
 const KEYS: [&str; 4] = ["oauth-client-id", "audience", "tags", "proxy"];
+const MAX_IDENTITY_BYTES: u64 = 1024 * 1024;
 
 fn settings(
     owners: &Map<String, Value>,
@@ -137,50 +138,59 @@ fn check_with(
     Ok(())
 }
 
-pub fn check() -> Result<()> {
-    let client = Client::builder()
+fn client() -> Result<Client> {
+    Client::builder()
         .timeout(TIMEOUT)
         .redirect(Policy::none())
+        // Like the JavaScript's fetch: the probe must reach the tailnet
+        // address itself, not a proxy named by the runner's environment.
+        .no_proxy()
         .build()
-        .context("build HTTP client")?;
+        .context("build HTTP client")
+}
+
+fn send(client: &Client, exchange: &str, request: Request<'_>) -> Result<Response> {
+    let (request, probe) = match request {
+        Request::Oidc { url, token } => (client.get(url).bearer_auth(token), false),
+        Request::Exchange { client: id, jwt } => (
+            client
+                .post(exchange)
+                .form(&[("client_id", id), ("jwt", jwt)]),
+            false,
+        ),
+        Request::Probe(url) => (client.post(url), true),
+    };
+    let response = request
+        .send()
+        .map_err(|_| anyhow::anyhow!("identity/proxy request failed"))?;
+    let status = response.status().as_u16();
+    let json = if probe || !(200..300).contains(&status) {
+        Value::Null
+    } else {
+        // Bound JSON reads too: a malformed endpoint must not consume unlimited memory.
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        response
+            .take(MAX_IDENTITY_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .context("read identity response")?;
+        if bytes.len() as u64 > MAX_IDENTITY_BYTES {
+            bail!("identity response exceeds 1 MiB");
+        }
+        serde_json::from_slice(&bytes).context("decode identity response")?
+    };
+    Ok(Response { status, json })
+}
+
+pub fn check() -> Result<()> {
+    let client = client()?;
     check_with(
         &super::required("ACTIONS_ID_TOKEN_REQUEST_URL")?,
         &super::required("ACTIONS_ID_TOKEN_REQUEST_TOKEN")?,
         &super::required("AUDIENCE")?,
         &super::required("OAUTH_CLIENT_ID")?,
         &super::required("PROXY")?,
-        |request| {
-            let (request, probe) = match request {
-                Request::Oidc { url, token } => (client.get(url).bearer_auth(token), false),
-                Request::Exchange { client: id, jwt } => (
-                    client
-                        .post(EXCHANGE)
-                        .form(&[("client_id", id), ("jwt", jwt)]),
-                    false,
-                ),
-                Request::Probe(url) => (client.post(url), true),
-            };
-            let response = request
-                .send()
-                .map_err(|_| anyhow::anyhow!("identity/proxy request failed"))?;
-            let status = response.status().as_u16();
-            let json = if probe || !(200..300).contains(&status) {
-                Value::Null
-            } else {
-                // Bound JSON reads too: a malformed endpoint must not consume unlimited memory.
-                use std::io::Read;
-                let mut bytes = Vec::new();
-                response
-                    .take(1024 * 1024 + 1)
-                    .read_to_end(&mut bytes)
-                    .context("read identity response")?;
-                if bytes.len() > 1024 * 1024 {
-                    bail!("identity response exceeds 1 MiB");
-                }
-                serde_json::from_slice(&bytes).context("decode identity response")?
-            };
-            Ok(Response { status, json })
-        },
+        |request| send(&client, EXCHANGE, request),
         &mut std::io::stdout().lock(),
     )
 }
@@ -327,6 +337,98 @@ mod tests {
                 );
             } else {
                 assert!(result.unwrap_err().to_string().contains(error));
+            }
+        }
+    }
+
+    /// Answers one loopback connection per response, in order, and returns
+    /// the raw requests it read.
+    fn serve(responses: Vec<(u16, Vec<u8>)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufRead, BufReader, Read};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let location = format!("{base}/redirected");
+        let server = std::thread::spawn(move || {
+            responses
+                .into_iter()
+                .map(|(status, body)| {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut reader = BufReader::new(&stream);
+                    let mut request = String::new();
+                    while !request.ends_with("\r\n\r\n") {
+                        assert_ne!(reader.read_line(&mut request).unwrap(), 0);
+                    }
+                    let length = request
+                        .lines()
+                        .filter_map(|line| line.split_once(':'))
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .map_or(0, |(_, value)| value.trim().parse().unwrap());
+                    let mut content = vec![0; length];
+                    reader.read_exact(&mut content).unwrap();
+                    request.push_str(&String::from_utf8(content).unwrap());
+                    // The client may stop reading an oversized body.
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nLocation: {location}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .and_then(|()| stream.write_all(&body));
+                    request
+                })
+                .collect()
+        });
+        (base, server)
+    }
+
+    #[test]
+    fn check_over_http() {
+        let ok = |json: Value| (200, json.to_string().into_bytes());
+        let oidc = || ok(json!({"value":"jwt-value"}));
+        let exchange = || ok(json!({"scope":"auth_keys"}));
+        let oversized = vec![b' '; MAX_IDENTITY_BYTES as usize + 1];
+        for (responses, error) in [
+            (vec![oidc(), exchange(), (401, vec![])], ""),
+            // A redirect is not followed: the server would see a fourth request.
+            (vec![oidc(), exchange(), (302, vec![])], "expected 401"),
+            (vec![(200, oversized)], "exceeds 1 MiB"),
+            (
+                vec![(200, b"not json".to_vec())],
+                "decode identity response",
+            ),
+            (vec![oidc(), (403, b"denied".to_vec())], "HTTP 403"),
+        ] {
+            let count = responses.len();
+            let (base, server) = serve(responses);
+            let client = client().unwrap();
+            let mut output = Vec::new();
+            let result = check_with(
+                &format!("{base}/token?existing=1&audience=old"),
+                "request-value",
+                "aud",
+                "client",
+                &format!("{base}/ignored"),
+                |request| send(&client, &format!("{base}/exchange"), request),
+                &mut output,
+            );
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), count);
+            let first = requests[0].to_ascii_lowercase();
+            assert!(first.starts_with("get /token?existing=1&audience=aud http/1.1\r\n"));
+            assert!(first.contains("\r\nauthorization: bearer request-value\r\n"));
+            if let Some(exchange) = requests.get(1) {
+                assert!(exchange.starts_with("POST /exchange HTTP/1.1\r\n"));
+                assert!(exchange.ends_with("\r\n\r\nclient_id=client&jwt=jwt-value"));
+            }
+            if let Some(probe) = requests.get(2) {
+                assert!(probe.starts_with("POST /v1/runs HTTP/1.1\r\n"));
+            }
+            match result {
+                Ok(()) => assert!(error.is_empty()),
+                Err(e) => {
+                    let e = format!("{e:#}");
+                    assert!(!error.is_empty() && e.contains(error), "{e}");
+                    assert!(!e.contains("request-value") && !e.contains("jwt-value"));
+                }
             }
         }
     }
