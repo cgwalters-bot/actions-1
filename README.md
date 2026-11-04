@@ -48,7 +48,7 @@ Before adopting v0.6.5, callers must migrate every bounds file (`allow`,
 selectors at the top level; exactly one forge section is required.
 Policy calls also require `actions: read` in the caller's permissions.
 
-Both wrappers pin agentic-job v0.6.9, by its commit, and check inference
+Both wrappers pin agentic-job v0.6.10, by its commit, and check inference
 reachability after the unchanged tailnet join, before securing the host.
 As upstream's agent.yml with `agent-user: sandbox`, they write the host
 configuration with `agentic-job config --host`, retaining `setup.script`,
@@ -126,7 +126,7 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.6.9**'s policy, check,
+event-review wrapper. It composes agentic-job **v0.6.10**'s policy, check,
 apply and review helpers, so that the tailnet and the inference broker admit
 this file's `job_workflow_ref`; agentic-job's review workflow can now run a
 caller's own network step instead (its #705), which callers have not moved
