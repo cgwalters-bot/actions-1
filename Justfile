@@ -10,6 +10,12 @@ test-lint:
 test-secure-host:
     CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-{{ cache_directory() }}/forge-lint}" cargo test --locked --manifest-path lint/Cargo.toml --test egress_probe --test read_probe
 
+# Rust replacements, before the first pinned release is wired into actions.
+test-action-scripts:
+    cargo test --locked --manifest-path action-scripts/Cargo.toml
+    cargo clippy --locked --manifest-path action-scripts/Cargo.toml --all-targets -- -D warnings
+    cargo fmt --manifest-path action-scripts/Cargo.toml --check
+
 renovate := "renovate@44.198.3"
 
 # The runner preset and this repository's use of it (renovate/README.md):
