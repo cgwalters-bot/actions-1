@@ -211,6 +211,55 @@ commit gets them only by reviewing an update to that pin. The dispatch
 wrapper continues to use these actions at `main` for non-review kinds;
 its review kind uses separate literal commit-pinned steps.
 
+### Advisory prose pass: blocked on head-bound comment publication
+
+The separate cheap prose pass requested in actions#195 is **not available**.
+No option, model fallback or publisher is added here. The concrete threats are
+turning wording suggestions into a merge verdict, posting suggestions for a
+head that has moved, and spending the main review budget when cheap inference
+is unconfigured. The main review's admission, verdict and status stay unchanged.
+
+The pinned agentic-job v0.6.11 commit
+`3f9f6425119b97bb3620a38fe0adc8e79be7dc8e` lacks the required publication contract:
+its `check.yml` runs `review verdict` whenever policy's `review` is true.
+`crates/agentic-job/src/review/verdict.rs::check_outputs` rejects an
+`add_comment` without a leading `VERDICT: APPROVE` or `VERDICT: CHANGES`.
+With `review: false`, generic analysis can use event admission and safe outputs,
+but `apply.yml` and the generic comment guard in `apply/applied.rs` do not
+revalidate the reviewed PR head before publishing. The stale-head check in
+`review/submit.rs` protects verdict submission, not generic comments. Adding a
+fake verdict, dropping head binding, or checking the head in a separate job
+before generic apply would not satisfy this contract.
+
+The prerequisite is an immutable helper release supporting head-bound,
+verdict-free analysis comments through policy/check/apply. It must retain the
+authorized public PR admission, carry the exact reviewed SHA, and reject stale
+publication in the writer. Check must bound the final advisory body and output
+count independently of the prompt. The sandbox must have no write credentials;
+only checked outputs may reach the writer. Failures, missing artifacts, noop and
+empty suggestions must never become a verdict, status or bucket escalation.
+
+The versioned prose checklist and prompt are available in tracker at
+[`5c4a8d61a94323703b71998c8b21eb7ecb2b386a`](https://github.com/cgwalters-forge/tracker/tree/5c4a8d61a94323703b71998c8b21eb7ecb2b386a/docs/review-checklist).
+Their version 0.1.0 limits supplied prose to 20,000 characters and three
+suggestions; these prompt limits alone are not checked publication or cost
+bounds. A future separate, off-by-default job must use that immutable trusted
+task over changed Markdown, commit messages and PR body as untrusted data,
+skip absent prose, and visibly skip absent cheap-model configuration. This
+repository's deployment defaults name only the main model, not a cheaper pool.
+Select an actually deployed cheaper model from trusted configuration without
+falling back to the main reviewer; read inference addresses from configuration.
+
+After the helper release, update policy/check/apply pins together and add the
+separate bounded analysis path without adding dependencies to the main verdict
+or status jobs. Document the actual caller repository, file, key and value with
+that implementation, rather than inventing an unsupported setting now. Rollout
+also needs reviewed wrapper-pin updates and an authorized public-PR smoke test
+covering prose/no-prose, injection, moved head, missing model/artifacts, empty
+suggestions and advisory failure while the main review result stays unchanged.
+Local wrapper tests are not that smoke test; merging this documentation does
+not activate the pass.
+
 ### Ordinary dispatched reviews (dormant)
 
 This is the wrapper slice of actions#174 / tracker#1171, not a caller

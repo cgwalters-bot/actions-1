@@ -1004,6 +1004,43 @@ fn real_reviews_are_opt_in_and_use_only_checked_artifact_at_admitted_head() {
 }
 
 #[test]
+fn main_review_publication_does_not_depend_on_advisory_results() {
+    let source = read(REVIEW);
+    let workflow = yaml(&source);
+    // An advisory failure must not block the main gate, and its text must
+    // never supply the checked verdict or reviewed head to that gate.
+    for (name, dependencies) in [
+        ("submit", vec!["policy", "agent", "check"]),
+        (
+            "status",
+            vec!["policy", "agent", "check", "submit", "apply"],
+        ),
+    ] {
+        let needs: Vec<_> = workflow["jobs"][name]["needs"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(needs, dependencies, "{name}");
+        let body = job(&source, name);
+        for line in body.lines().filter(|line| line.contains("needs.")) {
+            for reference in line.split("needs.").skip(1) {
+                let dependency = reference.split('.').next().unwrap();
+                assert!(dependencies.contains(&dependency), "{name}: {line}");
+            }
+        }
+        includes(
+            body,
+            &[
+                "HEAD_SHA: ${{ needs.policy.outputs.review-head }}",
+                "VERDICT: ${{ needs.check.outputs.verdict }}",
+            ],
+        );
+    }
+}
+
+#[test]
 fn publication_uses_policy_binary_not_removed_javascript_helpers() {
     let review = read(REVIEW);
     let dispatch = read(DISPATCH);
