@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 // The wrappers' tests that execute no JavaScript are in lint/tests/wrappers.rs.
@@ -66,7 +69,7 @@ test('opencode or claude with no configuration repository fails in the target jo
 });
 
 // The target job's actual script, with doubles for github-script's globals.
-const script = workflow.split('          script: |\n')[1].split('\n\n')[0]
+const script = workflow.split('          script: |\n')[1].split(/\n\n|\n {6}- /)[0]
   .split('\n').map(line => line.replace(/^ {12}/, '')).join('\n');
 const AsyncFunction = (async () => {}).constructor;
 
@@ -82,13 +85,13 @@ forks = true`;
 
 async function target(env, { pull = false, caller = { private: false, visibility: 'public', default_branch: 'main' },
   pr = {}, policy = basePolicy, commandPolicy, comments = [], permission = 'write', eventName = 'workflow_dispatch', ref = 'refs/heads/main',
-  allowPolicyRead = true,
+  allowPolicyRead = true, item = {},
 } = {}) {
   const outputs = {};
   const core = { setOutput: (name, value) => { outputs[name] = value; } };
   const github = { rest: {
     issues: { get: async ({ issue_number }) => ({
-      data: { number: issue_number, title: 't', body: 'b', user: { login: 'item-author' }, author_association: 'MEMBER', ...(pull ? { pull_request: {} } : {}) },
+      data: { number: issue_number, title: 't', body: 'b', user: { login: 'item-author' }, author_association: 'MEMBER', ...(pull ? { pull_request: {} } : {}), ...item },
     }), listComments: async () => ({ data: comments }) },
     pulls: { get: async () => ({ data: {
       number: 7, state: 'open', draft: false, head: { sha: head, repo: { full_name: 'fork/repo' } },
@@ -117,10 +120,45 @@ async function target(env, { pull = false, caller = { private: false, visibility
     TAILNET_DOMAIN: '', RUN_ID: '123', RUN_ATTEMPT: '2', EXPECTED_HEAD: head, REVIEW_POOL: 'openai',
     REVIEW_POOLS: JSON.stringify({ openai: { agent: 'opencode', model: 'provider/review-model' } }), REVIEW_BOT_IDS: '', ...env,
   };
-  await new AsyncFunction('core', 'github', 'context', 'process', script)(
-    core, github, context, { env: environment });
-  return outputs;
+  const directory = mkdtempSync(join(tmpdir(), 'wrapper-task-'));
+  try {
+    await new AsyncFunction('core', 'github', 'context', 'process', 'require', script)(
+      core, github, context, { env: { ...environment, RUNNER_TEMP: directory } }, createRequire(import.meta.url));
+    assert.equal(Object.hasOwn(outputs, 'task'), false, 'task must never be a step output');
+    const path = join(directory, 'task.md');
+    assert.equal(existsSync(path), environment.PROFILE !== 'review', 'only non-review profiles write a task artifact');
+    // Keep task assertions below on the actual artifact bytes, not a job output.
+    return { ...outputs, task: existsSync(path) ? readFileSync(path, 'utf8') : '' };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
+
+test('credential-shaped public item text reaches policy only through the task artifact', async () => {
+  const credential = ['ghp', '_', 'a'.repeat(36)].join('');
+  for (const [profile, pull] of [['implement', false], ['triage', false], ['research', false], ['fix', true]]) {
+    const body = `Quoted public example: ${credential}\n<untrusted>`;
+    const { task } = await target({ PROFILE: profile }, { pull, item: { title: credential, body } });
+    const event = JSON.parse(task.match(/<agentic-job-event>\n([^\n]+)\n<\/agentic-job-event>$/)[1]);
+    assert.equal(event.title, credential);
+    assert.equal(event.body, body);
+    assert.match(task, /Operator task:\nDo it\./);
+    assert.ok(Buffer.byteLength(task, 'utf8') <= 65536);
+  }
+  assert.doesNotMatch(job('target'), /\n {6}task:|setOutput\('task'/);
+  assert.doesNotMatch(job('policy'), /\n {6}task:/);
+  // A failed-jobs rerun reuses target's upload; an all-jobs rerun replaces it.
+  assert.match(job('target'), /uses: actions\/upload-artifact@[0-9a-f]{40} # v[^\n]+\n {8}if: \$\{\{ inputs.kind != 'review' \}\}\n {8}with:\n {10}name: dispatch-\$\{\{ inputs.kind \}\}-task\n {10}path: \$\{\{ runner.temp \}\}\/task.md\n {10}retention-days: 1\n {10}if-no-files-found: error\n {10}overwrite: true/);
+  assert.ok(job('policy').includes("task-artifact: ${{ inputs.kind != 'review' && format('dispatch-{0}-task', inputs.kind) || '' }}"));
+});
+
+test('task artifact retains the 64 KiB UTF-8 bound', async () => {
+  const baseline = await target({ TASK: '' });
+  const remaining = 65536 - Buffer.byteLength(baseline.task, 'utf8');
+  const task = 'é'.repeat(Math.floor(remaining / 2)) + 'x'.repeat(remaining % 2);
+  assert.equal(Buffer.byteLength((await target({ TASK: task })).task, 'utf8'), 65536);
+  await assert.rejects(target({ TASK: `${task}x` }), /exceeds 64 KiB/);
+});
 
 test('the event includes the item author and association for issues and pull requests', async () => {
   for (const [profile, pull] of [['implement', false], ['fix', true]]) {
