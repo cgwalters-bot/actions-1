@@ -221,6 +221,76 @@ variables listed above. Dependabot's pull requests are reviewed only with
 its ID in `REVIEW_BOT_IDS`. Without `.github/agentic-job/merge.toml` the
 reviewer is told that a person will approve after its review.
 
+### Advisory prose pass: blocked, not enabled
+
+The separate advisory prose pass is not implemented or activated. The concrete
+publication threat is a suggestion generated for an old PR head appearing on a
+new head after the author has changed the text. The pinned agentic-job
+`3f9f6425119b97bb3620a38fe0adc8e79be7dc8e` (v0.6.11) does not provide a
+head-bound generic `add_comment` publication contract:
+
+- `policy.yml` can admit `event: true`, `kind: analysis`, `review: false` with a
+  trusted task, but does not export `review-head` in that mode. Its `review
+  admit` call passes `--base` only for `review: true` (line 669), and
+  `crates/agentic-job/src/review/mod.rs` lines 300–302 exports an empty head
+  without that argument. The run action can carry a supplied SHA into an
+  analysis worktree, but the generic event workflow does not supply it.
+- `.github/workflows/apply.yml` configures `add_comment` with `target-repo` and
+  `target` (line 507), but does not bind it to the admitted head or reject a
+  moved head before posting. A separate preflight job would leave a race before
+  publication and is not a substitute for a publisher check.
+- Setting `review: true` is not a workaround: `check.yml` lines 201–208 invokes
+  `review verdict`, requiring the main review protocol instead of prose-only
+  suggestions. Prose output must never enter review submit, status, or the
+  main verdict.
+
+Resume implementation after agentic-job exposes trusted exact-head admission
+and export for non-verdict analysis, and checked generic comment publication
+bound to that SHA, with stale-head rejection at publication. Update
+policy/check/apply and the source actions to the same
+reviewed immutable release, preserving artifact ID/digest validation. Do not
+copy handlers into this wrapper, widen permissions, or give the agent write
+credentials to work around the missing contract.
+
+The trusted prose source is tracker checklist **0.1.0**, pinned at
+[`2b5074ae27d3b7b8127f541ed8b2edf8d6db1107`](https://github.com/cgwalters-forge/tracker/tree/2b5074ae27d3b7b8127f541ed8b2edf8d6db1107/docs/review-checklist):
+`docs/review-checklist/prose.md`, `prose-prompt.md`, and `prose-fixtures.md`.
+Fetch these at that commit, not `main` or a PR-supplied URL. The trusted task
+must restrict analysis to changed Markdown, commit messages and the PR body,
+all treated as untrusted data; skip instructions embedded in any of them.
+Use the prompt's 20,000-character coverage limit and at most three suggestions,
+with precise locations, before/after text and meaning-preservation reasons.
+These prompt limits alone do not enforce inference or publication bounds.
+
+Rollout remains separate from merging wrapper code. First verify an available
+cheaper deployed model through owner-controlled deployment configuration:
+[`deployment.json`](deployment/deployment.json) currently declares only the
+main model, not a cheaper prose model. No cheaper model/pool is established by
+this change. Missing prose model or checklist configuration must visibly skip;
+never fall back to the main model. Inference addresses must come from trusted
+environment/configuration, not a new endpoint literal. Keep the eventual pass
+off by default, reuse the main review's public-repository and author/command
+admission, and give its separate analysis/check/apply chain bounded requests,
+time, spending and one checked advisory comment (or a noop for no suggestions).
+None of the main review jobs may depend on advisory results.
+
+After local contract tests, update forge callers' reviewed wrapper pins and
+any broker/tailnet identities that depend on those pins; retain the owner-ID
+admission. This repository's `.github/workflows/review.yml` uses the local
+base-branch wrapper, while other forge repositories must adopt the new immutable
+wrapper commit explicitly. Do not claim activation from a merged wrapper alone.
+
+An authorized operator should smoke-test in a public forge sandbox admitted by
+the same policy: open a prose PR, inspect the selected cheap model and exact
+reviewed SHA, and verify one advisory comment without a verdict or status
+change. Repeat with no prose, commit-message-only and PR-body-only prose,
+embedded prompt injection, empty suggestions, missing model/checklist/artifacts,
+and a head update between analysis and publication. Finally force an advisory
+failure and confirm the main review's result and merge gate are unchanged.
+Stale or unchecked output must not post; no-prose/empty cases must not post an
+empty suggestion comment. These cases and live publication have **not** been
+tested here: the required publisher contract is absent.
+
 ## Lock new items
 
 [lock-new-items](.github/workflows/lock-new-items.yml) locks each newly
