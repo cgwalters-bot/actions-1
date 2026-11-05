@@ -82,6 +82,7 @@ forks = true`;
 
 async function target(env, { pull = false, caller = { private: false, visibility: 'public', default_branch: 'main' },
   pr = {}, policy = basePolicy, commandPolicy, comments = [], permission = 'write', eventName = 'workflow_dispatch', ref = 'refs/heads/main',
+  allowPolicyRead = true,
 } = {}) {
   const outputs = {};
   const core = { setOutput: (name, value) => { outputs[name] = value; } };
@@ -98,6 +99,7 @@ async function target(env, { pull = false, caller = { private: false, visibility
       assert.equal(`${owner}/${repo}`, 'caller/repo');
       return { data: caller };
     }, getContent: async ({ path, ref: policyRef }) => {
+      assert.ok(allowPolicyRead, 'rejected target must not reach policy reads');
       assert.equal(policyRef, 'b'.repeat(40), 'read policy at dispatched trusted SHA, never head');
       assert.ok(['workflow/review.toml', 'workflow/review-command.toml'].includes(path));
       const text = path.endsWith('review-command.toml')
@@ -302,10 +304,10 @@ test('ordinary review requires explicit pool/head and never falls back to deploy
 });
 
 test('review binds an open ready PR to base repository/default branch and expected head', async () => {
-  for (const pr of [{ state: 'closed' }, { draft: true }, { draft: undefined }, { number: 8 },
+  for (const pr of [{ state: 'closed' }, { draft: true }, { draft: null }, { draft: undefined }, { number: 8 },
     { head: { sha: 'c'.repeat(40) } }, { base: { ref: 'other', repo: { full_name: 'caller/repo' } } },
     { base: { ref: 'main', repo: { full_name: 'other/repo' } } }]) {
-    await assert.rejects(review({}, { pr }), /closed, draft, on the wrong base or has moved head/);
+    await assert.rejects(review({}, { pr, allowPolicyRead: false }), /closed, draft, on the wrong base or has moved head/);
   }
   await assert.rejects(review({ TARGET_REPO: 'other/repo' }), /base dispatch/);
   await assert.rejects(review({}, { eventName: 'pull_request_target' }), /base dispatch/);
@@ -374,6 +376,7 @@ test('submission preflight rejects a moved head, closure, draft or changed base'
     { rest: { pulls: { get: async () => ({ data: pull }) } } }, { repo: { owner: 'caller', repo: 'repo' } },
     { env: { PULL: '7', HEAD_SHA: head, BASE: 'main' } });
   await run(original);
-  for (const delta of [{ head: { sha: 'c'.repeat(40) } }, { state: 'closed' }, { draft: true },
-    { base: { ref: 'other', repo: { full_name: 'caller/repo' } } }]) await assert.rejects(run({ ...original, ...delta }), /before publication/);
+  for (const delta of [{ head: { sha: 'c'.repeat(40) } }, { state: 'closed' }, { draft: true }, { draft: null },
+    { base: { ref: 'other', repo: { full_name: 'caller/repo' } } },
+    { base: { ref: 'main', repo: { full_name: 'other/repo' } } }]) await assert.rejects(run({ ...original, ...delta }), /before publication/);
 });

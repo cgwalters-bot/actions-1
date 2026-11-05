@@ -287,6 +287,66 @@ stale-head, cancellation, failed-check/noop and authorized/unauthorized
 command cases. Actions must be allowed to create/approve PRs. No ruleset,
 legacy removal or rollout is part of this change.
 
+### Draft classifier reviews: blocked on the checked helper
+
+The review-only draft extension requested in actions#200 is **not available**.
+Ordinary dispatched and event reviews still reject drafts; no opt-in or
+`agent-board-review-result-v1` writer job is exposed. The concrete threat is
+laundering arbitrary agent prose (or an ordinary implementation run) into a
+verified quick classification by attaching a trusted writer job name. An
+ordinary checked APPROVE is not a checked draft-classifier result.
+
+The pinned agentic-job v0.6.11 commit
+`3f9f6425119b97bb3620a38fe0adc8e79be7dc8e` cannot carry this contract safely:
+`crates/agentic-job/src/review/mod.rs`'s `Dispatch::resolve` unconditionally
+rejects drafts with a requested head, and `review verdict` / `review submit`
+validate a verdict comment, not the embedded classifier JSON. The latter
+rechecks open state/head, not the exact title/description or base. Increasing
+the prose instructions, removing `review-head`, or renaming `submit` would
+bypass those missing checks rather than implement them.
+
+The prerequisite is an immutable agentic-job release extending its existing
+policy/check/submit helpers and checked artifact, with a base-owned,
+off-by-default **review-only** draft mode. It must bind repository, PR,
+expected head, base and exact current title/description through policy,
+independent check and publish-time revalidation. Ordinary draft rejection,
+credential-free sandbox fetching, no partial apply, cancellation/failed-check/
+noop guards and the base `GITHUB_TOKEN` writer must remain intact. This mode
+must not grant fix, ready, promotion or merge authority.
+
+The exact consumer contract is [agent-board#680's docs/poll.md](https://github.com/cgwalters-forge/agent-board/blob/71fe8272e70ba8438e46ba43336eed862bf7cdc6/docs/poll.md#draft-review-result-contract).
+Only an actual approving review may produce `APPROVED` with `commit_id`, one
+`agent-board-draft-review` JSON fence and one trusted gh-aw run marker. Check
+must reject duplicate fences/JSON fields, unknown fields/versions, forged
+markers, wrong targets and oversized results; enforce the 8192-byte **final
+body** limit (including the writer's footer/marker) and nonempty single-line
+evidence/reason of at most 1024 bytes each. The schema is
+`agent-board/draft-review/v1`; its exact fields are `schema`, `repository`,
+`pr`, `reviewed_head`, `title`, `description`, `semantic_diff`,
+`description_assessment`, `change_category`, `risk`, `evidence` and `reason`.
+Only `pass` / `matches` / `none` for semantics / description / risk can
+support quick; conservative, unknown or negative findings cannot claim it.
+Categories are `docs`, `dependencies`, `ci`, `mechanical` or
+`narrow_fix_with_test`, not path-derived proof. The consumer still owns its
+deterministic file/line/path/CI vetoes and reservation/run provenance checks.
+
+After that release, update the wrapper's policy/check/apply pins together,
+retain literal privileged dependency pins, and reserve the exact writer job
+name only for independently checked `kind=review` classifier output. Its
+publication must occur within that successful job's latest-attempt interval;
+a skipped, failed, cancelled or unchecked job cannot attest a result. Keep
+head code out of the writer context. Add offline helper fixtures for forged,
+duplicate, oversized and mismatched fields, title/description edits, closed/
+retargeted/moved PRs, explicit draft admission and exact writer provenance
+before exposing the opt-in. Local regressions currently cover rejection and
+the ordinary writer boundaries, not a functioning classifier.
+
+Caller migration is blocked too: do not enable draft intake or rename a
+general job to satisfy the consumer. No caller configuration, permissions,
+credentials or live reviews change here. The eventual wrapper option's name
+and caller value must be documented with the implementing release, not
+guessed against today's incompatible CLI.
+
 Runs may edit `.github/` here, so pull requests are reviewed by
 [this repository's caller](.github/workflows/review.yml) of the wrapper
 above. It uses a local reference so it runs the base branch's version, never

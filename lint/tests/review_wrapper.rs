@@ -390,6 +390,26 @@ fn ordinary_review_privileged_dependencies_are_exclusive_literal_pins() {
     }
 }
 
+// Until policy/check/submit support the structured classifier contract, an
+// ordinary verdict writer must not impersonate the consumer's reserved job.
+#[test]
+fn draft_classifier_writer_name_is_not_claimed_by_ordinary_workflows() {
+    let reserved = "agent-board-review-result-v1";
+    for entry in fs::read_dir(root().join(".github/workflows")).unwrap() {
+        let path = entry.unwrap().path();
+        if !matches!(
+            path.extension().and_then(|s| s.to_str()),
+            Some("yml" | "yaml")
+        ) {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        // Check the raw text too: an expression or reusable caller name must
+        // not hide an ordinary writer behind this provenance contract.
+        assert!(!text.contains(reserved), "{}", path.display());
+    }
+}
+
 struct Event<'a> {
     association: &'a str,
     bot: bool,
