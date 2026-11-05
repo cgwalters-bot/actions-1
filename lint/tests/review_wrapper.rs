@@ -10,7 +10,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 // What both wrappers call, by immutable commit with its tag as a comment: a
 // release, or, when a caller needs an unreleased fix, a commit of main with
 // the tag of its CI build (`build-DIGEST`), which zizmor's ref-version-mismatch
-// audit resolves. A bump changes this, the six calls, the smoke job's two and
+// audit resolves. A bump changes this, the nine calls, the smoke job's two and
 // the README.
 const PIN: &str = "489c69d53cc23b989131952c9e3ca4d5add4e2b5 # v0.6.14";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
@@ -18,6 +18,7 @@ const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
 // Both wrappers' agent job, called by local path.
 const AGENT: &str = ".github/workflows/cgwalters-agent.yml";
 const SMOKE: &str = ".github/workflows/secure-host.yml";
+const PROSE_POLICY: &str = "prose-policy";
 const LOCAL_HOST: &str = "./.agentic-job-source/secure-host";
 
 // Moving a tag or substituting another action must not change privileged setup.
@@ -585,14 +586,15 @@ fn ordinary_review_privileged_dependencies_are_exclusive_literal_pins() {
         }
     }
     // The tailnet join is privileged for every kind: one pinned step in
-    // each wrapper's register job and in the agent job both call at their
-    // own commit, and nowhere else.
-    for (file, name) in [
-        (DISPATCH, "register"),
-        (REVIEW, "register"),
-        (AGENT, "agent"),
+    // each register job (the review wrapper's prose pass has its own) and in
+    // the agent job both call at their own commit, and nowhere else.
+    for (file, name, count) in [
+        (DISPATCH, "register", 1),
+        (REVIEW, "register", 2),
+        (REVIEW, "prose-register", 2),
+        (AGENT, "agent", 1),
     ] {
-        assert_eq!(read(file).matches("tailscale@").count(), 1, "{file}");
+        assert_eq!(read(file).matches("tailscale@").count(), count, "{file}");
         let source = yaml(&read(file));
         let joins: Vec<_> = source["jobs"][name]["steps"]
             .as_vec()
@@ -644,6 +646,7 @@ struct Event<'a> {
     draft: bool,
     command: Option<&'a str>,
     visibility: Option<&'a str>,
+    prose_model: &'a str,
 }
 
 impl Default for Event<'_> {
@@ -656,11 +659,16 @@ impl Default for Event<'_> {
             draft: false,
             command: None,
             visibility: Some("public"),
+            prose_model: "",
         }
     }
 }
 
 fn admits(event: Event<'_>) -> bool {
+    admitted_by(event, "policy")
+}
+
+fn admitted_by(event: Event<'_>, job: &str) -> bool {
     let source = yaml(&read(REVIEW));
     let context = BTreeMap::from([
         (
@@ -703,8 +711,12 @@ fn admits(event: Event<'_>) -> bool {
             Yaml::Boolean(event.visibility != Some("public")),
         ),
         ("vars.REVIEW_BOT_IDS", Yaml::String(event.ids.into())),
+        (
+            "vars.AGENT_PROSE_MODEL",
+            Yaml::String(event.prose_model.into()),
+        ),
     ]);
-    evaluate(source["jobs"]["policy"]["if"].as_str().unwrap(), &context)
+    evaluate(source["jobs"][job]["if"].as_str().unwrap(), &context)
 }
 
 #[test]
@@ -879,8 +891,13 @@ fn review_source(text: &str) {
     );
     let source = yaml(text);
     let jobs = &source["jobs"];
-    for name in ["policy", "check", "apply"] {
-        includes(job(text, name), &[&format!("/{name}.yml@{PIN}")]);
+    for prefix in pipelines(text) {
+        for name in ["policy", "check", "apply"] {
+            includes(
+                job(text, &format!("{prefix}{name}")),
+                &[&format!("/{name}.yml@{PIN}")],
+            );
+        }
     }
     calls_register_then_agent(text);
     for name in jobs
@@ -889,7 +906,7 @@ fn review_source(text: &str) {
         .keys()
         .map(|key| key.as_str().unwrap())
     {
-        if !["apply", "agent"].contains(&name) {
+        if !["apply", "agent", "prose-apply", "prose-agent"].contains(&name) {
             excludes(job(text, name), &["secrets."]);
         }
     }
@@ -904,36 +921,39 @@ fn calls_register_then_agent(text: &str) {
     let source = yaml(text);
     let jobs = &source["jobs"];
     register_job(text);
-    let agent = &jobs["agent"];
-    assert_eq!(
-        agent["uses"].as_str(),
-        Some("./.github/workflows/cgwalters-agent.yml")
-    );
-    assert!(
-        agent["needs"]
-            .as_vec()
-            .unwrap()
-            .contains(&Yaml::String("register".into()))
-    );
-    assert_eq!(
-        agent["permissions"],
-        yaml("contents: read\nissues: read\npull-requests: read\nactions: read")
-    );
-    assert_eq!(
-        agent["secrets"],
-        yaml(
-            "INFERENCE_RUN_TOKEN: ${{ needs.register.outputs.run-token }}\nTAILNET_KEY: ${{ needs.register.outputs.tailnet-key }}"
-        )
-    );
-    assert_eq!(
-        agent["with"]["policy"].as_str(),
-        Some("${{ toJSON(needs.policy.outputs) }}")
-    );
+    let prefixes = pipelines(text);
+    for prefix in &prefixes {
+        let agent = &jobs[format!("{prefix}agent").as_str()];
+        assert_eq!(
+            agent["uses"].as_str(),
+            Some("./.github/workflows/cgwalters-agent.yml")
+        );
+        assert!(
+            agent["needs"]
+                .as_vec()
+                .unwrap()
+                .contains(&Yaml::String(format!("{prefix}register")))
+        );
+        assert_eq!(
+            agent["permissions"],
+            yaml("contents: read\nissues: read\npull-requests: read\nactions: read")
+        );
+        assert_eq!(
+            agent["secrets"],
+            yaml(&format!(
+                "INFERENCE_RUN_TOKEN: ${{{{ needs.{prefix}register.outputs.run-token }}}}\nTAILNET_KEY: ${{{{ needs.{prefix}register.outputs.tailnet-key }}}}"
+            ))
+        );
+        assert_eq!(
+            agent["with"]["policy"].as_str(),
+            Some(format!("${{{{ toJSON(needs.{prefix}policy.outputs) }}}}").as_str())
+        );
+    }
     let grants = text
         .lines()
         .filter(|line| line.trim() == "id-token: write")
         .count();
-    assert_eq!(grants, 2, "register's and check's");
+    assert_eq!(grants, 2 * prefixes.len(), "each register's and check's");
 }
 
 /// The shared agent job: upstream agent.yml's steps with our join, as the
@@ -1034,8 +1054,25 @@ fn register_job_is_hosted_and_holds_the_only_identity_token() {
     }
 }
 
+/// A wrapper's pipelines by job-name prefix: the review wrapper's advisory
+/// prose pass has its own policy, register, agent, check and apply jobs.
+fn pipelines(text: &str) -> Vec<&'static str> {
+    let mut prefixes = vec![""];
+    if !yaml(text)["jobs"][PROSE_POLICY].is_badvalue() {
+        prefixes.push("prose-");
+    }
+    prefixes
+}
+
 fn register_job(text: &str) {
-    let body = job(text, "register");
+    for prefix in pipelines(text) {
+        register_job_of(text, prefix);
+    }
+}
+
+fn register_job_of(text: &str, prefix: &str) {
+    let policy = format!("{prefix}policy");
+    let body = job(text, &format!("{prefix}register"));
     excludes(
         body,
         &[
@@ -1046,13 +1083,13 @@ fn register_job(text: &str) {
         ],
     );
     let source = yaml(text);
-    let register = &source["jobs"]["register"];
+    let register = &source["jobs"][format!("{prefix}register").as_str()];
     assert!(register["uses"].is_badvalue());
     assert_eq!(register["runs-on"].as_str(), Some("ubuntu-26.04"));
     assert_eq!(register["permissions"], yaml("id-token: write"));
     assert_eq!(
         register["if"].as_str(),
-        Some("${{ needs.policy.outputs.admitted == 'true' }}")
+        Some(format!("${{{{ needs.{policy}.outputs.admitted == 'true' }}}}").as_str())
     );
     assert_eq!(
         register["outputs"],
@@ -1088,7 +1125,9 @@ fn register_job(text: &str) {
             "EXPECTED_REPOSITORY: cgwalters-forge/agentic-job",
             "[[ \"$BINARY\" =~ ^[1-9][0-9]*$ && \"$POLICY\" =~ ^[1-9][0-9]*$ ]] ||",
             "mint: 'true'",
-            "artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}",
+            &format!(
+                "artifact-ids: ${{{{ needs.{policy}.outputs.binary-artifact-id }}}},${{{{ needs.{policy}.outputs.policy-artifact-id }}}}"
+            ),
             "\"$JOB_DIR/agentic-job\" register --config \"$JOB_DIR/config.toml\" --output \"$GITHUB_OUTPUT\"",
         ],
     );
@@ -1137,10 +1176,11 @@ fn wrapper_release_and_order(text: &str) {
                 .any(|part| call.contains(part))
         })
         .collect();
-    assert_eq!(calls.len(), 3, "{file}");
+    let expected = 3 * pipelines(text).len();
+    assert_eq!(calls.len(), expected, "{file}");
     assert_eq!(
         text.matches("uses: cgwalters-forge/agentic-job/").count(),
-        3,
+        expected,
         "{file}"
     );
     for call in calls {
@@ -1520,6 +1560,205 @@ fn real_reviews_are_opt_in_and_use_only_checked_artifact_at_admitted_head() {
             "\"$RUNNER_TEMP/bin/agentic-job\" review status",
         ],
     );
+}
+
+#[test]
+fn main_review_publication_does_not_depend_on_advisory_results() {
+    let source = read(REVIEW);
+    let workflow = yaml(&source);
+    // An advisory failure must not block the main gate, and its text must
+    // never supply the checked verdict or reviewed head to that gate.
+    // Advisory mode makes policy return `review: false`, which would
+    // silently stop the main verdict, so only a separate job may set it.
+    assert!(workflow["jobs"]["policy"]["with"]["advisory"].is_badvalue());
+    for (name, dependencies) in [
+        ("submit", vec!["policy", "agent", "check"]),
+        (
+            "status",
+            vec!["policy", "agent", "check", "submit", "apply"],
+        ),
+    ] {
+        let needs: Vec<_> = workflow["jobs"][name]["needs"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(needs, dependencies, "{name}");
+        let body = job(&source, name);
+        for line in body.lines().filter(|line| line.contains("needs.")) {
+            for reference in line.split("needs.").skip(1) {
+                let dependency = reference.split('.').next().unwrap();
+                assert!(dependencies.contains(&dependency), "{name}: {line}");
+            }
+        }
+        includes(
+            body,
+            &[
+                "HEAD_SHA: ${{ needs.policy.outputs.review-head }}",
+                "VERDICT: ${{ needs.check.outputs.verdict }}",
+            ],
+        );
+    }
+}
+
+// The advisory prose pass: off unless the caller names a cheaper model,
+// never the main reviewer's; agentic-job's head-bound advisory contract with
+// its own artifacts and a smaller budget; and a pipeline of its own, which
+// nothing of the main review reads and which never submits or reports a
+// verdict.
+#[test]
+fn advisory_prose_pass_is_opt_in_verdict_free_and_separate() {
+    let source = read(REVIEW);
+    let workflow = yaml(&source);
+    let jobs = &workflow["jobs"];
+    let policy = &jobs[PROSE_POLICY];
+    let condition = policy["if"].as_str().unwrap();
+    for part in [
+        "github.event.repository.visibility == 'public'",
+        "vars.AGENT_PROSE_MODEL != ''",
+        "github.event_name == 'pull_request_target'",
+        "!github.event.pull_request.draft",
+        "github.event.pull_request.author_association",
+    ] {
+        assert!(condition.contains(part), "{part}");
+    }
+    let with = &policy["with"];
+    assert_eq!(
+        with["model"].as_str(),
+        Some("${{ vars.AGENT_PROSE_MODEL }}")
+    );
+    for (key, value) in [
+        ("event", true),
+        ("review", true),
+        ("advisory", true),
+        ("apply-partial", false),
+    ] {
+        assert_eq!(with[key].as_bool(), Some(value), "{key}");
+    }
+    for (key, value) in [
+        ("kind", "analysis"),
+        ("outputs", "add_comment,noop"),
+        ("max-outputs", "1"),
+        ("notify", "none"),
+        ("artifact-prefix", "prose-"),
+        ("review-task", "workflow/prose.md"),
+        ("allow", "workflow/review.toml"),
+    ] {
+        assert_eq!(with[key].as_str(), Some(value), "{key}");
+    }
+    for key in [
+        "review-item",
+        "review-head",
+        "comment-target",
+        "output-repo",
+        "item-repo",
+        "apply-environment",
+        "proposals-artifact",
+    ] {
+        assert!(with[key].is_badvalue(), "{key}");
+    }
+    let main = &jobs["policy"]["with"];
+    for key in ["max-requests", "budget", "timeout"] {
+        let limit = |with: &Yaml| with[key].as_str().unwrap().parse::<u32>().unwrap();
+        assert!(limit(with) < limit(main), "{key}");
+    }
+    for (name, definition) in jobs.as_hash().unwrap() {
+        let name = name.as_str().unwrap();
+        let prose = name.starts_with("prose-");
+        let mut dependencies: Vec<_> = match &definition["needs"] {
+            Yaml::String(one) => vec![one.as_str()],
+            Yaml::Array(all) => all.iter().map(|v| v.as_str().unwrap()).collect(),
+            _ => vec![],
+        };
+        let body = job(&source, name);
+        for line in body.lines().filter(|line| line.contains("needs.")) {
+            for reference in line.split("needs.").skip(1) {
+                dependencies.push(reference.split('.').next().unwrap());
+            }
+        }
+        for dependency in dependencies {
+            if prose {
+                assert!(
+                    dependency.starts_with("prose-") || dependency == "admit",
+                    "{name}: {dependency}"
+                );
+            } else {
+                assert!(!dependency.starts_with("prose-"), "{name}: {dependency}");
+            }
+        }
+        if prose {
+            excludes(
+                body,
+                &[
+                    "review submit",
+                    "review status",
+                    "statuses:",
+                    "verdict",
+                    "AGENT_MODEL",
+                ],
+            );
+        }
+    }
+    includes(
+        &read("workflow/prose.md"),
+        &[
+            "Return exactly one safe output.",
+            "return noop instead; never post an",
+            "with VERDICT, approve or reject the change",
+        ],
+    );
+}
+
+// The prose pass starts only for an automatic event the main review admits,
+// and only once a cheaper model is configured; a `/review` comment, which
+// re-runs the main review, does not run it again.
+#[test]
+fn advisory_prose_pass_admits_only_configured_automatic_reviews() {
+    let events = || {
+        [
+            Event {
+                association: "COLLABORATOR",
+                ..Event::default()
+            },
+            Event {
+                association: "OWNER",
+                draft: true,
+                ..Event::default()
+            },
+            Event {
+                association: "MEMBER",
+                visibility: Some("private"),
+                ..Event::default()
+            },
+            Event::default(),
+            Event {
+                bot: true,
+                ids: "[42]",
+                ..Event::default()
+            },
+            Event {
+                association: "OWNER",
+                command: Some("/review"),
+                ..Event::default()
+            },
+        ]
+    };
+    let main = [true, false, false, false, true, true];
+    let prose = [true, false, false, false, true, false];
+    for (i, event) in events().into_iter().enumerate() {
+        assert!(!admitted_by(event, PROSE_POLICY), "unconfigured {i}");
+    }
+    for (i, event) in events().into_iter().enumerate() {
+        assert_eq!(admits(event), main[i], "main {i}");
+    }
+    for (i, event) in events().into_iter().enumerate() {
+        let configured = Event {
+            prose_model: "praxis/cheap",
+            ..event
+        };
+        assert_eq!(admitted_by(configured, PROSE_POLICY), prose[i], "{i}");
+    }
 }
 
 #[test]

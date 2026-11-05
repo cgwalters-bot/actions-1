@@ -337,7 +337,8 @@ fn broker_defaults_follow_the_tailnet_configuration() {
         .skip(1)
         .map(|suffix| suffix.split_once('\'').unwrap().0)
         .collect();
-    assert_eq!(fallbacks, [broker]);
+    // The review's policy call and its advisory prose pass's.
+    assert_eq!(fallbacks, [broker, broker]);
     let dispatch = read(AGENTIC_JOB);
     assert_eq!(captures(&dispatch, "\n          BROKER_URL: "), [broker]);
 }
@@ -676,7 +677,10 @@ jobs:
 #[test]
 fn review_wrapper_pins_its_own_actions_by_full_commit() {
     for (file, actions) in [
-        (REVIEW, &["admit", "deployment", "tailscale"][..]),
+        (
+            REVIEW,
+            &["admit", "deployment", "tailscale", "tailscale"][..],
+        ),
         (AGENT, &["tailscale", "secure-host"]),
     ] {
         let text = read(file);
@@ -1339,24 +1343,27 @@ fn agent_joins_the_tailnet_with_the_register_jobs_key() {
         "\n      - name: Join the tailnet\n        uses: cgwalters-forge/actions/tailscale@"
     ));
     assert!(agent.contains(&line(10, "authkey: ${{ secrets.TAILNET_KEY }}")));
-    for file in [AGENTIC_JOB, REVIEW] {
+    // The review wrapper's advisory prose pass has its own register job.
+    for (file, prefixes) in [(AGENTIC_JOB, &[""][..]), (REVIEW, &["", "prose-"])] {
         let workflow = read(file);
-        let register = job(&workflow, "register");
-        assert!(register.contains(&line(10, "mint: 'true'")), "{file}");
-        assert!(
-            register.contains(&line(6, "tailnet-key: ${{ steps.tailnet.outputs.key }}")),
-            "{file}"
-        );
+        for prefix in prefixes {
+            let register = job(&workflow, &format!("{prefix}register"));
+            assert!(register.contains(&line(10, "mint: 'true'")), "{file}");
+            assert!(
+                register.contains(&line(6, "tailnet-key: ${{ steps.tailnet.outputs.key }}")),
+                "{file}"
+            );
+            assert!(
+                job(&workflow, &format!("{prefix}agent")).contains(&line(
+                    6,
+                    &format!("TAILNET_KEY: ${{{{ needs.{prefix}register.outputs.tailnet-key }}}}")
+                )),
+                "{file}"
+            );
+        }
         assert_eq!(
             workflow.matches("- name: Join the tailnet").count(),
-            1,
-            "{file}"
-        );
-        assert!(
-            job(&workflow, "agent").contains(&line(
-                6,
-                "TAILNET_KEY: ${{ needs.register.outputs.tailnet-key }}"
-            )),
+            prefixes.len(),
             "{file}"
         );
     }

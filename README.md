@@ -452,6 +452,50 @@ commit gets them only by reviewing an update to that pin. The dispatch
 wrapper continues to use these actions at `main` for non-review kinds;
 its review kind uses separate literal commit-pinned steps.
 
+### Advisory prose pass (off by default)
+
+The review wrapper can run a second, cheaper pass that suggests clearer
+wording in a pull request's changed Markdown, commit messages and body, as
+actions#195 asks. Its suggestions are advice the author may decline: they
+never become a verdict, a `review` status, an approval or a bucket
+escalation. The concrete threats are turning wording suggestions into a merge
+verdict, posting suggestions for a head that has moved, and spending the main
+review's model and budget on prose.
+
+It is off until a caller sets the repository variable `AGENT_PROSE_MODEL` to a
+cheaper model the inference proxy serves. Nothing falls back to the main
+reviewer's `AGENT_MODEL` or [deployment](deployment/deployment.json) default,
+which names no cheaper pool; without the variable the `prose-*` jobs show as
+skipped. The pass runs only for the automatic `pull_request_target` events
+the main review admits, not for `/review` comments, with a smaller request,
+spend and time limit than the main review. The agent, its configuration and
+the inference addresses come from the same variables as the main review's.
+
+Its `prose-policy`, `prose-register`, `prose-agent`, `prose-check` and
+`prose-apply` jobs are a pipeline of their own at the main review's
+agentic-job pin, with their own credentials and `prose-` artifacts. No main
+job needs them, so a prose failure, noop or missing artifact cannot change
+the main review's result. They use agentic-job's
+[head-bound advisory contract](https://github.com/cgwalters-forge/agentic-job/blob/489c69d53cc23b989131952c9e3ca4d5add4e2b5/docs/safe-outputs.md#head-bound-advisory-publication)
+(`advisory: true`): policy binds the admitted pull request, base and head and
+returns `review: false`, check admits exactly one comment or one noop, and
+the writer reads the pull request again before posting and refuses a moved
+head (a read-to-POST race remains). They never call `review submit` or
+`review status`.
+
+The trusted task, [workflow/prose.md](workflow/prose.md), is read from the
+base checkout. It follows tracker's prose checklist 0.1.0 (at
+[`5c4a8d61a94323703b71998c8b21eb7ecb2b386a`](https://github.com/cgwalters-forge/tracker/tree/5c4a8d61a94323703b71998c8b21eb7ecb2b386a/docs/review-checklist)),
+treats the reviewed text as untrusted data, and asks for at most three
+suggestions over at most 20,000 characters, or a noop when there is no prose
+or nothing to suggest. Those two limits are the prompt's, not checked bounds.
+
+Local wrapper tests check the jobs' configuration and admission, not a live
+run. Before a caller enables the variable, an authorized public pull request
+should show the pass with and without changed prose, against an injection
+attempt in the body, a head moved before apply, and a failed or noop advisory
+run, with the main review's result unchanged in each.
+
 ### Ordinary dispatched reviews (dormant)
 
 This is the wrapper slice of actions#174 / tracker#1171, not a caller
