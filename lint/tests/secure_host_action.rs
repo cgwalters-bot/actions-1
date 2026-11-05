@@ -467,6 +467,46 @@ fn ci_egress_policy_fixture_keeps_git_fetch_from_github() {
 }
 
 #[test]
+fn metadata_probe_counts_http_errors_as_reachable_but_not_transport_failures() {
+    let temp = TempDir::new();
+    let curl = temp.write(
+        "curl",
+        r#"#!/bin/bash
+if [[ "$*" == *https://github.com/* ]]; then exit "${CONTROL_STATUS:-0}"; fi
+if [[ "$*" == *--fail* && "$METADATA_STATUS" == 401 ]]; then exit 22; fi
+if [[ "$METADATA_STATUS" == unreachable ]]; then exit 7; fi
+exit 0
+"#,
+    );
+    fs::set_permissions(&curl, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", temp.0.display(), std::env::var("PATH").unwrap());
+    for (status, phase, control, success) in [
+        ("200", "before", "0", true),
+        ("401", "before", "0", true),
+        ("unreachable", "before", "0", false),
+        ("200", "after", "0", false),
+        ("401", "after", "0", false),
+        ("unreachable", "after", "0", true),
+        ("unreachable", "after", "7", false),
+    ] {
+        let out = Command::new("just")
+            .arg("--justfile")
+            .arg(secure_host().join("../Justfile"))
+            .args(["secure-host-metadata", phase])
+            .env("PATH", &path)
+            .env("METADATA_STATUS", status)
+            .env("CONTROL_STATUS", control)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.success(),
+            success,
+            "{status} {phase} {control}: {out:?}"
+        );
+    }
+}
+
+#[test]
 fn runner_env_passes_only_trust_store_paths_under_the_proxy_directory() {
     let file = "NODE_EXTRA_CA_CERTS=/etc/egress-proxy/ca.pem\nREQUESTS_CA_BUNDLE=/etc/egress-proxy/ca-bundle.pem\n";
     let cases = [

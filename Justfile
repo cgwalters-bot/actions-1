@@ -59,12 +59,13 @@ secure-host-options want:
     if systemctl is-active --quiet docker.service; then echo "::error::docker is still running"; exit 1; fi
 
 # The cloud metadata service (Azure's, on GitHub's hosted runners) answers
-# before the action and not after it.
+# before the action and not after it. An HTTP error (such as 401) is still
+# an answer: only a transport failure proves the metadata endpoint unreachable.
 secure-host-metadata want:
     #!/usr/bin/env bash
     set -euo pipefail
     url="http://169.254.169.254/metadata/instance?api-version=2021-02-01"
-    if curl -sS --fail --max-time 10 -H Metadata:true -o /dev/null "$url"; then answered=yes; else answered=no; fi
+    if curl -sS --max-time 10 -H Metadata:true -o /dev/null "$url"; then answered=yes; else answered=no; fi
     case "{{ want }}-$answered" in
       before-yes | after-no) ;;
       *) echo "::error::{{ want }} the action, the metadata service answered: $answered"; exit 1 ;;
