@@ -344,7 +344,7 @@ test('review policy has fixed base-owned bounds/task and head; sandbox receives 
   const policy = job('policy');
   for (const text of ["review-head: ${{ inputs.kind == 'review' && inputs.head || '' }}", 'review-task: workflow/review.md',
     "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow", "inputs.kind == 'review' && needs.target.outputs.review-config",
-    "budget: ${{ inputs.kind == 'review' && '500'", "timeout: ${{ inputs.kind == 'review' && '75'"]) assert.ok(policy.includes(text), text);
+    "budget: ${{ inputs.kind == 'review' && '500'", "timeout: '75'"]) assert.ok(policy.includes(text), text);
   const agent = job('agent');
   assert.equal([...agent.matchAll(/uses: actions\/checkout@/g)].length, 2);
   assert.match(agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);

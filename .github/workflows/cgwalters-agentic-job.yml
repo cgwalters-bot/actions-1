@@ -562,7 +562,7 @@ jobs:
       issue: ${{ inputs.item }}
       apply-environment: ${{ inputs.kind != 'review' && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}
       budget: ${{ inputs.kind == 'review' && '500' || inputs.budget }}
-      timeout: ${{ inputs.kind == 'review' && '75' || '' }}
+      timeout: '75'
       # Keep the finished work of a run that stops on its budget, except for
       # a fix or a review, whose partial result is not worth applying.
       apply-partial: ${{ inputs.kind == 'implement' || inputs.kind == 'research' || inputs.kind == 'triage' }}
