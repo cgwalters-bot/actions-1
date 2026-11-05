@@ -56,6 +56,14 @@ on:
         description: Positive issue number in the target repository (a pull request's for review and fix)
         type: string
         required: true
+      head:
+        description: "For review: required exact 40-hex expected PR head, as sent by agent-board"
+        type: string
+        default: ""
+      pool:
+        description: "For review: required key in the base repository's REVIEW_POOLS; no agent/model fallback"
+        type: string
+        default: ""
       task:
         description: Public task for the agent
         type: string
@@ -153,7 +161,7 @@ on:
         value: ${{ jobs.apply.outputs.pull-request }}
       result-url:
         description: What the run posted or opened
-        value: ${{ jobs.apply.outputs.result-url }}
+        value: ${{ jobs.submit.outputs.review-url || jobs.apply.outputs.result-url }}
 
 permissions: {}
 
@@ -177,18 +185,29 @@ jobs:
       inference-audience: ${{ steps.target.outputs.inference-audience }}
       agent-config-repo: ${{ steps.target.outputs.agent-config-repo }}
       agent-config-path: ${{ steps.target.outputs.agent-config-path }}
+      review-base: ${{ steps.target.outputs.review-base }}
+      review-config: ${{ steps.target.outputs.review-config }}
+      review-allow: ${{ steps.target.outputs.review-allow }}
     steps:
       # The caller picks the agent job's runner, and on its own machine
       # could mint identity tokens with this file's `job_workflow_ref` for
       # any audience: refuse an owner not ours here, on a hosted runner,
       # before that job is scheduled.
       - uses: cgwalters-forge/actions/admit@main
+        if: ${{ inputs.kind != 'review' }}
+      # Moving main must not replace privileged code behind a reviewed pin.
+      - uses: cgwalters-forge/actions/admit@02d0342d682cf1c265668d7823009ae1936c4061 # main
+        if: ${{ inputs.kind == 'review' }}
       # The model and configuration repository defaults below, from
       # deployment/deployment.json, so that a second deployment's copy sets
       # them there rather than in this file (its copy repoints these
       # `uses:` lines at itself too, which GitHub requires be literal).
       - uses: cgwalters-forge/actions/deployment@main
         id: deployment
+        if: ${{ inputs.kind != 'review' }}
+      - uses: cgwalters-forge/actions/deployment@02d0342d682cf1c265668d7823009ae1936c4061 # main
+        id: review-deployment
+        if: ${{ inputs.kind == 'review' }}
       # Trusted pinned code only; no target checkout and no write token.
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         id: target
@@ -196,6 +215,10 @@ jobs:
           TARGET_REPO: ${{ inputs.repo }}
           TARGET_ITEM: ${{ inputs.item }}
           PROFILE: ${{ inputs.kind }}
+          EXPECTED_HEAD: ${{ inputs.head }}
+          REVIEW_POOL: ${{ inputs.pool }}
+          REVIEW_POOLS: ${{ vars.REVIEW_POOLS }}
+          REVIEW_BOT_IDS: ${{ vars.REVIEW_BOT_IDS }}
           TASK: ${{ inputs.task }}
           SKILLS: ${{ inputs.skills }}
           MAX_REQUESTS: ${{ inputs.max-requests }}
@@ -241,6 +264,118 @@ jobs:
             const profile = process.env.PROFILE;
             if (!['implement', 'triage', 'research', 'review', 'fix'].includes(profile)) {
               throw new Error('Unknown dispatch profile');
+            }
+            if (profile === 'review') {
+              // A central dispatch token cannot publish as this repository's
+              // Actions bot. Only the base's default-branch dispatch is trusted.
+              const repo = `${context.repo.owner}/${context.repo.repo}`;
+              const item = process.env.TARGET_ITEM;
+              const head = process.env.EXPECTED_HEAD;
+              const pool = process.env.REVIEW_POOL;
+              if (context.eventName !== 'workflow_dispatch' || process.env.TARGET_REPO !== repo ||
+                  !/^[1-9][0-9]*$/.test(item) || !Number.isSafeInteger(Number(item)) ||
+                  item.trim() !== item || head.trim() !== head || !/^[0-9a-f]{40}$/.test(head)) throw new Error('Review requires base dispatch, positive item and exact expected head');
+              if (pool.trim() !== pool || !/^[a-z][a-z0-9-]{0,31}$/.test(pool)) throw new Error('Review requires a valid pool');
+              const pools = JSON.parse(process.env.REVIEW_POOLS || '{}');
+              const selected = Object.hasOwn(pools, pool) && pools[pool];
+              if (!selected || Array.isArray(selected) || typeof selected !== 'object' ||
+                  Object.keys(selected).some(k => !['agent', 'model', 'config'].includes(k)) ||
+                  !['opencode', 'claude'].includes(selected.agent) ||
+                  typeof selected.model !== 'string' || selected.model.trim() !== selected.model || !/^[A-Za-z0-9][A-Za-z0-9_./:+-]{0,199}$/.test(selected.model)) {
+                throw new Error('Review pool must resolve to an explicit supported agent and model');
+              }
+              const config = Object.hasOwn(selected, 'config') ? selected.config : '.agentic-job-source/.github/agentic-job/hosted.toml';
+              if (typeof config !== 'string' || config.trim() !== config || !/^[A-Za-z0-9_.\/-]+\.toml$/.test(config) ||
+                  config.startsWith('/') || config.split('/').some(p => !p || p === '.' || p === '..')) {
+                throw new Error('Review pool config must be a base-owned relative TOML path');
+              }
+              if (process.env.SESSION === 'true') throw new Error('A review cannot be a session');
+              const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: Number(item) });
+              if (pull.number !== Number(item) || pull.state !== 'open' || pull.draft !== false ||
+                  pull.base?.repo?.full_name !== repo || pull.base.ref !== caller.default_branch || pull.head?.sha !== head) {
+                throw new Error('Review PR is closed, draft, on the wrong base or has moved head');
+              }
+              // Dispatch has no event admission upstream. Read only the fixed
+              // base policy, never a path chosen by dispatch or a head file.
+              // This deliberately accepts only the shipped JSON-array TOML
+              // admission subset; unsupported syntax fails closed.
+              const readPolicy = async path => {
+                const { data: file } = await github.rest.repos.getContent({ ...context.repo, path, ref: context.sha });
+                if (file.type !== 'file' || file.encoding !== 'base64' || file.size > 65536) throw new Error('Invalid base review bounds');
+                const bytes = Buffer.from(file.content, 'base64');
+                if (bytes.length > 65536) throw new Error('Oversized base review bounds');
+                const policy = { root: {}, trigger: {} };
+                let section = 'root';
+                for (const raw of bytes.toString('utf8').split('\n')) {
+                  const line = raw.trim();
+                  if (!line || line.startsWith('#')) continue;
+                  if (line.startsWith('[')) {
+                    section = line === '[github.trigger]' ? 'trigger' : 'other';
+                    continue;
+                  }
+                  if (section === 'other') continue;
+                  const match = line.match(/^([a-z_]+)\s*=\s*(.*)$/);
+                  if (!match) throw new Error('Unsupported base review admission syntax');
+                  const [, key, value] = match;
+                  if (section === 'root' && !['hosts', 'repos', 'bases'].includes(key)) continue;
+                  if (section === 'trigger' && !['events', 'roles', 'bots', 'forks', 'commands'].includes(key)) throw new Error('Unsupported review admission key');
+                  if (Object.hasOwn(policy[section], key)) throw new Error('Duplicate review admission key');
+                  policy[section][key] = JSON.parse(value);
+                }
+                const has = (values, value) => Array.isArray(values) && values.every(v => typeof v === 'string') && values.includes(value);
+                const scope = has(policy.root.hosts, 'github.com') && has(policy.root.repos, repo) && has(policy.root.bases, pull.base.ref) &&
+                  (pull.head.repo?.full_name === repo || policy.trigger.forks === true);
+                return { trigger: policy.trigger, has, scope };
+              };
+              const auto = await readPolicy('workflow/review.toml');
+              const ids = JSON.parse(process.env.REVIEW_BOT_IDS || '[]');
+              if (!Array.isArray(ids) || !ids.every(id => Number.isSafeInteger(id) && id > 0)) throw new Error('Invalid REVIEW_BOT_IDS');
+              const associated = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pull.author_association);
+              const bot = pull.user?.type === 'Bot' && ids.includes(pull.user.id) && auto.has(auto.trigger.bots, pull.user.login);
+              // Bots never inherit human role/association admission. The
+              // event helper enforces this too; dispatched policy skips it.
+              let human = pull.user?.type === 'User' && associated;
+              if (human && !auto.has(auto.trigger.roles, 'all')) {
+                const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({ ...context.repo, username: pull.user.login });
+                human = auto.has(auto.trigger.roles, permission.permission);
+              }
+              const automatic = auto.scope && auto.has(auto.trigger.events, 'pull_request_target') && (human || bot);
+              let allow = 'workflow/review.toml';
+              if (!automatic) {
+                // #620 sends no command id. A command review therefore needs
+                // an exact /review by a currently authorized writer. The pass
+                // owns consumption/pacing; this bounded check owns admission.
+                const command = await readPolicy('workflow/review-command.toml');
+                const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: Number(item), per_page: 100 });
+                if (comments.length >= 100) throw new Error('Review command history exceeds admission bound');
+                let admitted = false;
+                let checked = 0;
+                for (const comment of comments.slice().reverse()) {
+                  if (comment.body?.trim() !== '/review' || comment.user?.type !== 'User') continue;
+                  if (++checked > 10) break;
+                  const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({ ...context.repo, username: comment.user.login });
+                  if (['admin', 'maintain', 'write'].includes(permission.permission) && command.has(command.trigger.roles, permission.permission)) admitted = true;
+                }
+                if (!command.scope || !admitted || !command.has(command.trigger.events, 'issue_comment') || !command.has(command.trigger.commands, '/review')) throw new Error('Review author or command is not admitted');
+                allow = 'workflow/review-command.toml';
+              }
+              core.setOutput('review-base', caller.default_branch);
+              core.setOutput('review-config', config);
+              core.setOutput('review-allow', allow);
+              core.setOutput('task', '');
+              core.setOutput('agent', selected.agent);
+              core.setOutput('model', selected.model);
+              core.setOutput('runner', '"ubuntu-26.04"');
+              core.setOutput('max-requests', '150');
+              core.setOutput('skills', 'false');
+              core.setOutput('session', 'false');
+              core.setOutput('inference-url', process.env.BROKER_URL);
+              core.setOutput('inference-audience', process.env.BROKER_AUDIENCE);
+              // Agent configuration is read from the selected base-owned
+              // runner config, not dispatched paths or AGENT* fallbacks.
+              core.setOutput('agent-config-repo', '');
+              core.setOutput('agent-config-path', '');
+              return;
             }
             const agent = process.env.AGENT;
             // v0.6.5 requires the runner's user for fake-profile;
@@ -373,7 +508,7 @@ jobs:
     # token lets notify post it on an item of another repository, which the
     # job token cannot write to.
     secrets:
-      SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
+      SAFE_OUTPUTS_PAT: ${{ inputs.kind != 'review' && secrets.SAFE_OUTPUTS_PAT || '' }}
     permissions:
       actions: read
       contents: read
@@ -383,6 +518,7 @@ jobs:
       id: ${{ inputs.repo }}#${{ inputs.item }}
       repo: ${{ inputs.repo }}
       task: ${{ needs.target.outputs.task }}
+      base: ${{ inputs.kind == 'review' && needs.target.outputs.review-base || 'main' }}
       kind: ${{ (inputs.kind == 'implement' || inputs.kind == 'fix') && 'branch' || 'analysis' }}
       outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || 'add_comment,noop,missing_tool,missing_data')) }}
       max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}
@@ -391,13 +527,13 @@ jobs:
       # agentic-job's #553 that branch may be outside the bot's fork, where
       # its CI runs the agent's commit, but only where the head repository
       # opts in (agentic-job's docs/safe-outputs.md).
-      allow: ${{ inputs.kind == 'fix' && inputs.fix-allow || inputs.allow }}
+      allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow || (inputs.kind == 'fix' && inputs.fix-allow || inputs.allow) }}
       agent: ${{ needs.target.outputs.agent }}
       model: ${{ needs.target.outputs.model }}
       agent-config-repo: ${{ needs.target.outputs.agent-config-repo }}
       agent-config-path: ${{ needs.target.outputs.agent-config-path }}
       agent-skills: ${{ needs.target.outputs.skills == 'true' }}
-      config: ${{ inputs.config || vars.AGENT_CONFIG || '.github/agentic-job/hosted.toml' }}
+      config: ${{ inputs.kind == 'review' && needs.target.outputs.review-config || inputs.config || vars.AGENT_CONFIG || '.github/agentic-job/hosted.toml' }}
       fake-profile: ${{ needs.target.outputs.agent == 'fake' && ((inputs.kind == 'triage' || inputs.kind == 'research') && 'comment' || (inputs.kind == 'fix' && 'implement' || inputs.kind)) || '' }}
       # Counted by the proxy for every real agent; vibe requires it, having
       # no price for a model to hold a budget against. Checked in the target job.
@@ -409,12 +545,14 @@ jobs:
       idle-minutes: ${{ needs.target.outputs.idle-minutes }}
       review: ${{ inputs.kind == 'review' }}
       review-item: ${{ inputs.kind == 'review' && inputs.item || '' }}
+      review-head: ${{ inputs.kind == 'review' && inputs.head || '' }}
+      review-task: workflow/review.md
       # The pull request a fix pushes to: policy reads its branch and head.
       push-item: ${{ inputs.kind == 'fix' && inputs.item || '' }}
       inference-url: ${{ needs.target.outputs.inference-url }}
       inference-audience: ${{ needs.target.outputs.inference-audience }}
-      inference-register: ${{ inputs.inference-register }}
-      inference-provider: ${{ inputs.inference-provider }}
+      inference-register: ${{ inputs.kind == 'review' && 'github-oidc' || inputs.inference-register }}
+      inference-provider: ${{ inputs.kind != 'review' && inputs.inference-provider || '' }}
       output-repo: ${{ inputs.repo }}
       comment-target: ${{ inputs.item }}
       # Policy records this as run's watched item when the caller's config
@@ -422,8 +560,9 @@ jobs:
       # For implement, apply also links a new PR to this issue (Closes, or
       # Refs for partial work); other profiles do not open a new PR.
       issue: ${{ inputs.item }}
-      apply-environment: ${{ inputs.apply-environment || vars.APPLY_ENVIRONMENT }}
-      budget: ${{ inputs.budget }}
+      apply-environment: ${{ inputs.kind != 'review' && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}
+      budget: ${{ inputs.kind == 'review' && '500' || inputs.budget }}
+      timeout: ${{ inputs.kind == 'review' && '75' || '' }}
       # Keep the finished work of a run that stops on its budget, except for
       # a fix or a review, whose partial result is not worth applying.
       apply-partial: ${{ inputs.kind == 'implement' || inputs.kind == 'research' || inputs.kind == 'triage' }}
@@ -451,6 +590,7 @@ jobs:
       id-token: write
     outputs:
       exit: ${{ steps.run.outputs.exit }}
+      job: ${{ job.check_run_id }}
       safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
       safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}
     steps:
@@ -521,7 +661,7 @@ jobs:
       # reaches on the tailnet: the scripted agent alone needs no proxy. A
       # session's hostname is the target job's, which its endpoint names.
       - name: Join the tailnet
-        if: ${{ needs.target.outputs.agent != 'fake' || needs.target.outputs.session == 'true' }}
+        if: ${{ inputs.kind != 'review' && (needs.target.outputs.agent != 'fake' || needs.target.outputs.session == 'true') }}
         uses: cgwalters-forge/actions/tailscale@main
         with:
           hostname: ${{ needs.target.outputs.session-host || format('agentic-job-{0}-{1}', github.run_id, github.run_attempt) }}
@@ -534,6 +674,13 @@ jobs:
           # A session serves its bridge over HTTPS, and tailscaled makes and keeps
           # that certificate only with a state directory.
           statedir: ${{ needs.target.outputs.session == 'true' && '/var/lib/tailscale-session' || '' }}
+      - name: Join the review tailnet
+        if: ${{ inputs.kind == 'review' }}
+        uses: cgwalters-forge/actions/tailscale@02d0342d682cf1c265668d7823009ae1936c4061 # main
+        with:
+          hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
+          oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}
+          tags: ${{ vars.AGENTIC_JOB_TAILSCALE_TAGS }}
       # Fail on a missing proxy route before setup, not in its sandbox probes.
       # This TCP check sends no credentials and skips fake/no-proxy runs.
       - name: Check inference proxy reachability
@@ -547,16 +694,16 @@ jobs:
       - uses: ./.agentic-job-source/secure-host
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
-      # The agent's GH_TOKEN is this job's read-only token. No step follows:
-      # nothing here touches what the agent left.
+      # Head code can exfiltrate even a read-only token. Review gets none;
+      # pinned run fetches its head only as data inside the sandbox.
       - id: run
         timeout-minutes: 340
         uses: ./.agentic-job-source/run
         with:
           job-dir: /var/tmp/agentic-job
           agent-user: sandbox
-          github-token: ${{ github.token }}
-          inference-api-key: ${{ secrets.INFERENCE_API_KEY }}
+          github-token: ${{ inputs.kind != 'review' && github.token || '' }}
+          inference-api-key: ${{ inputs.kind != 'review' && secrets.INFERENCE_API_KEY || '' }}
 
   # A session's endpoint on the dispatch issue, as a line of the run's one
   # status comment, while the agent job runs. As policy's notify job does,
@@ -617,9 +764,64 @@ jobs:
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
       safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}
 
+  submit:
+    needs: [target, policy, agent, check]
+    if: >-
+      ${{ !cancelled() && inputs.kind == 'review' && vars.AGENT_REAL_REVIEWS == 'true' &&
+          needs.policy.outputs.review-head != '' && needs.policy.outputs.binary-artifact-id != '' &&
+          needs.agent.result == 'success' && needs.agent.outputs.exit == '0' &&
+          needs.check.result == 'success' && needs.check.outputs.artifact-id != '' &&
+          contains(fromJSON('["APPROVE", "CHANGES"]'), needs.check.outputs.verdict) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      review-url: ${{ steps.submit.outputs.review-url }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}
+          path: ${{ runner.temp }}/bin
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.check.outputs.artifact-id }}
+          path: ${{ runner.temp }}/checked
+      # submit itself rechecks the head and open state; also recheck base
+      # and draft here, which that pinned helper does not check again.
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PULL: ${{ inputs.item }}
+          HEAD_SHA: ${{ needs.policy.outputs.review-head }}
+          BASE: ${{ needs.target.outputs.review-base }}
+        with:
+          script: |
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: Number(process.env.PULL) });
+            if (pull.state !== 'open' || pull.draft !== false || pull.head.sha !== process.env.HEAD_SHA ||
+                pull.base.repo.full_name !== `${context.repo.owner}/${context.repo.repo}` || pull.base.ref !== process.env.BASE) {
+              throw new Error('Review PR closed, drafted, retargeted or moved before publication');
+            }
+      - name: Submit the checked verdict at the admitted head
+        id: submit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ inputs.item }}
+          HEAD_SHA: ${{ needs.policy.outputs.review-head }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          VERDICT: ${{ needs.check.outputs.verdict }}
+          AGENT_EXIT: ${{ needs.agent.outputs.exit }}
+          AGENT_JOB: ${{ needs.agent.outputs.job }}
+          REAL_REVIEWS: ${{ vars.AGENT_REAL_REVIEWS }}
+        run: |
+          chmod +x "$RUNNER_TEMP/bin/agentic-job"
+          "$RUNNER_TEMP/bin/agentic-job" review submit --accepted "$RUNNER_TEMP/checked/agent_output.json" --output "$GITHUB_OUTPUT"
+
   apply:
     needs: [policy, agent, check, session]
-    if: ${{ always() && needs.policy.result == 'success' }}
+    # Reviews publish only through checked submit, never through the PAT or
+    # as an unbound comment when stale, cancelled, noop or opted out.
+    if: ${{ always() && inputs.kind != 'review' && needs.policy.result == 'success' }}
     uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@3f9f6425119b97bb3620a38fe0adc8e79be7dc8e # v0.6.11
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment

@@ -62,7 +62,8 @@ test('an unlisted organization joins with its own client ID and tags, both', () 
 test('both wrappers join with the repository variables for the login', () => {
   for (const file of ['cgwalters-agentic-job.yml', 'cgwalters-review.yml']) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), 'utf8');
-    const join = text.split('- name: Join the tailnet\n')[1].split(/\n {6}- /)[0];
+    // Only the step's inputs: its condition may still gate on the run's kind.
+    const join = text.split('- name: Join the tailnet\n')[1].split(/\n {6}- /)[0].split('\n        with:\n')[1];
     assert.match(join, /\n {10}oauth-client-id: \$\{\{ vars\.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID \}\}\n/, file);
     assert.match(join, /\n {10}tags: \$\{\{ vars\.AGENTIC_JOB_TAILSCALE_TAGS \}\}(\n|$)/, file);
     assert.doesNotMatch(join, /inputs\./, file);

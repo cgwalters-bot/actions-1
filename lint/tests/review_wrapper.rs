@@ -146,7 +146,7 @@ impl<'a> Parser<'a> {
         self.0 = self.0.trim_start();
         let end = self
             .0
-            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.')
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.' && c != '-')
             .unwrap_or(self.0.len());
         assert!(end > 0, "unexpected expression: {}", self.0);
         let name = self.0[..end].to_owned();
@@ -223,6 +223,11 @@ impl Expr {
             Self::Call(name, args) => {
                 let args: Vec<_> = args.iter().map(|arg| arg.eval(context)).collect();
                 match (name.as_str(), args.as_slice()) {
+                    ("cancelled", []) => context
+                        .get("cancelled")
+                        .cloned()
+                        .unwrap_or(Yaml::Boolean(false)),
+                    ("always", []) => Yaml::Boolean(true),
                     ("fromJSON", [value]) => yaml(&string(value)),
                     ("startsWith", [value, prefix]) => Yaml::Boolean(
                         string(value)
@@ -251,6 +256,138 @@ fn evaluate(source: &str, context: &BTreeMap<&str, Yaml>) -> bool {
     let expr = parser.expression(0);
     assert!(parser.0.trim().is_empty(), "unparsed: {}", parser.0);
     truthy(&expr.eval(context))
+}
+
+#[test]
+fn ordinary_review_submit_fails_closed_and_never_enters_pat_apply() {
+    let workflow = yaml(&read(DISPATCH));
+    let condition = workflow["jobs"]["submit"]["if"].as_str().unwrap();
+    let condition = condition
+        .trim()
+        .strip_prefix("${{")
+        .unwrap()
+        .strip_suffix("}}")
+        .unwrap();
+    let context: BTreeMap<_, _> = [
+        ("inputs.kind", "review"),
+        ("vars.AGENT_REAL_REVIEWS", "true"),
+        ("needs.policy.outputs.review-head", "head"),
+        ("needs.policy.outputs.binary-artifact-id", "123"),
+        ("needs.agent.result", "success"),
+        ("needs.agent.outputs.exit", "0"),
+        ("needs.check.result", "success"),
+        ("needs.check.outputs.artifact-id", "456"),
+        ("needs.check.outputs.verdict", "APPROVE"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k, Yaml::String(v.to_owned())))
+    .collect();
+    assert!(evaluate(condition, &context));
+    for (key, values) in [
+        (
+            "inputs.kind",
+            vec!["implement", "fix", "triage", "research", ""],
+        ),
+        ("vars.AGENT_REAL_REVIEWS", vec!["", "false"]),
+        ("needs.policy.outputs.review-head", vec![""]),
+        ("needs.policy.outputs.binary-artifact-id", vec![""]),
+        (
+            "needs.agent.result",
+            vec!["failure", "cancelled", "skipped"],
+        ),
+        ("needs.agent.outputs.exit", vec!["", "1", "124"]),
+        (
+            "needs.check.result",
+            vec!["failure", "cancelled", "skipped"],
+        ),
+        ("needs.check.outputs.artifact-id", vec![""]),
+        ("needs.check.outputs.verdict", vec!["", "NOOP", "REJECT"]),
+    ] {
+        for value in values {
+            let mut changed = context.clone();
+            changed.insert(key, Yaml::String(value.to_owned()));
+            assert!(!evaluate(condition, &changed), "{key}={value}");
+        }
+    }
+    let mut changed = context.clone();
+    changed.insert("cancelled", Yaml::Boolean(true));
+    assert!(!evaluate(condition, &changed));
+    changed = context.clone();
+    changed.insert(
+        "needs.check.outputs.verdict",
+        Yaml::String("CHANGES".to_owned()),
+    );
+    assert!(evaluate(condition, &changed));
+    let apply = workflow["jobs"]["apply"]["if"].as_str().unwrap();
+    let apply = apply
+        .trim()
+        .strip_prefix("${{")
+        .unwrap()
+        .strip_suffix("}}")
+        .unwrap();
+    changed.insert("needs.policy.result", Yaml::String("success".to_owned()));
+    assert!(!evaluate(apply, &changed));
+    for kind in ["implement", "fix", "triage", "research"] {
+        changed.insert("inputs.kind", Yaml::String(kind.to_owned()));
+        assert!(evaluate(apply, &changed));
+    }
+}
+
+#[test]
+fn ordinary_review_privileged_dependencies_are_exclusive_literal_pins() {
+    let workflow = yaml(&read(DISPATCH));
+    for (job, action) in [
+        ("target", "admit"),
+        ("target", "deployment"),
+        ("agent", "tailscale"),
+    ] {
+        let prefix = format!("cgwalters-forge/actions/{action}@");
+        let steps: Vec<_> = workflow["jobs"][job]["steps"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .filter(|step| {
+                step["uses"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with(&prefix))
+            })
+            .collect();
+        assert_eq!(steps.len(), 2);
+        for kind in ["review", "implement", "fix", "triage", "research"] {
+            let context = BTreeMap::from([
+                ("inputs.kind", Yaml::String(kind.to_owned())),
+                (
+                    "needs.target.outputs.agent",
+                    Yaml::String("opencode".to_owned()),
+                ),
+            ]);
+            let active: Vec<_> = steps
+                .iter()
+                .filter(|step| {
+                    let expr = step["if"]
+                        .as_str()
+                        .unwrap()
+                        .strip_prefix("${{")
+                        .unwrap()
+                        .strip_suffix("}}")
+                        .unwrap();
+                    evaluate(expr, &context)
+                })
+                .collect();
+            assert_eq!(active.len(), 1, "{kind}/{action}");
+            let reference = active[0]["uses"]
+                .as_str()
+                .unwrap()
+                .strip_prefix(&prefix)
+                .unwrap();
+            if kind == "review" {
+                assert_eq!(reference.len(), 40);
+                assert!(reference.bytes().all(|b| b.is_ascii_hexdigit()));
+            } else {
+                assert_eq!(reference, "main");
+            }
+        }
+    }
 }
 
 struct Event<'a> {
