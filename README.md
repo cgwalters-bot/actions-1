@@ -208,7 +208,84 @@ updates from `main`, grouped as `review actions` with automerge off. Unlike
 release-tag updates, this works without this repository publishing tags. These
 updates must merge through review here; a caller pinned to the wrapper's
 commit gets them only by reviewing an update to that pin. The dispatch
-wrapper continues to use these actions at `main`.
+wrapper continues to use these actions at `main` for non-review kinds;
+its review kind uses separate literal commit-pinned steps.
+
+### Ordinary dispatched reviews (dormant)
+
+This is the wrapper slice of actions#174 / tracker#1171, not a caller
+cutover. No pool, caller, admission or ruleset is activated here, and
+`cgwalters-review.yml` remains unchanged. The concrete threats are spending
+an unpaced fallback model, reading PR-owned policy with privilege, leaking
+a GitHub token to hostile head code, and publishing a stale or unchecked
+approval. Review dispatch therefore has a closed contract:
+
+- Run `dispatch.yml` in the public **base repository**, on its default
+  branch. Pass `kind: review`, `repo: OWNER/REPO` equal to that repository,
+  positive `item`, exact lowercase 40-hex `head`, and nonempty `pool`.
+  These are agent-board#620's ordinary sender inputs, including its fixed
+  `task` hint; that hint is ignored, not review instructions. The caller
+  names the run `review OWNER/REPO#ITEM HEAD (POOL)` for the pass reader.
+- The base repository variable `REVIEW_POOLS` is the only pool map. Unset
+  means every review dispatch fails. It is a JSON object, for example
+  `{"openai":{"agent":"opencode","model":"provider/model","config":".github/agentic-job/review-hosted.toml"}}`.
+  This is an example, not a deployed pool. Keys are lowercase letters,
+  digits or hyphens, start with a letter, and are at most 32 characters.
+  Each selected value has only `agent` (`opencode` or `claude`), nonempty
+  single-word `model` (at most 200 characters, letters/digits and
+  `_./:+-`), and optional `config`. Config is a relative TOML path without
+  empty, `.` or `..` components; absent uses the pinned helper's
+  `.agentic-job-source/.github/agentic-job/hosted.toml`. A base-owned custom
+  config can name agent configuration repositories and setup. There is
+  **no AGENT/AGENT_MODEL/AGENT_CONFIG fallback**, nor dispatched agent,
+  model, runner, config, endpoint, budget or task override for reviews.
+- The trusted dispatched default-branch SHA owns `workflow/review.toml`,
+  `workflow/review-command.toml`, `workflow/review.md`, merge guidance and
+  the selected config. Review always uses those fixed bounds/task paths.
+  Admission accepts the shipped TOML subset: one-line JSON string arrays
+  for `hosts`, `repos`, `bases` and trigger lists; a boolean `forks`;
+  no duplicate admission keys or unknown trigger keys. Other policy/output
+  settings are checked by the pinned policy helper. Unsupported admission
+  syntax fails closed. Human authors still need OWNER/MEMBER/COLLABORATOR
+  association and an admitted role (`all`, or their current permission).
+  Bots always need both immutable `REVIEW_BOT_IDS` admission and their bot
+  login in the bounds, even with a trusted association. Otherwise an exact `/review` comment must have a
+  currently authorized admin/maintain/write author admitted by command
+  bounds. Since #620 sends no command id, the wrapper checks at most 100
+  comments (a full page is refused) and the latest ten candidate commands;
+  the pass still owns command consumption, deduplication and pacing. The
+  admitted automatic or command bounds file also governs policy/check;
+  automatic bounds cannot override command-specific fork/output limits.
+- PRs must be open, not draft, based on the base repository's default
+  branch and still at `head`. Policy receives that expected head and checks
+  it again. The hosted sandbox gets no GitHub token or provider key; the
+  pinned runner fetches the exact head as data inside that sandbox, never
+  as a privileged checkout. Reviews are capped at 150 inference requests,
+  500 AIC and 75 minutes through policy; the agent job retains its existing
+  outer timeout. Broker aggregate limits still apply.
+
+Publication remains off unless `AGENT_REAL_REVIEWS=true`. Only a successful
+agent and successful check with APPROVE or CHANGES reach `review submit`;
+noop, cancellation and failed checks never publish. Submit downloads only
+the policy binary and this run's checked artifact, uses the base repository
+`GITHUB_TOKEN` (not the apply PAT), binds `commit_id`, and generates the
+trusted run marker and agent-job link. A preflight also rechecks draft/base;
+the helper rechecks open state/head immediately before submission. Review
+never falls through to PAT apply or an unbound stale verdict comment.
+The helper's existing 422 fallback may post a marked comment instead of a
+review; that is not an approval and the pass must not accept it as one.
+
+Before activation, callers need a separately reviewed full-SHA review call,
+the matching broker **and** tailnet `job_workflow_ref` admissions retaining
+owner-ID restrictions, base-owned bounds/task/config and explicit pools.
+Keep the existing event caller and its admission for rollback. Local tests
+exercise admission, publication wiring and preflight; they do not prove a
+live tailnet join, inference registration, sandbox head fetch, Actions bot
+identity/commit/run-marker acceptance by the pass, or GitHub submission.
+Those require the coordinated `cgwalters-forge/review` pilot, including
+stale-head, cancellation, failed-check/noop and authorized/unauthorized
+command cases. Actions must be allowed to create/approve PRs. No ruleset,
+legacy removal or rollout is part of this change.
 
 Runs may edit `.github/` here, so pull requests are reviewed by
 [this repository's caller](.github/workflows/review.yml) of the wrapper

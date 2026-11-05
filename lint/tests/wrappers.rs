@@ -370,14 +370,23 @@ fn review_wrapper_pins_its_own_actions_by_full_commit() {
 
 #[test]
 fn dispatch_wrapper_still_follows_main_for_its_own_actions() {
+    let workflow = read(AGENTIC_JOB);
+    let refs = own_action_refs(&workflow);
     assert_eq!(
-        own_action_refs(&read(AGENTIC_JOB)),
+        refs.iter()
+            .copied()
+            .filter(|(_, r)| *r == "main")
+            .collect::<Vec<_>>(),
         [
             ("admit", "main"),
             ("deployment", "main"),
             ("tailscale", "main")
         ]
     );
+    assert_eq!(refs.len(), 6);
+    for (action, r) in refs.into_iter().filter(|(_, r)| *r != "main") {
+        assert!(is_commit(r), "{action}: {r}");
+    }
 }
 
 // From v0.5.0 check.yml's detect job asks for `id-token: write`, and GitHub
@@ -673,8 +682,11 @@ fn agentic_job_is_called_at_one_release_our_own_actions_at_main() {
         refs.iter().map(|r| r.0).collect::<Vec<_>>(),
         [
             "actions/admit",
+            "actions/admit",
+            "actions/deployment",
             "actions/deployment",
             "agentic-job/.github/workflows/policy.yml",
+            "actions/tailscale",
             "actions/tailscale",
             "agentic-job/.github/workflows/check.yml",
             "agentic-job/.github/workflows/apply.yml",
@@ -682,7 +694,7 @@ fn agentic_job_is_called_at_one_release_our_own_actions_at_main() {
     );
     for (path, r) in &refs {
         if path.starts_with("actions/") {
-            assert_eq!(*r, "main", "{path}");
+            assert!(*r == "main" || is_commit(r), "{path}");
         }
     }
     assert!(!workflow.contains("PINNED_SHA"));
@@ -851,7 +863,7 @@ fn policy_is_given_max_requests_only_from_the_target_job() {
 #[test]
 fn tailnet_join_is_for_a_real_agent_or_a_session() {
     assert!(job(&read(AGENTIC_JOB), "agent").contains(
-        "- name: Join the tailnet\n        if: ${{ needs.target.outputs.agent != 'fake' || needs.target.outputs.session == 'true' }}\n"
+        "- name: Join the tailnet\n        if: ${{ inputs.kind != 'review' && (needs.target.outputs.agent != 'fake' || needs.target.outputs.session == 'true') }}\n"
     ));
 }
 
