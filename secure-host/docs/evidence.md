@@ -72,6 +72,38 @@ can be ahead of this action's pin, through this action with
 A hosted runner serves no IPv6 metadata address, so that refusal has a
 unit test of its rule and a probe without a control, not a hosted proof.
 
+### Forced core dumps (upstream only)
+
+The successful Ubuntu 26.04
+[confined job 42182106140/127775120020](https://github.com/cgwalters-forge/agentic-job/actions/runs/42182106140/job/127775120020)
+tested the image built from PR head
+`4f7fd85a9377cdeb128e7e52f5ed25d70def9481`, merged by
+[#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154) as
+[773322d503987eac40845ce49d5bc0b9acbd8b30](https://github.com/cgwalters-forge/agentic-job/commit/773322d503987eac40845ce49d5bc0b9acbd8b30).
+Its control reads a random marker from a sacrificial child's forced dump
+before setup. After setup, the run step and JavaScript main and post
+steps cannot recover such a dump; their records show
+`core_pattern: "|/bin/false"` and `core-dump: false`. The image's
+`core-pattern` check also passes. The same job records successful
+pre-setup parent environ/mem/ptrace and Worker environ controls, followed
+by refusals in run/main/post.
+
+`worker-core` is derived from the sacrificial dump result and the host
+pattern, **not** a direct dump of Runner.Worker or a test of its own
+`prlimit`. No Worker or parent is crashed. This is existing upstream
+evidence, not a new hosted reproduction, proof for the pinned image or
+RHEL evidence. The host-wide setting loses every new core dump,
+deterministic CI's too, but does not erase previously stored dumps.
+Diagnostic sockets remain a separate route and the job remains the
+trust unit; all runner-mode credential refusals stay in place.
+
+The effective pin remains v0.6.9, without either discard or its check;
+v0.6.12 also predates the fix. A release containing it and a pin update
+remain [deployment #2070](https://github.com/cgwalters-forge/agentic-job/issues/2070).
+[Prepare/config adoption #2656](https://github.com/cgwalters-forge/agentic-job/issues/2656)
+is separate. See [runner reads](runner-reads.md#forced-core-dumps-pinned-image-versus-upstream)
+for the mechanism and limits.
+
 ## Where each probe has been seen to fail
 
 agentic-job's `tests/sandbox_host.rs` removes one protection at a time,

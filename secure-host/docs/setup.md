@@ -99,6 +99,17 @@ Setup logs `Sandbox setup stage NAME: SECONDSs (ok|failed)` for every
 stage and `Sandbox setup total: …` after them. These cover setup only,
 not pulling the image, loading the policy or the probes.
 
+The pinned v0.6.9 setup does **not** change `kernel.core_pattern`.
+The threat left open is a step forcing a same-uid process to dump its
+memory despite the read rule and Yama. Upstream #3154 adds a
+`core-dumps` stage under `deny-runner-reads`, writing and reading back
+`|/bin/false` as the host-wide pattern. All jobs on that host then lose
+new core dumps, deterministic CI included; stored cores are not removed.
+This needs a release containing the fix and a pin update, not merely
+v0.6.12. See [runner reads](runner-reads.md#forced-core-dumps-pinned-image-versus-upstream)
+for the immutable change and deployment/adoption follow-ups. It does not
+change the separate diagnostic-socket option or the job trust contract.
+
 ### The lock
 
 `sandbox.lock-runner` (on in [`hosted.toml`](../hosted.toml)) takes root

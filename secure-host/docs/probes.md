@@ -35,6 +35,17 @@ The runner's user's probes, of [the lock](setup.md#the-lock):
 | `runner-metadata`, `runner-metadata-v6` | reach the metadata service, with `sandbox.deny-runner-metadata` | none after setup: CI's control is before the action | the rules on its uids |
 | `worker-diagnostics` | (none: lists `Runner.Worker`'s diagnostic sockets still linked, with `sandbox.unlink-worker-diagnostics`) | | the unlink |
 
+The pinned v0.6.9 check has no `core-pattern` probe, so a successful
+check does not close the [forced-core route](runner-reads.md#forced-core-dumps-pinned-image-versus-upstream).
+Upstream #3154 adds it under `deny-runner-reads`: one read of
+`/proc/sys/kernel/core_pattern` must be exactly `|/bin/false` (a single
+trailing newline is accepted); an unreadable or different value fails.
+This checks the host setting, not a Worker crash. The separate upstream
+`confined` job forces a dump only of a sacrificial child, with a
+successful pre-setup control and refusals in run/main/post
+([existing evidence](evidence.md#forced-core-dumps-upstream-only)). Neither
+probe is proof for this pin or RHEL, and v0.6.12 predates the fix.
+
 ### What the final probe proves
 
 Setup plants `/etc/agentic-job/world-write-probe`, a root-owned
