@@ -28,7 +28,7 @@ test('Renovate tracks the wrappers\' own-action pins from main without automerge
   const pattern = new RegExp(manager.matchStrings[0], 'g');
   const wrapper = read('./cgwalters-review.yml');
   const pins = [...wrapper.matchAll(pattern)];
-  assert.equal(pins.length, 3);
+  assert.equal(pins.length, 4);
   for (const pin of pins) assert.match(pin.groups.currentDigest, /^[0-9a-f]{40}$/);
   // Exercise successive digest-only updates, including after main advances
   // again: preserve paths and the prose marker, never generate `# main`.

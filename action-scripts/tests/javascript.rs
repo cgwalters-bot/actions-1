@@ -21,6 +21,11 @@ const ALLOWED: &[&str] = &[
     "tailscale/prerequisites.test.mjs",
     "tailscale/setup.mjs",
     "tailscale/setup.test.mjs",
+    // Grandfather the existing prose advisory alongside the action scripts
+    // during migration; unrelated new Node entry points remain denied.
+    "workflow/prose-binary.test.mjs",
+    "workflow/prose.mjs",
+    "workflow/prose.test.mjs",
 ];
 
 #[test]

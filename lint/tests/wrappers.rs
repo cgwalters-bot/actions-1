@@ -302,7 +302,7 @@ fn dispatched_review_keeps_base_policy_and_credential_free_head_access() {
             "agent must retain {required}"
         );
     }
-    let agent = read(AGENT);
+    let agent = job(&read(AGENT), "agent");
     assert_eq!(agent.matches("uses: actions/checkout@").count(), 2);
     // Both privileged checkouts come from policy, never a PR head or another
     // caller input. Check every ref, not merely the presence of one safe ref.
@@ -676,7 +676,10 @@ jobs:
 #[test]
 fn review_wrapper_pins_its_own_actions_by_full_commit() {
     for (file, actions) in [
-        (REVIEW, &["admit", "deployment", "tailscale"][..]),
+        (
+            REVIEW,
+            &["admit", "deployment", "tailscale", "tailscale"][..],
+        ),
         (AGENT, &["tailscale", "secure-host"]),
     ] {
         let text = read(file);
