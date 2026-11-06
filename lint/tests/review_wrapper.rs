@@ -13,6 +13,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 // audit resolves. A bump changes this, the six calls, the smoke job's two and
 // the README.
 const PIN: &str = "be1191213b722ad9ca085028140e44c4e6f4f43d # build-ac1f8f96c4670a86df68d7d186f78bbc787380a706aea8069cc07175d8d6dc6f";
+const PROSE_PIN: &str = "eecc8c434e67a7607264ab3f7d90c88b6d02042a # v0.6.12";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
 // Both wrappers' agent job, called by local path.
@@ -527,14 +528,15 @@ fn ordinary_review_privileged_dependencies_are_exclusive_literal_pins() {
         }
     }
     // The tailnet join is privileged for every kind: one pinned step in
-    // each wrapper's register job and in the agent job both call at their
-    // own commit, and nowhere else.
-    for (file, name) in [
-        (DISPATCH, "register"),
-        (REVIEW, "register"),
-        (AGENT, "agent"),
+    // each wrapper's register job, the independent prose register job and
+    // the agent job both wrappers call at their own commit, and nowhere else.
+    for (file, name, count) in [
+        (DISPATCH, "register", 1),
+        (REVIEW, "register", 2),
+        (REVIEW, "prose-register", 2),
+        (AGENT, "agent", 1),
     ] {
-        assert_eq!(read(file).matches("tailscale@").count(), 1, "{file}");
+        assert_eq!(read(file).matches("tailscale@").count(), count, "{file}");
         let source = yaml(&read(file));
         let joins: Vec<_> = source["jobs"][name]["steps"]
             .as_vec()
@@ -875,7 +877,12 @@ fn calls_register_then_agent(text: &str) {
         .lines()
         .filter(|line| line.trim() == "id-token: write")
         .count();
-    assert_eq!(grants, 2, "register's and check's");
+    let expected = if jobs["prose-register"].is_badvalue() {
+        2
+    } else {
+        4
+    };
+    assert_eq!(grants, expected, "register's and check's, including prose");
 }
 
 /// The shared agent job: upstream agent.yml's steps with our join, as the
@@ -1078,15 +1085,20 @@ fn wrapper_release_and_order(text: &str) {
                 .any(|part| call.contains(part))
         })
         .collect();
-    assert_eq!(calls.len(), 3, "{file}");
+    let has_prose = text.contains("\n  prose-policy:\n");
+    assert_eq!(calls.len(), if has_prose { 6 } else { 3 }, "{file}");
     assert_eq!(
         text.matches("uses: cgwalters-forge/agentic-job/").count(),
-        3,
+        if has_prose { 6 } else { 3 },
         "{file}"
     );
-    for call in calls {
+    for (index, call) in calls.iter().enumerate() {
         assert!(call.starts_with("cgwalters-forge/agentic-job/"), "{file}");
-        assert_eq!(call.split_once('@').unwrap().1, PIN, "{file}");
+        assert_eq!(
+            call.split_once('@').unwrap().1,
+            if index < 3 { PIN } else { PROSE_PIN },
+            "{file}"
+        );
     }
     let source = yaml(text);
     assert_eq!(
@@ -1432,5 +1444,203 @@ fn publication_uses_policy_binary_not_removed_javascript_helpers() {
     includes(
         job(&review, "refusal"),
         &["\"$RUNNER_TEMP/bin/agentic-job\" status"],
+    );
+}
+
+#[test]
+fn prose_is_separate_default_off_and_uses_exact_advisory_contract() {
+    let text = read(REVIEW);
+    let source = yaml(&text);
+    let jobs = &source["jobs"];
+    for main in [
+        "admit", "policy", "refusal", "agent", "check", "submit", "apply", "status",
+    ] {
+        excludes(
+            job(&text, main),
+            &["needs.prose-", "prose-pull", "REVIEW_PROSE"],
+        );
+    }
+    includes(
+        job(&text, "prose-config"),
+        &[
+            "needs: policy",
+            "needs.policy.outputs.admitted == 'true'",
+            "REVIEW_PROSE: ${{ vars.REVIEW_PROSE }}",
+        ],
+    );
+    includes(
+        job(&text, "prose-policy"),
+        &[
+            "needs.policy.outputs.admitted == 'true'",
+            "needs.prose-config.outputs.enabled == 'true'",
+        ],
+    );
+    let with = &jobs["prose-policy"]["with"];
+    for (key, value) in [
+        ("advisory", true),
+        ("event", true),
+        ("review", true),
+        ("apply-partial", false),
+    ] {
+        assert_eq!(with[key], Yaml::Boolean(value), "{key}");
+    }
+    for (key, value) in [
+        ("kind", "analysis"),
+        ("outputs", "add_comment,noop"),
+        ("max-outputs", "1"),
+        ("notify", "none"),
+        ("task", ""),
+        ("review-task", "workflow/prose.md"),
+        ("artifact-prefix", "prose-"),
+    ] {
+        assert_eq!(with[key].as_str(), Some(value), "{key}");
+    }
+    // The policy id does not namespace uploads. Both policy calls run in the
+    // same workflow: the prefix must separate every policy/run/check artifact.
+    assert!(jobs["policy"]["with"]["artifact-prefix"].is_badvalue());
+    for suffix in [
+        "agentic-job-binary",
+        "agentic-job-policy",
+        "agent-run",
+        "agent-transcript",
+        "safe-outputs",
+        "checked-outputs",
+        "applied",
+    ] {
+        assert_ne!(suffix, format!("prose-{suffix}"));
+    }
+    for key in [
+        "review-item",
+        "review-head",
+        "comment-target",
+        "output-repo",
+        "item-repo",
+        "apply-environment",
+        "proposals-artifact",
+    ] {
+        assert!(with[key].is_badvalue(), "advisory forbids {key}");
+    }
+    for name in ["prose-policy", "prose-check", "prose-apply"] {
+        assert!(
+            jobs[name]["uses"]
+                .as_str()
+                .unwrap()
+                .ends_with(PROSE_PIN.split_once(' ').unwrap().0)
+        );
+        excludes(
+            job(&text, name),
+            &[
+                "SAFE_OUTPUTS_PAT",
+                "statuses: write",
+                "classifier",
+                "verdict",
+            ],
+        );
+    }
+    includes(
+        job(&text, "prose-check"),
+        &[
+            "safe-outputs-artifact-id: ${{ needs.prose-agent.outputs.safe-outputs-artifact-id }}",
+            "safe-outputs-artifact-digest: ${{ needs.prose-agent.outputs.safe-outputs-artifact-digest }}",
+        ],
+    );
+    includes(
+        job(&text, "prose-bounds"),
+        &[
+            "needs.prose-check.outputs.artifact-id != ''",
+            "needs.prose-check.outputs.artifact-digest",
+            "digest-mismatch: error",
+            "node workflow/prose.mjs check",
+        ],
+    );
+    includes(
+        job(&text, "prose-apply"),
+        &[
+            "needs.prose-agent.outputs.exit == '0'",
+            "needs.prose-check.result == 'success'",
+            "needs.prose-bounds.result == 'success'",
+            "cancel-in-progress: false",
+            "check: ${{ toJSON(needs.prose-check) }}",
+        ],
+    );
+}
+
+#[test]
+fn prose_runner_only_migration_keeps_oidc_and_writes_out_of_agent_job() {
+    let shared = read(AGENT);
+    let text = job(&shared, "prose");
+    excludes(
+        &text,
+        &[
+            "id-token:",
+            "agent-user: sandbox",
+            "pull-requests: write",
+            "tailscale",
+            "TAILNET_KEY",
+            "INFERENCE_API_KEY",
+        ],
+    );
+    includes(
+        &text,
+        &[
+            "eecc8c434e67a7607264ab3f7d90c88b6d02042a",
+            "runner-home:",
+            "AGENT_USER: runner",
+            "runner-setup.py admit",
+            "runner-setup.py setup",
+            "inference-run-token: ${{ secrets.INFERENCE_RUN_TOKEN }}",
+        ],
+    );
+    let source = yaml(&shared);
+    assert_eq!(source["jobs"]["agent"]["if"].as_str(), Some("${{ !inputs.prose }}"));
+    assert_eq!(source["jobs"]["prose"]["if"].as_str(), Some("${{ inputs.prose }}"));
+    assert_eq!(source["on"]["workflow_call"]["inputs"]["prose"]["default"], Yaml::Boolean(false));
+    assert_eq!(source["jobs"]["prose"]["permissions"], yaml("contents: read\nissues: read\npull-requests: read\nactions: read"));
+    let steps = source["jobs"]["prose"]["steps"].as_vec().unwrap();
+    for output in ["exit", "safe-outputs-artifact-id", "safe-outputs-artifact-digest"] {
+        assert_eq!(
+            source["on"]["workflow_call"]["outputs"][output]["value"].as_str(),
+            Some(format!("${{{{ inputs.prose && jobs.prose.outputs.{output} || jobs.agent.outputs.{output} }}}}").as_str())
+        );
+    }
+    let index = |part: &str| {
+        steps
+            .iter()
+            .position(|step| format!("{step:?}").contains(part))
+            .unwrap()
+    };
+    assert!(index("prepare") < index("runner-setup.py admit"));
+    assert!(index("runner-setup.py admit") < index("node workflow/prose.mjs"));
+    assert!(index("node workflow/prose.mjs") < index("config --host"));
+    assert!(index("./.agentic-job-source/secure-host") < index("runner-setup.py setup"));
+    for step in &steps[index("config --host")..] {
+        assert_eq!(step["if"].as_str(), Some("steps.prose.outputs.ready == 'true'"));
+    }
+    assert_eq!(steps.last().unwrap()["id"].as_str(), Some("run"));
+    let review = read(REVIEW);
+    includes(job(&review, "prose-agent"), &["uses: ./.github/workflows/cgwalters-agent.yml", "prose: true", "github-reads: true"]);
+    excludes(job(&review, "prose-agent"), &["TAILNET_KEY"]);
+    includes(
+        job(&review, "prose-register"),
+        &["id-token: write", "register --config"],
+    );
+    excludes(
+        job(&review, "prose-agent"),
+        &["id-token:", "secrets: inherit"],
+    );
+}
+
+#[test]
+fn prose_offline_fixtures_run_in_existing_wrapper_suite() {
+    let out = Command::new("node")
+        .args(["--test", "workflow/prose.test.mjs"])
+        .current_dir(root())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
 }

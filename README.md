@@ -413,6 +413,104 @@ commit gets them only by reviewing an update to that pin. The dispatch
 wrapper continues to use these actions at `main` for non-review kinds;
 its review kind uses separate literal commit-pinned steps.
 
+### Advisory prose (default off)
+
+The independent `prose-*` chain in the review wrapper uses agentic-job
+**v0.6.12**, commit `eecc8c434e67a7607264ab3f7d90c88b6d02042a`, for policy,
+prepare/run, check and apply. Its policy binary, source actions and publishing
+workflows must stay at that one commit. The main verdict composition retains
+its independently matched pins and runner-user setup described above; the
+advisory does not change its release or network configuration.
+The new advisory agent already uses the runner-only contract: registration is
+in another job, its run token is passed as a reusable-workflow secret, host
+configuration omits the setup script, and setup runs unprivileged before run
+with an explicit `runner-home`. It has no OIDC, provider key, MCP credential,
+write token or persistent network-join credential.
+
+The concrete threats are PR text obtaining publication authority, spending the
+main review allocation, or attaching advice to an unreviewed head. The prose
+chain therefore starts only after the existing authorized public-PR event
+admission; it is analysis with head-bound advisory policy, one checked comment
+or noop, no notification and no partial apply. Nothing in the main review
+depends on prose results. It never submits reviews, sets statuses, classifies
+PRs or escalates buckets. Advisory failure cannot change the main verdict.
+
+`REVIEW_PROSE`, a trusted repository/organization variable containing JSON, is
+the only opt-in. Unset or `{"enabled":false}` visibly skips in the prose-config
+job summary. No cheap deployment has been selected or verified here. To enable,
+the owner must supply **all** of these fields, not copy a fictional model/pool:
+`enabled` (true), `model` (actual provider/model), `runner` (a JSON-encoded label
+array for an isolated ephemeral runner already connected to the inference
+network), `requests` (1–12), `minutes` (1–5), `usd` (0.01–0.10),
+`verified` (true), `evidence` (HTTPS verification record), and `inputPrice`,
+`outputPrice`, `mainInputPrice`, `mainOutputPrice` (positive prices in the same
+units). Both prose prices must be strictly cheaper. The owner must verify the
+model is actually served through the configured broker and record the date,
+model identifiers and pricing evidence **before** setting `verified`. This is
+an owner attestation, not a live availability/pricing probe. Supply
+`INFERENCE_URL` from deployment configuration; there is no endpoint or main
+reviewer fallback. Broker aggregate caps and run request/time/USD limits remain
+necessary: reported spend may cross its cap on the last reply. No hard billing
+guarantee is implied.
+
+The agent runner must already reach that endpoint, without a credential it can
+reuse to join the network. Only the trusted hosted registration job joins the
+tailnet with OIDC. Admit this wrapper's registration `job_workflow_ref` in the
+broker and tailnet before enabling. If no compatible runner or model exists,
+leave prose off; do not give its agent OIDC or restore `agent-user: sandbox`.
+
+The base-owned `workflow/prose.md` and `workflow/prose.mjs` are required beside
+the existing review bounds. Input preparation reads at most 100 changed-file
+records and 100 commit records (2 MiB per API response, 30 seconds per call),
+and supplies at most 20,000 Unicode characters: body up to 4,000, then commit
+messages and changed Markdown hunks with remaining space. Hunk headers, paths,
+commit SHAs and body/message line positions are retained; missing patches,
+truncation and incomplete pagination are reported, not claimed as covered.
+Changed Markdown, commit messages and body are serialized as untrusted JSON.
+The checklist, manual prompt and constructed fixtures are fetched only from
+tracker commit `5c4a8d61a94323703b71998c8b21eb7ecb2b386a` under
+`docs/review-checklist/prose*.md`. Missing checklist/input, stale head and no
+prose visibly skip without publishing. Instructions ask for exact before/after,
+location and meaning-preservation rationale, or noop. The independent trusted
+bounds job checks one to three structured rewrites and a 12,000-byte comment
+after upstream checking; it passes upstream's checked artifact unchanged to
+apply. This structural check is not proof of semantic correctness or immunity
+to prompt injection. The pinned fixtures are reference material, not a model
+evaluation result.
+
+Policy, input preparation and apply bind the admitted head. Apply retains
+same-run artifact ID/digest checks, deduplication and publisher-side live-head
+rechecking, and adds trusted reviewed-SHA framing. GitHub has no conditional
+issue-comment POST: a head can still move between the last read and POST. The
+comment is framed as advice for the reviewed SHA, not guaranteed current advice.
+Serialize publication; inspect the destination before retrying a lost POST
+response. A later run can post another advisory. Body text is reviewed on
+admitted runs; today's caller does **not** independently trigger on body-only
+edits. No edited-body event is added by this change.
+
+Roll out only after reviewing a full-SHA wrapper pin in each caller, copying the
+two prose files to its trusted base and retaining its existing bounds and
+permission grants. This repository's caller already uses the local reusable
+wrapper, so its event configuration needs no new trigger or grant. For external
+callers, update `.github/workflows/review.yml`'s `jobs.review.uses` to
+`cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@` followed by the
+reviewed merge commit, not a moving tag. Wrapper merge alone activates nothing.
+After cheap-model verification and credential-boundary checks, an authorized
+owner must smoke-test an admitted **public** PR with a known prose rewrite,
+commit-message-only/body cases and noop; confirm the exact reviewed SHA and one
+advisory comment with no verdict/status effect. Also push a newer head before
+publication, exercise missing config/artifacts and an advisory failure, and
+confirm the main review result is unchanged. Disable by clearing `REVIEW_PROSE`.
+Keep actions#195 open until deployment and live acceptance are recorded.
+
+Offline tests cover input bounds, injection-as-data, missing configuration and
+checklist, stale preparation heads, noop, structured output bounds, immutable
+pins and isolation of the main dependency graph. They do not prove model
+quality, live availability/pricing, broker admission, ephemeral-runner isolation
+or live GitHub publication. Run `node --test workflow/prose.test.mjs` and
+`just test-lint`; an optional binary-backed fixture run is documented with the
+tests. No live inference or write smoke test is part of local verification.
+
 ### Ordinary dispatched reviews (dormant)
 
 This is the wrapper slice of actions#174 / tracker#1171, not a caller

@@ -100,7 +100,7 @@ test('Renovate tracks the wrappers\' own-action pins from main without automerge
   const pattern = new RegExp(manager.matchStrings[0], 'g');
   const wrapper = read('./cgwalters-review.yml');
   const pins = [...wrapper.matchAll(pattern)];
-  assert.equal(pins.length, 3);
+  assert.equal(pins.length, 4);
   for (const pin of pins) assert.match(pin.groups.currentDigest, /^[0-9a-f]{40}$/);
   // Exercise successive digest-only updates, including after main advances
   // again: preserve paths and the prose marker, never generate `# main`.
@@ -545,7 +545,7 @@ test('review policy has fixed base-owned bounds/task and head; the agent receive
     "budget: ${{ inputs.kind == 'review' && '500'", "timeout: '75'"]) assert.ok(policy.includes(text), text);
   assert.ok(job('agent').includes("\n      github-reads: ${{ inputs.kind != 'review' }}\n"));
   assert.ok(job('agent').includes('\n    uses: ./.github/workflows/cgwalters-agent.yml\n'));
-  const agent = read('./cgwalters-agent.yml');
+  const agent = read('./cgwalters-agent.yml').split('\n  agent:\n')[1].split('\n  prose:\n')[0];
   assert.equal([...agent.matchAll(/uses: actions\/checkout@/g)].length, 2);
   assert.match(agent, /ref: \$\{\{ fromJSON\(inputs.policy\).ref \}\}/);
   assert.doesNotMatch(agent, /ref:.*(?:head|inputs\.(?!policy\)))|git fetch|pulls\//);

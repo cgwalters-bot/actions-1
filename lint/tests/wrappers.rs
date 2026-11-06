@@ -394,7 +394,10 @@ jobs:
 #[test]
 fn review_wrapper_pins_its_own_actions_by_full_commit() {
     for (file, actions) in [
-        (REVIEW, &["admit", "deployment", "tailscale"][..]),
+        (
+            REVIEW,
+            &["admit", "deployment", "tailscale", "tailscale"][..],
+        ),
         (AGENT, &["tailscale"]),
     ] {
         let text = read(file);
