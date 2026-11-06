@@ -59,6 +59,9 @@ and inference registration. The dispatch wrapper rejects `fake` before
 provisioning because v0.6.5 supports its scripted profile only as the
 runner's user.
 
+The v0.6.12 upgrade is deferred until the wrappers and smoke job adopt its
+runner-only credential boundary; it refuses `agent-user: sandbox`.
+
 The release train may replace only the local `secure-host` forwarder in both
 wrappers and the wrapper smoke job with
 `cgwalters-forge/actions/secure-host@<full immutable commit>`: the verified
