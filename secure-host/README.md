@@ -198,6 +198,24 @@ attestation with `gh attestation verify`, against the signer in
 branch, on a GitHub-hosted runner. Every host fix takes an agentic-job
 release, then a pin update here.
 
+The effective pin is still **v0.6.9**: a step can force another process
+of the runner's user to dump core and read its memory, despite the
+runner-read rule and Yama. Upstream
+[agentic-job#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154)
+closes this route by discarding all new host core dumps under
+`deny-runner-reads`; it adds a `core-pattern` check. This also loses new
+core dumps for deterministic CI, but does not remove stored cores or
+close the Worker's diagnostic sockets. **v0.6.12 predates the fix**;
+deployment needs a release containing it and a pin update here
+([agentic-job#2070](https://github.com/cgwalters-forge/agentic-job/issues/2070)).
+Prepare/config adoption remains
+[agentic-job#2656](https://github.com/cgwalters-forge/agentic-job/issues/2656),
+not part of this documentation change. See
+[runner reads](docs/runner-reads.md#forced-core-dumps-pinned-image-versus-upstream)
+for the implementation and [evidence](docs/evidence.md#forced-core-dumps-upstream-only)
+for the existing Ubuntu job, not a new reproduction or RHEL proof. The
+job remains the trust unit; no credential refusal is lifted.
+
 ## Inputs
 
 | Input | Default | |

@@ -50,12 +50,50 @@ or `EACCES`. Signals still reach it.
 - The Worker is exempt by its pid, which the pin keeps after the job. On
   a reused host, a later job's Worker is not exempt, and its orphan
   cleanup stops working.
-- A step can still signal an earlier process: it can raise the process's
-  core limit and make it dump core where the host's `core_pattern`
-  leaves the dump readable.
+- In the pinned image, a step can still signal an earlier process: it
+  can raise the process's core limit and make it dump core where the
+  host's `core_pattern` leaves the dump readable (below).
 - It does not end the process: runner cleanup does, at the job's end.
 - It is not isolation between steps: a step can still tamper with later
   steps, which the [threat model](threat-model.md) accepts.
+
+## Forced core dumps: pinned image versus upstream
+
+The effective [`Containerfile.pin`](../Containerfile.pin) is v0.6.9 at
+`sha256:008d34bf9598ef83d7859772200f26637814d2cd105028457208ddc87d69788b`.
+It does not discard cores or check the core pattern. Even when the BPF
+rule and Yama refuse `/proc` reads and ptrace, a step can use `prlimit`
+and `SIGSEGV` on another process of the same uid, then read its memory
+through `coredumpctl dump` on a host using systemd-coredump. That leaves
+a forced-core route to a step's parent, agentic-job's `run` and the
+Worker, separate from the diagnostic-socket route below.
+
+Upstream [#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154),
+at [773322d503987eac40845ce49d5bc0b9acbd8b30](https://github.com/cgwalters-forge/agentic-job/commit/773322d503987eac40845ce49d5bc0b9acbd8b30),
+sets `kernel.core_pattern` to `|/bin/false` when `deny-runner-reads` is
+enabled (`sandbox.deny-runner-reads` in this pin's configuration,
+`host.deny-runner-reads` in the newer source). It is not a new option:
+the rule stays off by default in the image, on in this action's
+`hosted.toml`, and requires the runner lock. Only root in the initial
+user namespace can change the host-wide pattern; the lock denies that
+to later steps. The newer check fails `core-pattern` unless that exact
+discard setting is readable, accepting a single trailing newline.
+
+Every job on such a host loses **all new core dumps**, deterministic
+CI included, not just dumps of the runner's processes. Existing stored
+cores are not removed and remain readable according to their access
+rules. Disabling `deny-runner-reads` gives up both the read rule and the
+new discard behavior; it is not a per-process diagnostic exception.
+The setting neither separates steps nor closes .NET diagnostic sockets.
+All runner-mode credential refusals remain: inference-provider keys,
+MCP credentials, the OIDC request and the other `--runner-home` refusals.
+
+v0.6.12 predates this fix. A release containing it and a pin update here
+are still needed ([deployment #2070](https://github.com/cgwalters-forge/agentic-job/issues/2070));
+[prepare/config adoption #2656](https://github.com/cgwalters-forge/agentic-job/issues/2656)
+is separate work. The [upstream Ubuntu evidence](evidence.md#forced-core-dumps-upstream-only)
+uses a sacrificial dump plus the host setting for the Worker, never a
+crashed Worker; RHEL is unverified.
 
 ## The Worker's diagnostic sockets
 
