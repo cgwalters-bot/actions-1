@@ -1,0 +1,92 @@
+# Runner-only v0.6.12 composition. The runner must already reach INFERENCE_URL;
+# no OIDC or reusable network credential may be present in the agent's job.
+name: cgwalters-prose-agent
+on:
+  workflow_call:
+    inputs:
+      policy:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: true
+    secrets:
+      INFERENCE_RUN_TOKEN:
+        required: true
+    outputs:
+      exit:
+        value: ${{ jobs.agent.outputs.exit }}
+      safe-outputs-artifact-id:
+        value: ${{ jobs.agent.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest:
+        value: ${{ jobs.agent.outputs.safe-outputs-artifact-digest }}
+permissions: {}
+jobs:
+  agent:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    outputs:
+      exit: ${{ steps.run.outputs.exit }}
+      safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(inputs.policy).ref }}
+          persist-credentials: false
+      - name: Require the advisory release and trusted uploads
+        env:
+          POLICY: ${{ inputs.policy }}
+        run: >-
+          jq -e '."source-repository" == "cgwalters-forge/agentic-job" and
+          ."source-sha" == "eecc8c434e67a7607264ab3f7d90c88b6d02042a" and
+          ([."binary-artifact-id", ."policy-artifact-id"] | all(test("^[1-9][0-9]*$")))'
+          <<< "$POLICY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cgwalters-forge/agentic-job
+          ref: eecc8c434e67a7607264ab3f7d90c88b6d02042a # v0.6.12
+          path: .agentic-job-source
+          persist-credentials: false
+      - uses: ./.agentic-job-source/prepare # zizmor: ignore[self-repository] Validated immutable policy source, never head code.
+        with:
+          binary-artifact-id: ${{ fromJSON(inputs.policy).binary-artifact-id }}
+          policy-artifact-id: ${{ fromJSON(inputs.policy).policy-artifact-id }}
+      - name: Admit the runner-only configuration
+        env:
+          CALLER_PRIVATE: ${{ toJSON(github.event.repository.private) }}
+          AGENT_USER: runner
+        run: python3 .agentic-job-source/workflow/runner-setup.py admit
+      - name: Prepare bounded prose and pinned checklist
+        id: prose
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node workflow/prose.mjs
+      - name: Check inference reachability
+        if: steps.prose.outputs.ready == 'true'
+        run: agentic-job secure-host inference .agentic-job/config.toml
+      - name: The runner-only host configuration
+        if: steps.prose.outputs.ready == 'true'
+        run: agentic-job config --host --from .agentic-job/config.toml > "$RUNNER_TEMP/agentic-job-host.toml"
+      - if: steps.prose.outputs.ready == 'true'
+        uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Validated immutable policy source, never head code.
+        with:
+          config: ${{ runner.temp }}/agentic-job-host.toml
+      - name: The unprivileged setup script
+        if: steps.prose.outputs.ready == 'true'
+        env:
+          AGENT_HOME: ${{ runner.temp }}/agent-home
+        run: python3 .agentic-job-source/workflow/runner-setup.py setup
+      - id: run
+        if: steps.prose.outputs.ready == 'true'
+        timeout-minutes: 6
+        uses: ./.agentic-job-source/run # zizmor: ignore[self-repository] Validated immutable policy source, never head code.
+        with:
+          runner-home: ${{ format('{0}/agent-home', runner.temp) }}
+          github-token: ${{ github.token }}
+          inference-run-token: ${{ secrets.INFERENCE_RUN_TOKEN }}

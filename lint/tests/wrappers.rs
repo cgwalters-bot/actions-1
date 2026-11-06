@@ -361,7 +361,7 @@ fn review_wrapper_pins_its_own_actions_by_full_commit() {
     let refs = own_action_refs(&text);
     assert_eq!(
         refs.iter().map(|r| r.0).collect::<Vec<_>>(),
-        ["admit", "deployment", "tailscale"]
+        ["admit", "deployment", "tailscale", "tailscale"]
     );
     for (action, r) in refs {
         assert!(is_commit(r), "{action}: {r}");

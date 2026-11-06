@@ -44,11 +44,11 @@ test('Renovate tracks both wrappers review pins from main without automerge', ()
   const pattern = new RegExp(manager.matchStrings[0], 'g');
   const wrapper = read('./cgwalters-review.yml');
   const pins = [...wrapper.matchAll(pattern)];
-  assert.equal(pins.length, 3);
+  assert.equal(pins.length, 4);
   for (const pin of pins) assert.match(pin.groups.currentDigest, /^[0-9a-f]{40}$/);
   // Exercise the digest-only replacement: preserve the action paths and branch.
   const updated = wrapper.replace(pattern, match => match.replace(/[0-9a-f]{40}/, 'a'.repeat(40)));
-  assert.equal([...updated.matchAll(pattern)].filter(pin => pin.groups.currentDigest === 'a'.repeat(40)).length, 3);
+  assert.equal([...updated.matchAll(pattern)].filter(pin => pin.groups.currentDigest === 'a'.repeat(40)).length, 4);
   assert.equal([...read('./cgwalters-agentic-job.yml').matchAll(pattern)].length, 3);
   assert.deepEqual(config.packageRules, [{
     description: "Update the review wrapper's own-action commits together through review, even without release tags",
