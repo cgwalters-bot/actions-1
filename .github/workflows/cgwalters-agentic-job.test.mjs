@@ -56,6 +56,13 @@ test('Renovate tracks the wrappers\' own-action pins from main without automerge
   }]);
 });
 
+test('canary admission is implement-only', async () => {
+  await target({ PROFILE: 'implement', CANARY: 'true' });
+  for (const PROFILE of ['review', 'fix', 'research', 'triage']) {
+    await assert.rejects(target({ PROFILE, CANARY: 'true' }), /canary is supported only for implement/);
+  }
+});
+
 test('opencode or claude with no configuration repository fails in the target job', async () => {
   for (const agent of ['opencode', 'claude']) {
     await assert.rejects(target({ AGENT_CONFIG_REPO: '', AGENT: agent }), /No agent configuration repository/, agent);

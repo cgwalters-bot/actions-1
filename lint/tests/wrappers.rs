@@ -288,7 +288,7 @@ fn dispatched_review_keeps_base_policy_and_credential_free_head_access() {
         "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow",
         "inputs.kind == 'review' && needs.target.outputs.review-config",
         "budget: ${{ inputs.kind == 'review' && '500'",
-        "timeout: '75'",
+        "timeout: ${{ inputs.canary && '3' || '75' }}",
     ] {
         assert!(policy.contains(required), "policy must retain {required}");
     }
@@ -1310,7 +1310,7 @@ fn safe_output_contract_keeps_caller_bounds_counts_and_apply_token() {
     )));
     assert!(policy.contains(&line(
         6,
-        "max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}"
+        "max-outputs: ${{ (inputs.canary || inputs.kind == 'review') && '1' || '3' }}"
     )));
     let review = read(REVIEW);
     let review_policy = job(&review, "policy");

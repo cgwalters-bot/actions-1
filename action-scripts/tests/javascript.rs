@@ -4,6 +4,10 @@ use std::{collections::BTreeSet, path::Path, process::Command};
 // New Node entry points would bypass the migration and its delivery checks.
 const ALLOWED: &[&str] = &[
     ".github/workflows/cgwalters-agentic-job.test.mjs",
+    // The wrapper canary's controller and gate run in actions/github-script;
+    // move them with the other scripts once the Rust helpers ship.
+    ".github/workflows/wrapper-canary.cjs",
+    ".github/workflows/wrapper-canary.test.mjs",
     "app-token/remint.mjs",
     "app-token/remint.test.mjs",
     "renovate/dry-run.mjs",
