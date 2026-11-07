@@ -11,3 +11,5 @@
 "review.yml" = "This repository's caller of cgwalters-review.yml, run from the base branch."
 "secure-host.yml" = "This repository's CI for the secure-host action: runs it by local path (./secure-host) on hosted runners, with a read-only token."
 "workflows-check.yml" = "The required check itself: reads a pull request's files as Git blobs, with a read-only token."
+"wrapper-canary.yml" = "Opt-in, environment-gated default-branch controller; dispatches two real scratch sessions and cancels at eight minutes."
+"wrapper-canary-dispatch.yml" = "Default-branch child of the canary controller, calling the maintainer-admitted wrapper branch."

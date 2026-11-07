@@ -64,6 +64,13 @@ test('Renovate tracks the wrappers\' own-action pins from main without automerge
   }]);
 });
 
+test('canary admission is implement-only', async () => {
+  await target({ PROFILE: 'implement', CANARY: 'true' });
+  for (const PROFILE of ['review', 'fix', 'research', 'triage']) {
+    await assert.rejects(target({ PROFILE, CANARY: 'true' }), /canary is supported only for implement/);
+  }
+});
+
 test('opencode or claude with no configuration repository fails in the target job', async () => {
   for (const agent of ['opencode', 'claude']) {
     await assert.rejects(target({ AGENT_CONFIG_REPO: '', AGENT: agent }), /No agent configuration repository/, agent);
@@ -368,7 +375,7 @@ test('review policy has fixed base-owned bounds/task and head; the agent receive
   const policy = job('policy');
   for (const text of ["review-head: ${{ inputs.kind == 'review' && inputs.head || '' }}", 'review-task: workflow/review.md',
     "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow", "inputs.kind == 'review' && needs.target.outputs.review-config",
-    "budget: ${{ inputs.kind == 'review' && '500'", "timeout: '75'"]) assert.ok(policy.includes(text), text);
+    "budget: ${{ inputs.kind == 'review' && '500'", "timeout: ${{ inputs.canary && '3' || '75' }}"]) assert.ok(policy.includes(text), text);
   assert.ok(job('agent').includes("\n      github-reads: ${{ inputs.kind != 'review' }}\n"));
   assert.ok(job('agent').includes('\n    uses: ./.github/workflows/cgwalters-agent.yml\n'));
   const agent = read('./cgwalters-agent.yml');

@@ -372,6 +372,97 @@ variables listed above. Dependabot's pull requests are reviewed only with
 its ID in `REVIEW_BOT_IDS`. Without `.github/agentic-job/merge.toml` the
 reviewer is told that a person will approve after its review.
 
+## Wrapper canary (opt-in)
+
+The concrete failure this catches is a wrapper change that passes static CI
+and a base-branch review, but cannot start a real agent or check its handback
+(actions#138). It is **not** a way to run an unread fork with secrets. This
+reworks the canary proposed in #139 without a new `pull_request_target` gate.
+It is off until `WRAPPER_CANARY_REQUIRED=true`; existing required `ci` then
+refuses relevant PRs without successful head-specific canary evidence.
+
+[wrapper-canary.yml](.github/workflows/wrapper-canary.yml) runs only on
+`workflow_dispatch` on main, behind the `wrapper-canary` environment. A
+maintainer must read the **entire** candidate commit and promote that exact
+head to the maintainer-protected `wrapper-canary` branch. That push can itself
+run the candidate's push workflows with secrets: admission is a human trust
+decision, not a sandbox. Never promote an unread fork, or update this branch
+while a canary is running. The branch's broker/tailnet privileges must be no
+broader than needed for these scratch sessions.
+
+```sh
+SHA=... # the exact commit already reviewed
+git fetch origin "pull/$PR/head"
+test "$(git rev-parse FETCH_HEAD)" = "$SHA"
+git push origin "$SHA:refs/heads/wrapper-canary"
+gh workflow run wrapper-canary.yml --ref main -f pull="$PR" -f sha="$SHA"
+```
+
+The protected branch may need a maintainer-authorized non-fast-forward update;
+do not grant bots or all contributors permission to move it. The controller
+checks the open PR and branch against `sha`, starts an implement/noop dispatch
+on a scratch issue in cgwalters-forge-stage/board-test, and reopens a scratch
+PR there to start its event review. Both use the candidate wrappers at
+`@wrapper-canary`. The controller checks the resolved wrapper SHAs, full run
+success, successful shared-agent jobs and successful independent handback
+checks. It pins each discovered run ID, rejects ambiguous discovery, and
+cancels unfinished children after eight minutes. The controller job has a
+ten-minute outer timeout. A healthy run should finish within that bound;
+runner queues and environment approval waits are not agent execution time.
+If manually cancelled, or an API failure prevents discovery/cancellation,
+cancel both child runs manually too; their existing wrapper limits still
+apply. Reopen leaves the scratch PR open for reuse.
+
+Then rerun `ci` on the PR. Evidence must name its exact head and the current
+base SHA; updating either requires a fresh canary. If main advanced since
+the original CI event, update the PR branch first: rerunning an old event
+does not test the new base. Missing, skipped, failed,
+ambiguous or old evidence cannot pass. Detection includes both wrappers, the
+shared agent, canary helpers, and their local action directories, including
+renames; incomplete file lists fail closed. The read-only `ci` gate is a
+regression check, not protection against a PR deliberately rewriting `ci`
+or its helper. It inherits the existing required-ci trust model.
+
+### Setup and limits
+
+Provision these **before** enabling the variable (no settings are changed by
+this patch): the protected branch initially at main; the environment restricted
+to main with maintainer approval; its `WRAPPER_CANARY_TOKEN`, scoped to Actions
+read/write on actions and board-test, contents/PR read on actions and PR write
+on board-test; `CGWALTERS_BOT_PAT` and `agent-apply` as for the normal dispatch;
+`WRAPPER_CANARY_ISSUE` and `WRAPPER_CANARY_PULL` here naming reusable scratch
+items; board-test's caller below; and broker/tailnet admission for both
+wrappers' `job_workflow_ref` at `refs/heads/wrapper-canary`, retaining owner-ID
+restrictions. Keep `ci` required on main. The branch becomes as trusted as
+main when admitted. Repository administrators own that deployment decision.
+
+The dispatch caller sets the off-by-default wrapper input `canary: true`.
+This prevents a startup test from publishing an accidental agent change:
+implement admission requests only one noop, with a three-minute agent
+timeout and noop-only bounds. Other dispatch kinds refuse this input. Normal
+implement requests and their existing limits are unchanged.
+
+Board-test needs `.github/workflows/wrapper-canary-review.yml` on its default
+branch with `pull_request_target: types: [reopened]`, job key `review`, condition
+`github.event.pull_request.number == fromJSON(vars.WRAPPER_CANARY_PULL)`, and
+`uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@wrapper-canary`.
+Grant the same six permissions as [review.yml](.github/workflows/review.yml).
+Set its `WRAPPER_CANARY_PULL` to the scratch PR number and `AGENT=opencode`,
+with real inference configuration and base-owned review bounds/task. Use a
+non-draft, unmerged, in-repository PR by an admitted collaborator. Keep real
+review submission off there unless explicitly needed; this tests handback,
+not approval. The current wrappers refuse `fake` independently.
+
+Immutable action dependencies remain immutable: a canary runs exactly what
+the candidate wrapper references, **not** automatically a changed action's
+unreferenced working-tree copy. In particular dispatch's `@main` dependencies
+and review's pinned dependencies cannot test unmerged action changes by
+themselves. This remains a limitation of #138, not grounds to rewrite pins or
+weaken privileged checkout policy. A coordinated dependency canary and live
+broker/tailnet validation are still needed before treating this as full
+coverage. New workflow exemptions also take effect only after a separate
+base-branch exemption merge, per [workflows-check](lint/workflows-check.md).
+
 ## Lock new items
 
 [lock-new-items](.github/workflows/lock-new-items.yml) locks each newly

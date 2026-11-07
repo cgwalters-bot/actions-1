@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -72,6 +74,14 @@ jobs:
         run: node --test app-token/*.test.mjs
       - name: cgwalters-agentic-job unit tests
         run: node --test .github/workflows/*.test.mjs
+      - name: Require the admitted head's wrapper canary
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUIRED: ${{ vars.WRAPPER_CANARY_REQUIRED }}
+        with:
+          script: |
+            const { checkCanary } = require('./.github/workflows/wrapper-canary.cjs');
+            await checkCanary({ github, context, core });
       # tailscale without a tailnet: with no id-token permission the login
       # fails after tailscaled started (and after the job user reached its
       # LocalAPI, which the action's own readiness check does), so this

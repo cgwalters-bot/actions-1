@@ -1,0 +1,42 @@
+# Run trusted controller code on main only, never a PR checkout. Promoting a
+# reviewed commit to wrapper-canary is the explicit privilege admission.
+name: wrapper-canary
+run-name: 'wrapper canary ${{ inputs.pull }} ${{ inputs.sha }}'
+on:
+  workflow_dispatch:
+    inputs:
+      pull:
+        description: Open actions pull request to main
+        type: string
+        required: true
+      sha:
+        description: Exact reviewed head promoted to the protected wrapper-canary branch
+        type: string
+        required: true
+permissions: {}
+concurrency:
+  group: wrapper-canary
+  cancel-in-progress: false
+jobs:
+  canary:
+    if: github.ref == 'refs/heads/main' && vars.WRAPPER_CANARY_REQUIRED == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment: wrapper-canary
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PULL: ${{ inputs.pull }}
+          SHA: ${{ inputs.sha }}
+          ISSUE: ${{ vars.WRAPPER_CANARY_ISSUE }}
+          SCRATCH_PULL: ${{ vars.WRAPPER_CANARY_PULL }}
+        with:
+          github-token: ${{ secrets.WRAPPER_CANARY_TOKEN }}
+          script: |
+            const { runCanary } = require('./.github/workflows/wrapper-canary.cjs');
+            await runCanary({ github, context, core });

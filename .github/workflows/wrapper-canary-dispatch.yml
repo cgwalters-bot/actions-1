@@ -1,0 +1,38 @@
+# Only wrapper-canary.yml dispatches this child. Keeping it separate lets the
+# trusted controller cancel both real sessions at its shared deadline.
+name: wrapper-canary-dispatch
+run-name: 'wrapper canary dispatch ${{ inputs.sha }}'
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        type: string
+        required: true
+      issue:
+        type: string
+        required: true
+permissions: {}
+jobs:
+  dispatch:
+    if: github.ref == 'refs/heads/main' && vars.WRAPPER_CANARY_REQUIRED == 'true'
+    uses: cgwalters-forge/actions/.github/workflows/cgwalters-agentic-job.yml@wrapper-canary
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: read
+      id-token: write
+    with:
+      kind: implement
+      canary: true
+      repo: cgwalters-forge-stage/board-test
+      item: ${{ inputs.issue }}
+      task: "Wrapper startup canary. Do not change files. Hand back one noop saying wrapper canary, then run agentic-job handback check."
+      allow: .github/agentic-job/canary.toml
+      config: .agentic-job-source/.github/agentic-job/hosted.toml
+      apply-environment: agent-apply
+      agent: opencode
+      budget: '100'
+      max-requests: '30'
+    secrets:
+      SAFE_OUTPUTS_PAT: ${{ secrets.CGWALTERS_BOT_PAT }}

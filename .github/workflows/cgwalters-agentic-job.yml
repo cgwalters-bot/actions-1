@@ -92,6 +92,10 @@ on:
         description: "For implement or fix with claude or opencode: install agentic-job's skills and the configuration repository's (agentic-job's docs/skills.md); implement follows its implement skill"
         type: boolean
         default: false
+      canary:
+        description: "Implement only: prevent a startup test from publishing changes; noop-only, one output and three agent minutes"
+        type: boolean
+        default: false
       apply-environment:
         description: "The caller's environment whose token applies the outputs; empty: the variable APPLY_ENVIRONMENT. Required"
         type: string
@@ -221,6 +225,7 @@ jobs:
           TARGET_REPO: ${{ inputs.repo }}
           TARGET_ITEM: ${{ inputs.item }}
           PROFILE: ${{ inputs.kind }}
+          CANARY: ${{ inputs.canary }}
           EXPECTED_HEAD: ${{ inputs.head }}
           REVIEW_POOL: ${{ inputs.pool }}
           REVIEW_POOLS: ${{ vars.REVIEW_POOLS }}
@@ -266,6 +271,9 @@ jobs:
               throw new Error('cgwalters-agentic-job runs only from a public repository');
             }
             const profile = process.env.PROFILE;
+            if (process.env.CANARY === 'true' && profile !== 'implement') {
+              throw new Error('canary is supported only for implement startup tests');
+            }
             if (!['implement', 'triage', 'research', 'review', 'fix'].includes(profile)) {
               throw new Error('Unknown dispatch profile');
             }
@@ -510,8 +518,9 @@ jobs:
       task-artifact: ${{ inputs.kind != 'review' && format('dispatch-{0}-task', inputs.kind) || '' }}
       base: ${{ inputs.kind == 'review' && needs.target.outputs.review-base || 'main' }}
       kind: ${{ (inputs.kind == 'implement' || inputs.kind == 'fix') && 'branch' || 'analysis' }}
-      outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || 'add_comment,noop,missing_tool,missing_data')) }}
-      max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}
+      # A canary must not turn an accidental agent edit into a published PR.
+      outputs: ${{ inputs.canary && 'noop' || (inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || 'add_comment,noop,missing_tool,missing_data'))) }}
+      max-outputs: ${{ (inputs.canary || inputs.kind == 'review') && '1' || '3' }}
       # A fix has bounds of its own: pushing to a pull request's branch is
       # allowed for the repositories fix.toml names and no other. Since
       # agentic-job's #553 that branch may be outside the bot's fork, where
@@ -547,7 +556,7 @@ jobs:
       issue: ${{ inputs.item }}
       apply-environment: ${{ inputs.kind != 'review' && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}
       budget: ${{ inputs.kind == 'review' && '500' || inputs.budget }}
-      timeout: '75'
+      timeout: ${{ inputs.canary && '3' || '75' }}
       # Keep the finished work of a run that stops on its budget, except for
       # a fix or a review, whose partial result is not worth applying.
       apply-partial: ${{ inputs.kind == 'implement' || inputs.kind == 'research' || inputs.kind == 'triage' }}
