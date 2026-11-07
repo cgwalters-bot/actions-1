@@ -861,6 +861,39 @@ fn policy_is_given_max_requests_only_from_the_target_job() {
     )));
 }
 
+#[test]
+fn safe_output_contract_keeps_caller_bounds_counts_and_apply_token() {
+    let dispatch = read(AGENTIC_JOB);
+    let policy = job(&dispatch, "policy");
+    assert!(policy.contains(&line(
+        6,
+        "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow || (inputs.kind == 'fix' && inputs.fix-allow || inputs.allow) }}"
+    )));
+    assert!(policy.contains(&line(
+        6,
+        "max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}"
+    )));
+    let review = read(REVIEW);
+    let review_policy = job(&review, "policy");
+    assert!(review_policy.contains(&line(6, "max-outputs: '1'")));
+    assert!(review_policy.contains(&line(
+        6,
+        "allow: ${{ github.event_name == 'issue_comment' && 'workflow/review-command.toml' || 'workflow/review.toml' }}"
+    )));
+    for workflow in [&dispatch, &review] {
+        let apply = job(workflow, "apply");
+        assert!(apply.contains(&line(
+            6,
+            "SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}"
+        )));
+        assert!(apply.contains(&line(6, "policy: ${{ toJSON(needs.policy.outputs) }}")));
+        assert!(apply.contains(&line(6, "check: ${{ toJSON(needs.check) }}")));
+        for name in ["register", "agent", "check"] {
+            assert!(!job(workflow, name).contains("SAFE_OUTPUTS_PAT"), "{name}");
+        }
+    }
+}
+
 // The agent job has no identity token: it joins with the key the register
 // job minted, as root before anything of the agent's, for every kind.
 #[test]
