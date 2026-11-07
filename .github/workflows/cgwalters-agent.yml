@@ -154,7 +154,7 @@ jobs:
       # agent's. Pinned: main must not change privileged code behind a
       # caller's reviewed wrapper pin. Renovate moves it (renovate.json).
       - name: Join the tailnet
-        uses: cgwalters-forge/actions/tailscale@ba6c56925e63551fd4373fbeb23456a2f4a316da # main
+        uses: cgwalters-forge/actions/tailscale@abc3dba8f7a5c67df4f05300e4e204566d627417 # main
         with:
           authkey: ${{ secrets.TAILNET_KEY }}
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}-agent
