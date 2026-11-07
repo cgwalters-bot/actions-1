@@ -70,8 +70,9 @@ a single-use ephemeral key for the agent job's join
 registers the run at the broker with the policy job's binary. Both values
 reach the agent job only as secrets of its call, which masks them in its
 log; the agent job is called by local path, so at the wrapper's commit.
-Re-running only a failed agent job fails at the join, since the first
-attempt spent the key: re-run all jobs. The agent job then runs upstream's agent.yml sequence: prepare,
+Re-running only a failed agent job, whose key the first attempt spent,
+and an agent job that waited past its key's hour both fail at a check
+before the join that says so: re-run all jobs. The agent job then runs upstream's agent.yml sequence: prepare,
 agentic-job's runner-user admission, the join, the reachability check,
 `agentic-job config --host` (with no `setup.script`), the pinned
 `secure-host` forwarder, the setup script as the runner's user, and `run`

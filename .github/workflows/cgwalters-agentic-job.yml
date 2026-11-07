@@ -579,6 +579,9 @@ jobs:
     outputs:
       run-token: ${{ steps.register.outputs.run-token }}
       tailnet-key: ${{ steps.tailnet.outputs.key }}
+      # For the agent job's check of the key (cgwalters-agent.yml).
+      tailnet-key-attempt: ${{ github.run_attempt }}
+      tailnet-key-minted-at: ${{ steps.minted.outputs.at }}
     steps:
       # The binary and configuration this job runs are the policy call's
       # uploads of this run, from the repository the wrappers' policy
@@ -596,6 +599,10 @@ jobs:
             { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
           [[ "$BINARY" =~ ^[1-9][0-9]*$ && "$POLICY" =~ ^[1-9][0-9]*$ ]] ||
             { echo '::error::register requires binary and policy upload IDs from policy'; exit 1; }
+      # Before minting, so that the agent job's expiry check errs early.
+      - name: The key's mint time
+        id: minted
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
       # Pinned, as in cgwalters-agent.yml: main must not change privileged
       # code behind a caller's reviewed wrapper pin. The calling
       # repository's tailnet login, for an organization tailnets.json
@@ -643,6 +650,8 @@ jobs:
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       runner: ${{ needs.target.outputs.runner }}
+      tailnet-key-attempt: ${{ needs.register.outputs.tailnet-key-attempt }}
+      tailnet-key-minted-at: ${{ needs.register.outputs.tailnet-key-minted-at }}
       # Head code can exfiltrate even a read-only token: a review gets none.
       github-reads: ${{ inputs.kind != 'review' }}
 
