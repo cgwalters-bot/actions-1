@@ -345,7 +345,7 @@ stale-head, cancellation, failed-check/noop and authorized/unauthorized
 command cases. Actions must be allowed to create/approve PRs. No ruleset,
 legacy removal or rollout is part of this change.
 
-### Draft classifier reviews: blocked on the checked helper
+### Draft classifier reviews: blocked on reusable helper wiring
 
 The review-only draft extension requested in actions#200 is **not available**.
 Ordinary dispatched and event reviews still reject drafts; no opt-in or
@@ -354,23 +354,36 @@ laundering arbitrary agent prose (or an ordinary implementation run) into a
 verified quick classification by attaching a trusted writer job name. An
 ordinary checked APPROVE is not a checked draft-classifier result.
 
-agentic-job v0.6.11 (`3f9f6425119b97bb3620a38fe0adc8e79be7dc8e`), the
-pin when this was written, could not carry this contract safely:
-`crates/agentic-job/src/review/mod.rs`'s `Dispatch::resolve` unconditionally
-rejects drafts with a requested head, and `review verdict` / `review submit`
-validate a verdict comment, not the embedded classifier JSON. The latter
-rechecks open state/head, not the exact title/description or base. Increasing
-the prose instructions, removing `review-head`, or renaming `submit` would
-bypass those missing checks rather than implement them.
+The binary prerequisite landed in agentic-job#3067 and v0.6.12
+(`eecc8c434e67a7607264ab3f7d90c88b6d02042a`). The wrappers' current
+`427ce2295925654be9c35e91ca5cee91bbc2c9ea` pin carries it, and the
+runner-only migration above is complete; neither an older pin nor the
+removed sandbox user is the remaining blocker. The pinned binary's
+[draft-classifier contract](https://github.com/cgwalters-forge/agentic-job/blob/427ce2295925654be9c35e91ca5cee91bbc2c9ea/docs/review.md#draft-classifier-reviews)
+requires `REVIEW_DRAFT_CLASSIFIER=true` in policy dispatch, check's verdict
+step and submit, with `add_comment,noop` and `max-outputs: 1`.
 
-The prerequisite is an immutable agentic-job release extending its existing
-policy/check/submit helpers and checked artifact, with a base-owned,
-off-by-default **review-only** draft mode. It must bind repository, PR,
-expected head, base and exact current title/description through policy,
-independent check and publish-time revalidation. Ordinary draft rejection,
-credential-free sandbox fetching, no partial apply, cancellation/failed-check/
-noop guards and the base `GITHUB_TOKEN` writer must remain intact. This mode
-must not grant fix, ready, promotion or merge authority.
+The reusable workflows at that pin do not yet carry that setting or the
+snapshot between stages. Specifically,
+[`policy.yml`](https://github.com/cgwalters-forge/agentic-job/blob/427ce2295925654be9c35e91ca5cee91bbc2c9ea/.github/workflows/policy.yml)
+has no classifier input/environment on `Resolve a dispatched review` and
+does not upload its `$RUNNER_TEMP/dispatch-review.json` with the policy
+artifact.
+[`check.yml`](https://github.com/cgwalters-forge/agentic-job/blob/427ce2295925654be9c35e91ca5cee91bbc2c9ea/.github/workflows/check.yml)
+has no classifier setting and invokes `review verdict` without
+`--pull-request`. A wrapper environment cannot be passed through a reusable
+workflow call. Setting a repository variable alone therefore enables nothing.
+
+The precise prerequisite is upstream reusable-workflow plumbing for a trusted,
+off-by-default classifier setting, a policy-owned snapshot uploaded by ID,
+and check invoking the binary with that snapshot and setting. Then pin all
+helper calls and the agent sequence together to a compatible commit, before
+adding wrapper admission or the reserved writer name. Do not duplicate the
+policy/check workflows here or substitute a snapshot from the agent. Keep
+ordinary draft rejection, credential-free head fetching, no partial apply,
+cancellation/failed-check/noop guards and the base `GITHUB_TOKEN` writer.
+Submit must receive `BASE` and revalidate repository, PR, head, base and exact
+title/description. This mode grants no fix, ready, promotion or merge authority.
 
 The exact consumer contract is [agent-board#680's docs/poll.md](https://github.com/cgwalters-forge/agent-board/blob/71fe8272e70ba8438e46ba43336eed862bf7cdc6/docs/poll.md#draft-review-result-contract).
 Only an actual approving review may produce `APPROVED` with `commit_id`, one
@@ -381,14 +394,16 @@ body** limit (including the writer's footer/marker) and nonempty single-line
 evidence/reason of at most 1024 bytes each. The schema is
 `agent-board/draft-review/v1`; its exact fields are `schema`, `repository`,
 `pr`, `reviewed_head`, `title`, `description`, `semantic_diff`,
-`description_assessment`, `change_category`, `risk`, `evidence` and `reason`.
+`description_assessment`, `change_category`, `risk`, `evidence` and `reason`,
+plus optional `architecture_findings` (an array of nonempty single-line
+strings, each at most 1024 bytes). A nonempty architecture finding forces deep.
 Only `pass` / `matches` / `none` for semantics / description / risk can
 support quick; conservative, unknown or negative findings cannot claim it.
 Categories are `docs`, `dependencies`, `ci`, `mechanical` or
 `narrow_fix_with_test`, not path-derived proof. The consumer still owns its
 deterministic file/line/path/CI vetoes and reservation/run provenance checks.
 
-After that release, update the wrapper's policy/check/apply pins together,
+After that workflow plumbing lands, update the wrapper's helper pins together,
 retain literal privileged dependency pins, and reserve the exact writer job
 name only for independently checked `kind=review` classifier output. Its
 publication must occur within that successful job's latest-attempt interval;
@@ -400,10 +415,10 @@ before exposing the opt-in. Local regressions currently cover rejection and
 the ordinary writer boundaries, not a functioning classifier.
 
 Caller migration is blocked too: do not enable draft intake or rename a
-general job to satisfy the consumer. No caller configuration, permissions,
-credentials or live reviews change here. The eventual wrapper option's name
-and caller value must be documented with the implementing release, not
-guessed against today's incompatible CLI.
+general job to satisfy the consumer. The four caller children and tracker#1324
+remain separate and disabled until compatibility is proven. No caller
+configuration, permissions, credentials or live reviews change here; the
+wrapper does not yet expose the binary's classifier setting.
 
 Runs may edit `.github/` here, so pull requests are reviewed by
 [this repository's caller](.github/workflows/review.yml) of the wrapper
