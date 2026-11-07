@@ -5,6 +5,7 @@
 "ci.yml" = "This repository's CI: tests this revision's actions by local path, with a read-only token."
 "cgwalters-agentic-job.yml" = "Reusable wrapper of agentic-job's reusable workflows, which run the agent in their own sandbox."
 "cgwalters-review.yml" = "Reusable wrapper of agentic-job's review workflows, which run the agent in their own sandbox."
+"cgwalters-agent.yml" = "Both wrappers' agent job, called by local path: agentic-job's agent.yml steps, with prepare, secure-host and run from the policy call's pinned source, and no identity token or repository secret."
 "lock-new-items.yml" = "Reusable workflow whose one step locks the opened item by API, reading and running nothing of it."
 "lock.yml" = "This repository's caller of lock-new-items.yml, run from the base branch."
 "review.yml" = "This repository's caller of cgwalters-review.yml, run from the base branch."
