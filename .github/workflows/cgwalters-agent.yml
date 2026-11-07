@@ -35,6 +35,14 @@ on:
         description: Give the agent this job's own read-only GitHub token as GH_TOKEN
         type: boolean
         required: true
+      tailnet-key-attempt:
+        description: The run attempt whose register job minted TAILNET_KEY
+        type: string
+        required: true
+      tailnet-key-minted-at:
+        description: When, in seconds since the epoch, the register job minted TAILNET_KEY (at most)
+        type: string
+        required: true
     secrets:
       # The register job's `agentic-job register` output: the broker's run
       # token, narrow, capped and expiring. Only `run` gets it.
@@ -148,6 +156,24 @@ jobs:
           CALLER_PRIVATE: ${{ toJSON(github.event.repository.private) }}
           AGENT_USER: runner
         run: python3 .agentic-job-source/workflow/runner-setup.py admit
+      # Re-running only a failed agent job reuses the register job's
+      # outputs, a key the first attempt spent, and a review queued behind
+      # another can hold its key past expiry: either way the join would
+      # fail with Tailscale's bare refusal. Say what to do instead.
+      # KEY_EXPIRY_SECONDS is tailscale/mint.mjs's.
+      - name: Check the tailnet key is this attempt's and unexpired
+        env:
+          MINTED_ATTEMPT: ${{ inputs.tailnet-key-attempt }}
+          MINTED_AT: ${{ inputs.tailnet-key-minted-at }}
+          KEY_EXPIRY_SECONDS: 3600
+        run: |
+          [[ "$MINTED_AT" =~ ^[0-9]+$ ]] || { echo "::error::no mint time for the tailnet key"; exit 1; }
+          if [[ "$MINTED_ATTEMPT" != "$GITHUB_RUN_ATTEMPT" ]]; then
+            echo "::error::the tailnet key is attempt $MINTED_ATTEMPT's, whose join spends it: re-run all jobs, not only failed ones"; exit 1
+          fi
+          if (( $(date +%s) - MINTED_AT >= KEY_EXPIRY_SECONDS )); then
+            echo "::error::the tailnet key expired while this job waited to start: re-run all jobs"; exit 1
+          fi
       # Our one privileged network step, as root before anything of the
       # agent's is on the machine, with the register job's key, which the
       # join spends: whatever is still valid after secure-host is the

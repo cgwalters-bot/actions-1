@@ -80,8 +80,10 @@ a single-use ephemeral key for the agent job's join
 registers the run at the broker with the policy job's binary. Both values
 reach the agent job only as secrets of its call, which masks them in its
 log; the agent job is called by local path, so at the wrapper's commit.
-Re-running only a failed agent job can reuse a spent key: use **Re-run all
-jobs**, not **Re-run failed jobs** (see [retry recovery](#retry-recovery)).
+Re-running only a failed agent job can reuse a spent key, and an agent job
+can wait past its key's hour; both fail at a check before the join that
+says so. Use **Re-run all jobs**, not **Re-run failed jobs** (see
+[retry recovery](#retry-recovery)).
 The agent job then runs upstream's agent.yml sequence: prepare,
 agentic-job's runner-user admission, the join, the reachability check,
 `agentic-job config --host` (with no `setup.script`), the pinned
@@ -122,11 +124,11 @@ configuration explicitly or wait for supported ACP.
 
 The early ACP refusal slice of #219 landed in #227. Session work is separate
 in #225; this pin still refuses session listeners, and this change enables
-neither sessions nor a second user. #220 proposes an actionable pre-join
+neither sessions nor a second user. #220 added an actionable pre-join
 refusal for spent/expired keys with the re-run-all-jobs mitigation, not fresh
 keys per attempt. Queue expiry is still unfixed: a review queued for over
-an hour can hold an expired key. KVM access and self-pin policy remain
-separate #219 checklist items too.
+an hour can hold an expired key, now refused before the join. KVM access
+and self-pin policy remain separate #219 checklist items too.
 
 ### Retry recovery
 
@@ -148,8 +150,8 @@ For #219, retain this recovery contract rather than grant a broker new
 tailnet-key issuance authority. This does not refresh credentials at actual
 agent start or fix long queues. Keep OIDC and standing mint credentials out
 of the agent job; do not make keys reusable or extend their lifetime as a
-workaround. #220's open pre-join diagnostics are separate, not implemented
-here. Fresh-attempt issuance, live delayed-start/rerun acceptance, RHEL KVM
+workaround. #220's pre-join check only makes the failure clear.
+Fresh-attempt issuance, live delayed-start/rerun acceptance, RHEL KVM
 verification and self-pin lint policy remain outstanding.
 
 ### Session limitations
