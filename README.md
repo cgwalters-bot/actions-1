@@ -136,6 +136,50 @@ jobs:
       SAFE_OUTPUTS_PAT: ${{ secrets.CGWALTERS_BOT_PAT }}
 ```
 
+### Secondary pull requests
+
+The wrappers need no secondary-specific input. At the audited wrapper revision
+[`ba6c569`](https://github.com/cgwalters-forge/actions/commit/ba6c56925e63551fd4373fbeb23456a2f4a316da),
+policy, check and apply all pin agentic-job `427ce22`; its
+[workflow contract](https://github.com/cgwalters-forge/agentic-job/blob/427ce2295925654be9c35e91ca5cee91bbc2c9ea/docs/workflow.md)
+and [safe-output contract](https://github.com/cgwalters-forge/agentic-job/blob/427ce2295925654be9c35e91ca5cee91bbc2c9ea/docs/safe-outputs.md)
+govern this feature, not the older v0.6.11 release plan.
+
+The concrete threat is an agent redirecting a privileged write to another
+repository. Secondary publication stays off unless the caller's bounds file
+sets `[github.secondary_pull_request]`, with an exact `repo`, `base`,
+`branch_prefix`, `max = 1`, `max_patch_bytes` and `max_patch_files`.
+Check enforces these bounds independently; apply consumes only checked outputs.
+Secondary file exemptions must be explicit in that table's
+`unprotected_files`; primary exemptions are not inherited. See the pinned
+contract for the patch/base metadata and run-specific branch requirements.
+
+Dispatch forwards the caller's `allow` (or `fix-allow` for fixes) to policy,
+with a total `max-outputs` of **3**, including any secondary request. Both
+review paths allow only **1** output. The caller's `max_outputs` must admit
+the requested total; per-type limits still apply. A secondary request adds
+one to the primary `create_pull_request.max` collector allowance, not to the
+wrapper's total ceiling: two PRs leave room for only one other request.
+Do not raise a caller's total above 3 expecting this wrapper to request more.
+Tracker's activation child owns its bounds changes and the live
+primary-plus-secondary publication test; this audit enables no caller.
+
+Both wrappers explicitly forward `SAFE_OUTPUTS_PAT` to apply, never to the
+agent or check. Secondary publication requires that PAT, with access to fork
+the secondary repository, disable Actions on its fork, push there and open a
+PR; the job token is insufficient. The bot must not own the secondary target.
+
+Live acceptance of the migrated wrappers is recorded by tracker dispatch
+[42348718765](https://github.com/cgwalters-forge/tracker/actions/runs/42348718765)
+(register, agent, check and apply succeeded) and event review
+[42320676566](https://github.com/cgwalters-forge/actions/actions/runs/42320676566)
+(register, agent, check and submit succeeded). Both runs' `referenced_workflows`
+resolve the wrappers and shared agent job to `ba6c569`, and the helpers to
+`427ce22`. The older misctool review `41920939510` resolves to wrapper
+`5906e674` and helpers v0.6.1, so it is not acceptance of this migration.
+These are real agent runs, not the host smoke test; they do not prove
+primary-plus-secondary publication or complete #138's required canary rollout.
+
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
