@@ -643,6 +643,9 @@ jobs:
     outputs:
       run-token: ${{ steps.register.outputs.run-token }}
       tailnet-key: ${{ steps.tailnet.outputs.key }}
+      # For the agent job's check of the key (cgwalters-agent.yml).
+      tailnet-key-attempt: ${{ github.run_attempt }}
+      tailnet-key-minted-at: ${{ steps.minted.outputs.at }}
     steps:
       # The binary and configuration this job runs are the policy call's
       # uploads of this run, from the repository the wrappers' policy
@@ -686,6 +689,10 @@ jobs:
               sys.exit('register preflight: missing, malformed or oversized policy configuration; rerun policy to produce a valid config.toml')
           if 'child-agent' in config:
               sys.exit('register preflight: [child-agent] / acp-experiment is unsupported under the pinned runner-only implementation; remove [child-agent] from the caller configuration or wait for supported ACP; no credentials were acquired')
+      # Before minting, so that the agent job's expiry check errs early.
+      - name: The key's mint time
+        id: minted
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
       # Pinned, as in cgwalters-agent.yml: main must not change privileged
       # code behind a caller's reviewed wrapper pin. The calling
       # repository's tailnet login, for an organization tailnets.json
@@ -728,6 +735,8 @@ jobs:
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       runner: ${{ needs.target.outputs.runner }}
+      tailnet-key-attempt: ${{ needs.register.outputs.tailnet-key-attempt }}
+      tailnet-key-minted-at: ${{ needs.register.outputs.tailnet-key-minted-at }}
       # Head code can exfiltrate even a read-only token: a review gets none.
       github-reads: ${{ inputs.kind != 'review' }}
 
