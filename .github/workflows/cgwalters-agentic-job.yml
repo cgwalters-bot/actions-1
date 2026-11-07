@@ -202,7 +202,7 @@ jobs:
       - uses: cgwalters-forge/actions/admit@main
         if: ${{ inputs.kind != 'review' }}
       # Moving main must not replace privileged code behind a reviewed pin.
-      - uses: cgwalters-forge/actions/admit@1e867fca30bbfd531021f760b72cc839a1b10739 # main
+      - uses: cgwalters-forge/actions/admit@ba6c56925e63551fd4373fbeb23456a2f4a316da # main
         if: ${{ inputs.kind == 'review' }}
       # The model and configuration repository defaults below, from
       # deployment/deployment.json, so that a second deployment's copy sets
@@ -211,7 +211,7 @@ jobs:
       - uses: cgwalters-forge/actions/deployment@main
         id: deployment
         if: ${{ inputs.kind != 'review' }}
-      - uses: cgwalters-forge/actions/deployment@1e867fca30bbfd531021f760b72cc839a1b10739 # main
+      - uses: cgwalters-forge/actions/deployment@ba6c56925e63551fd4373fbeb23456a2f4a316da # main
         id: review-deployment
         if: ${{ inputs.kind == 'review' }}
       # Trusted pinned code only; no target checkout and no write token.
@@ -604,7 +604,7 @@ jobs:
       # organization may already set for an OAuth client of another use.
       - name: Join the tailnet and mint the agent job's key
         id: tailnet
-        uses: cgwalters-forge/actions/tailscale@1e867fca30bbfd531021f760b72cc839a1b10739 # main
+        uses: cgwalters-forge/actions/tailscale@ba6c56925e63551fd4373fbeb23456a2f4a316da # main
         with:
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
           oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}
