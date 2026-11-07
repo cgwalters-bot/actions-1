@@ -29,14 +29,16 @@ test('the review wrapper stays on the inference broker', () => {
 
 // Renovate's matchStrings are JavaScript regular expressions, so this one
 // runs them here rather than in lint/tests/wrappers.rs.
-test('Renovate tracks both wrappers review pins from main without automerge', () => {
+test('Renovate tracks the wrappers\' own-action pins from main without automerge', () => {
   const config = JSON.parse(read('../renovate.json'));
   assert.equal(config.customManagers.length, 1);
   const manager = config.customManagers[0];
   assert.equal(manager.customType, 'regex');
-  assert.deepEqual(manager.managerFilePatterns, ['/^\\.github/workflows/cgwalters-(?:review|agentic-job)\\.yml$/']);
+  assert.deepEqual(manager.managerFilePatterns, ['/^\\.github/workflows/cgwalters-(?:review|agentic-job|agent)\\.yml$/']);
   const eligible = new RegExp(manager.managerFilePatterns[0].slice(1, -1));
-  for (const file of ['cgwalters-review', 'cgwalters-agentic-job']) assert.ok(eligible.test(`.github/workflows/${file}.yml`));
+  for (const file of ['cgwalters-review', 'cgwalters-agentic-job', 'cgwalters-agent']) {
+    assert.ok(eligible.test(`.github/workflows/${file}.yml`));
+  }
   assert.ok(!eligible.test('.github/workflows/review.yml'));
   assert.equal(manager.datasourceTemplate, 'git-refs');
   assert.equal(manager.packageNameTemplate, 'https://github.com/cgwalters-forge/actions');
@@ -49,7 +51,11 @@ test('Renovate tracks both wrappers review pins from main without automerge', ()
   // Exercise the digest-only replacement: preserve the action paths and branch.
   const updated = wrapper.replace(pattern, match => match.replace(/[0-9a-f]{40}/, 'a'.repeat(40)));
   assert.equal([...updated.matchAll(pattern)].filter(pin => pin.groups.currentDigest === 'a'.repeat(40)).length, 3);
-  assert.equal([...read('./cgwalters-agentic-job.yml').matchAll(pattern)].length, 3);
+  // admit and deployment for the dispatch wrapper's review path, and each
+  // wrapper's register job's tailnet join; the shared agent job's join.
+  for (const [file, count] of [['./cgwalters-agentic-job.yml', 3], ['./cgwalters-agent.yml', 1]]) {
+    assert.equal([...read(file).matchAll(pattern)].length, count, file);
+  }
   assert.deepEqual(config.packageRules, [{
     description: "Update the review wrapper's own-action commits together through review, even without release tags",
     matchManagers: ['custom.regex'], matchDatasources: ['git-refs'],
@@ -117,7 +123,7 @@ async function target(env, { pull = false, caller = { private: false, visibility
     INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud', INFERENCE_REGISTER: 'github-oidc', AGENT_CONFIG_REPO: 'o/c',
     BROKER_URL: 'http://broker', BROKER_AUDIENCE: 'broker-aud',
     AGENT_CONFIG_PATH: 'p', APPLY_ENVIRONMENT: 'apply', SESSION: 'false', IDLE_MINUTES: '',
-    TAILNET_DOMAIN: '', RUN_ID: '123', RUN_ATTEMPT: '2', EXPECTED_HEAD: head, REVIEW_POOL: 'openai',
+    INFERENCE_PROVIDER: '', INFERENCE_API_KEY_SET: 'false', EXPECTED_HEAD: head, REVIEW_POOL: 'openai',
     REVIEW_POOLS: JSON.stringify({ openai: { agent: 'opencode', model: 'provider/review-model' } }), REVIEW_BOT_IDS: '', ...env,
   };
   const directory = mkdtempSync(join(tmpdir(), 'wrapper-task-'));
@@ -217,7 +223,7 @@ test('max-requests defaults to 400 and passes through for a real agent', async (
   assert.equal((await target({}))['max-requests'], '400');
   assert.equal((await target({ MAX_REQUESTS: '1000', AGENT: 'claude' }))['max-requests'], '1000');
   assert.equal((await target({ MAX_REQUESTS: '1', AGENT: 'vibe', AGENT_MODEL: 'devstral-small-latest' }))['max-requests'], '1');
-  await assert.rejects(target({ AGENT: 'fake' }), /fake is unsupported with agent-user sandbox/);
+  await assert.rejects(target({ AGENT: 'fake' }), /fake is unsupported by this wrapper/);
 });
 
 test('max-requests outside 1 to 1000 fails the run', async () => {
@@ -231,65 +237,45 @@ function job(name) {
   return `\n${workflow.split(`\n  ${name}:\n`)[1].split(/\n {2}[a-z-]+:\n/)[0]}`;
 }
 
-test('a run is no session unless asked, and passes policy nothing new', async () => {
+// A session's listener and a provider key both needed the sandbox user:
+// with the runner as the only agent user (agentic-job#2989) the agent can
+// read whatever its job holds. Refused before anything is provisioned,
+// for every profile; the inputs stay so a caller passing one gets this.
+test('session, idle-minutes and provider-key mode are refused before provisioning', async () => {
   assert.match(workflow, /\n {6}session:\n {8}description: [^\n]*\n {8}type: boolean\n {8}default: false\n/);
   assert.match(workflow, /\n {6}idle-minutes:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
-  const outputs = await target({ TAILNET_DOMAIN: 'example.ts.net' });
-  assert.equal(outputs.session, 'false');
-  assert.equal(outputs['idle-minutes'], '');
-  assert.equal(outputs['session-endpoint'], '');
-  assert.match(workflow, /\n {6}session: \$\{\{ needs\.target\.outputs\.session == 'true' \}\}\n/);
-  assert.match(workflow, /\n {6}idle-minutes: \$\{\{ needs\.target\.outputs\.idle-minutes \}\}\n/);
-  assert.match(workflow, /\n {10}SESSION: \$\{\{ inputs\.session \}\}\n {10}IDLE_MINUTES: \$\{\{ inputs\.idle-minutes \}\}\n/);
-});
-
-test('a session names its endpoint from the join hostname and the repository variable', async () => {
-  for (const [agent, idle] of [['opencode', '60'], ['claude', '1'], ['claude', '']]) {
-    const outputs = await target({ SESSION: 'true', IDLE_MINUTES: idle, TAILNET_DOMAIN: 'tail-1.ts.net', AGENT: agent });
-    assert.equal(outputs.session, 'true');
-    assert.equal(outputs['idle-minutes'], idle);
-    assert.equal(outputs['session-host'], 'agentic-job-123-2');
-    assert.equal(outputs['session-endpoint'], 'wss://agentic-job-123-2.tail-1.ts.net/');
-  }
-  assert.equal((await target({}))['session-host'], '');
-  // The address is the node the agent job joins as, also when that job
-  // alone is re-run, on a domain only the calling repository sets.
-  assert.match(job('agent'), /\n {10}hostname: \$\{\{ needs\.target\.outputs\.session-host \|\| format\('agentic-job-\{0\}-\{1\}', github\.run_id, github\.run_attempt\) \}\}\n/);
-  assert.match(job('target'), /\n {6}session-host: \$\{\{ steps\.target\.outputs\.session-host \}\}\n/);
-  assert.match(workflow, /\n {10}TAILNET_DOMAIN: \$\{\{ vars\.TAILNET_DOMAIN \}\}\n/);
-  assert.doesNotMatch(workflow, /inputs\.tailnet/i);
-});
-
-test('a session without a usable domain, for review, or with idle-minutes out of bounds fails', async () => {
-  for (const domain of ['', 'localhost', 'Example.ts.net', 'a.ts.net/x', 'a.ts.net`', '-a.ts.net', 'a.ts.net\n']) {
-    await assert.rejects(target({ SESSION: 'true', TAILNET_DOMAIN: domain }), /TAILNET_DOMAIN/, JSON.stringify(domain));
-  }
-  await assert.rejects(target({ SESSION: 'true', TAILNET_DOMAIN: 'a.ts.net', PROFILE: 'review', TARGET_REPO: 'caller/repo' }, { pull: true }), /review/);
-  for (const value of ['0', '61', '100', '01', ' 5', '5 ', '1e1', '-1']) {
-    await assert.rejects(target({ SESSION: 'true', TAILNET_DOMAIN: 'a.ts.net', IDLE_MINUTES: value }), /idle-minutes/, JSON.stringify(value));
-  }
-  // Without session it would be ignored downstream; refuse it instead.
-  await assert.rejects(target({ IDLE_MINUTES: '10' }), /idle-minutes/);
-});
-
-// agentic-job's provider-key mode (its #740), off unless a caller asks:
-// the defaults are its broker's, and the key, which `run` holds outside
-// the agent's sandbox, is handed to that one step and to nothing else.
-test('provider-key mode passes through with broker defaults, the key to run alone', () => {
   assert.match(workflow, /\n {6}inference-register:\n {8}description: [^\n]*\n {8}type: string\n {8}default: github-oidc\n/);
   assert.match(workflow, /\n {6}inference-provider:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
   assert.match(workflow, /\n {6}INFERENCE_API_KEY:\n {8}required: false\n/);
-  assert.ok(job('policy').includes("inference-register: ${{ inputs.kind == 'review' && 'github-oidc' || inputs.inference-register }}"));
-  assert.ok(job('policy').includes("inference-provider: ${{ inputs.kind != 'review' && inputs.inference-provider || '' }}"));
-  const uses = [...workflow.matchAll(/secrets\.INFERENCE_API_KEY/g)];
-  assert.equal(uses.length, 1);
-  assert.ok(job('agent').includes("github-token: ${{ inputs.kind != 'review' && github.token || '' }}"));
-  assert.ok(job('agent').includes("inference-api-key: ${{ inputs.kind != 'review' && secrets.INFERENCE_API_KEY || '' }}"));
+  const refusals = [
+    [{ SESSION: 'true' }, /session and idle-minutes are refused/],
+    [{ IDLE_MINUTES: '10' }, /session and idle-minutes are refused/],
+    [{ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }, /inference-register must be github-oidc/],
+    [{ INFERENCE_REGISTER: '' }, /inference-register must be github-oidc/],
+    [{ INFERENCE_PROVIDER: 'anthropic' }, /inference-register must be github-oidc/],
+    [{ INFERENCE_API_KEY_SET: 'true' }, /inference-register must be github-oidc/],
+    [{ INFERENCE_API_KEY_SET: undefined }, /inference-register must be github-oidc/],
+  ];
+  for (const [env, error] of refusals) {
+    await assert.rejects(target(env, { allowPolicyRead: false }), error, JSON.stringify(env));
+    await assert.rejects(review(env, { pull: true, allowPolicyRead: false }), error, JSON.stringify(env));
+  }
+  const outputs = await target({});
+  for (const name of ['session', 'idle-minutes', 'session-host', 'session-endpoint']) {
+    assert.equal(Object.hasOwn(outputs, name), false, name);
+  }
+  // The key's presence reaches the target job as a boolean, and the key
+  // nowhere else; policy is given only the broker's registration.
+  assert.deepEqual([...workflow.matchAll(/secrets\.INFERENCE_API_KEY\b[^\n]*/g)].map(m => m[0]), ["secrets.INFERENCE_API_KEY != '' }}"]);
+  assert.match(workflow, /\n {10}INFERENCE_API_KEY_SET: \$\{\{ secrets\.INFERENCE_API_KEY != '' \}\}\n/);
+  assert.match(job('policy'), /\n {6}inference-register: github-oidc\n/);
+  assert.doesNotMatch(job('policy'), /inference-provider|\n {6}session:|idle-minutes/);
+  assert.doesNotMatch(workflow, /TAILNET_DOMAIN|session-host|session-endpoint|inference-api-key/);
+  assert.doesNotMatch(read('./cgwalters-agent.yml'), /inference-api-key|mcp-token|agent-user|INFERENCE_API_KEY/);
 });
 
 test('the broker audience goes to policy only with the broker registration', async () => {
   assert.equal((await target({}))['inference-audience'], 'aud');
-  assert.equal((await target({ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }))['inference-audience'], '');
   assert.match(workflow, /\n {10}INFERENCE_REGISTER: \$\{\{ inputs\.inference-register \}\}\n/);
 });
 
@@ -307,8 +293,6 @@ test('our broker\'s audience is the default only with our broker\'s URL', async 
   for (const url of ['http://proxy', 'http://broker/', 'https://broker']) {
     await assert.rejects(target({ INFERENCE_URL: url, INFERENCE_AUDIENCE: '' }), /needs its own inference-audience/, url);
   }
-  // No identity token is minted for the proxy otherwise: nothing to refuse.
-  assert.deepEqual(await pick({ INFERENCE_URL: 'https://api.example', INFERENCE_AUDIENCE: '', INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }), ['https://api.example', '']);
   // Neither has a default of its own in the expressions, which would set
   // one without the other.
   assert.match(workflow, /\n {10}INFERENCE_URL: \$\{\{ inputs\.inference-url \|\| vars\.INFERENCE_URL \}\}\n/);
@@ -380,17 +364,19 @@ test('review admission keeps association, immutable bot id AND base bounds, and 
   await assert.rejects(review({}, { pr: outsider, comments: Array(100).fill(comments[0]) }), /history exceeds/);
 });
 
-test('review policy has fixed base-owned bounds/task and head; sandbox receives no credential or privileged head checkout', () => {
+test('review policy has fixed base-owned bounds/task and head; the agent receives no credential or privileged head checkout', () => {
   const policy = job('policy');
   for (const text of ["review-head: ${{ inputs.kind == 'review' && inputs.head || '' }}", 'review-task: workflow/review.md',
     "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow", "inputs.kind == 'review' && needs.target.outputs.review-config",
     "budget: ${{ inputs.kind == 'review' && '500'", "timeout: '75'"]) assert.ok(policy.includes(text), text);
-  const agent = job('agent');
+  assert.ok(job('agent').includes("\n      github-reads: ${{ inputs.kind != 'review' }}\n"));
+  assert.ok(job('agent').includes('\n    uses: ./.github/workflows/cgwalters-agent.yml\n'));
+  const agent = read('./cgwalters-agent.yml');
   assert.equal([...agent.matchAll(/uses: actions\/checkout@/g)].length, 2);
-  assert.match(agent, /ref: \$\{\{ needs.policy.outputs.ref \}\}/);
-  assert.doesNotMatch(agent, /ref:.*(?:head|inputs\.)|git fetch|pulls\//);
-  assert.ok(agent.includes("github-token: ${{ inputs.kind != 'review' && github.token || '' }}"));
-  assert.ok(agent.includes('agent-user: sandbox'));
+  assert.match(agent, /ref: \$\{\{ fromJSON\(inputs.policy\).ref \}\}/);
+  assert.doesNotMatch(agent, /ref:.*(?:head|inputs\.(?!policy\)))|git fetch|pulls\//);
+  assert.ok(agent.includes("github-token: ${{ inputs.github-reads && github.token || '' }}"));
+  assert.doesNotMatch(agent, /agent-user/);
   assert.ok(job('apply').includes("inputs.kind != 'review'"));
 });
 
@@ -400,7 +386,8 @@ test('checked submit keeps bot token, policy binary, checked artifact, commit an
   for (const text of ['GH_TOKEN: ${{ github.token }}', 'artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}',
     'artifact-ids: ${{ needs.check.outputs.artifact-id }}', 'HEAD_SHA: ${{ needs.policy.outputs.review-head }}',
     'AGENT_JOB: ${{ needs.agent.outputs.job }}', 'review submit --accepted "$RUNNER_TEMP/checked/agent_output.json"']) assert.ok(submit.includes(text), text);
-  assert.match(job('agent'), /job: \$\{\{ job.check_run_id \}\}/);
+  assert.match(read('./cgwalters-agent.yml'), /\n {6}job: \$\{\{ job.check_run_id \}\}\n/);
+  assert.match(read('./cgwalters-agent.yml'), /\n {6}job:\n {8}value: \$\{\{ jobs.agent.outputs.job \}\}\n/);
   for (const text of ['!cancelled()', "vars.AGENT_REAL_REVIEWS == 'true'", "needs.check.result == 'success'",
     "needs.check.outputs.artifact-id != ''", "needs.agent.result == 'success'", "needs.agent.outputs.exit == '0'",
     `contains(fromJSON('["APPROVE", "CHANGES"]'), needs.check.outputs.verdict)`]) assert.ok(submit.includes(text), text);

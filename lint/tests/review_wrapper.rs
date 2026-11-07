@@ -7,11 +7,17 @@ use std::process::{Command, Stdio};
 
 use yaml_rust2::{Yaml, YamlLoader};
 
-// The release both wrappers call, by immutable commit with its tag as a
-// comment. A bump changes this, the six calls, the header and the README.
-const PIN: &str = "3f9f6425119b97bb3620a38fe0adc8e79be7dc8e # v0.6.11";
+// What both wrappers call, by immutable commit with its tag as a comment: a
+// release, or, when a caller needs an unreleased fix, a commit of main with
+// the tag of its CI build (`build-DIGEST`), which zizmor's ref-version-mismatch
+// audit resolves. A bump changes this, the six calls, the smoke job's two and
+// the README.
+const PIN: &str = "427ce2295925654be9c35e91ca5cee91bbc2c9ea # build-e9bea055d71d86a461b8956e1e550398f8a8253d32539b253969bf6f17527a9d";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
+// Both wrappers' agent job, called by local path.
+const AGENT: &str = ".github/workflows/cgwalters-agent.yml";
+const SMOKE: &str = ".github/workflows/secure-host.yml";
 const LOCAL_HOST: &str = "./.agentic-job-source/secure-host";
 
 // Moving a tag or substituting another action must not change privileged setup.
@@ -336,11 +342,7 @@ fn ordinary_review_submit_fails_closed_and_never_enters_pat_apply() {
 #[test]
 fn ordinary_review_privileged_dependencies_are_exclusive_literal_pins() {
     let workflow = yaml(&read(DISPATCH));
-    for (job, action) in [
-        ("target", "admit"),
-        ("target", "deployment"),
-        ("agent", "tailscale"),
-    ] {
+    for (job, action) in [("target", "admit"), ("target", "deployment")] {
         let prefix = format!("cgwalters-forge/actions/{action}@");
         let steps: Vec<_> = workflow["jobs"][job]["steps"]
             .as_vec()
@@ -387,6 +389,36 @@ fn ordinary_review_privileged_dependencies_are_exclusive_literal_pins() {
                 assert_eq!(reference, "main");
             }
         }
+    }
+    // The tailnet join is privileged for every kind: one pinned step in
+    // each wrapper's register job and in the agent job both call at their
+    // own commit, and nowhere else.
+    for (file, name) in [
+        (DISPATCH, "register"),
+        (REVIEW, "register"),
+        (AGENT, "agent"),
+    ] {
+        assert_eq!(read(file).matches("tailscale@").count(), 1, "{file}");
+        let source = yaml(&read(file));
+        let joins: Vec<_> = source["jobs"][name]["steps"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .filter(|step| {
+                step["uses"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("tailscale"))
+            })
+            .collect();
+        assert_eq!(joins.len(), 1, "{file}");
+        assert!(joins[0]["if"].is_badvalue(), "{file}");
+        let reference = joins[0]["uses"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("cgwalters-forge/actions/tailscale@")
+            .unwrap();
+        assert_eq!(reference.len(), 40, "{file}");
+        assert!(reference.bytes().all(|b| b.is_ascii_hexdigit()), "{file}");
     }
 }
 
@@ -635,12 +667,15 @@ fn only_admitted_agents_compete_and_only_pushes_cancel() {
 #[test]
 fn trusted_source_one_network_join_before_dropping_root_no_post_agent_steps() {
     review_source(&read(REVIEW));
+    agent_source(&read(AGENT));
 }
 
+// The review wrapper: no head, no inherited secret, the pinned calls, and
+// secrets only for apply and for the agent's call, which gets the register
+// job's two values and nothing else.
 fn review_source(text: &str) {
-    let text = host_source(text, "agent");
     excludes(
-        &text,
+        text,
         &[
             "pull_request.head",
             "head.ref",
@@ -648,9 +683,82 @@ fn review_source(text: &str) {
             "workflow_dispatch",
         ],
     );
-    let source = yaml(&text);
+    let source = yaml(text);
     let jobs = &source["jobs"];
-    let steps: Vec<_> = jobs["agent"]["steps"]
+    for name in ["policy", "check", "apply"] {
+        includes(job(text, name), &[&format!("/{name}.yml@{PIN}")]);
+    }
+    calls_register_then_agent(text);
+    for name in jobs
+        .as_hash()
+        .unwrap()
+        .keys()
+        .map(|key| key.as_str().unwrap())
+    {
+        if !["apply", "agent"].contains(&name) {
+            excludes(job(text, name), &["secrets."]);
+        }
+    }
+}
+
+/// Both wrappers' register and agent jobs: the register job is the
+/// wrapper's own, as the token's `job_workflow_ref` names the file that
+/// defines the job, and holds the identity token alone; the agent's call,
+/// of the shared workflow at the wrapper's commit, reads only and gets
+/// exactly register's two outputs.
+fn calls_register_then_agent(text: &str) {
+    let source = yaml(text);
+    let jobs = &source["jobs"];
+    register_job(text);
+    let agent = &jobs["agent"];
+    assert_eq!(
+        agent["uses"].as_str(),
+        Some("./.github/workflows/cgwalters-agent.yml")
+    );
+    assert!(
+        agent["needs"]
+            .as_vec()
+            .unwrap()
+            .contains(&Yaml::String("register".into()))
+    );
+    assert_eq!(
+        agent["permissions"],
+        yaml("contents: read\nissues: read\npull-requests: read\nactions: read")
+    );
+    assert_eq!(
+        agent["secrets"],
+        yaml(
+            "INFERENCE_RUN_TOKEN: ${{ needs.register.outputs.run-token }}\nTAILNET_KEY: ${{ needs.register.outputs.tailnet-key }}"
+        )
+    );
+    assert_eq!(
+        agent["with"]["policy"].as_str(),
+        Some("${{ toJSON(needs.policy.outputs) }}")
+    );
+    let grants = text
+        .lines()
+        .filter(|line| line.trim() == "id-token: write")
+        .count();
+    assert_eq!(grants, 2, "register's and check's");
+}
+
+/// The shared agent job: upstream agent.yml's steps with our join, as the
+/// runner's user, with no identity token, nothing written and only the
+/// call's two secrets, each in the one step that spends it.
+fn agent_source(text: &str) {
+    let text = host_source(text, "agent");
+    excludes(
+        &text,
+        &[
+            "pull_request.head",
+            "head.ref",
+            "secrets: inherit",
+            "id-token:",
+            "vars.",
+        ],
+    );
+    let source = yaml(&text);
+    let steps: Vec<_> = source["jobs"]["agent"]["steps"]
         .as_vec()
         .unwrap()
         .iter()
@@ -663,60 +771,159 @@ fn review_source(text: &str) {
     assert_eq!(
         steps,
         [
+            "Install RHEL prerequisites",
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "The policy call's source repository",
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "Create the job directory",
             "./.agentic-job-source/prepare",
-            "Keep the job inputs private",
+            "Admit the runner-user configuration",
             "Join the tailnet",
             "Check inference proxy reachability",
             "The host's configuration",
             "./.agentic-job-source/secure-host",
+            "The setup script",
             "run",
         ]
     );
+    assert_eq!(
+        source["jobs"]["agent"]["permissions"],
+        yaml("contents: read\nissues: read\npull-requests: read\nactions: read")
+    );
     let agent = job(&text, "agent");
-    includes(agent, &["ref: ${{ needs.policy.outputs.ref }}"]);
+    includes(agent, &["ref: ${{ fromJSON(inputs.policy).ref }}"]);
     excludes(
         agent,
+        &["pull-requests: write", "contents: write", "issues: write"],
+    );
+    assert_eq!(
+        captures(agent, "secrets."),
+        ["TAILNET_KEY }}", "INFERENCE_RUN_TOKEN }}"]
+    );
+    let order = [
+        "name: Join the tailnet",
+        "authkey: ${{ secrets.TAILNET_KEY }}",
+        "run: agentic-job secure-host inference .agentic-job/config.toml",
+        "--string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:",
+        "uses: ./.agentic-job-source/secure-host",
+        "run: python3 .agentic-job-source/workflow/runner-setup.py setup",
+        "uses: ./.agentic-job-source/run",
+        "inference-run-token: ${{ secrets.INFERENCE_RUN_TOKEN }}",
+    ];
+    let positions: Vec<_> = order
+        .iter()
+        .map(|part| {
+            assert_eq!(agent.matches(part).count(), 1, "{part}");
+            agent.find(part).unwrap()
+        })
+        .collect();
+    assert!(positions.is_sorted(), "{order:?}");
+}
+
+fn captures<'a>(text: &'a str, prefix: &str) -> Vec<&'a str> {
+    text.match_indices(prefix)
+        .map(|(i, _)| {
+            let rest = &text[i + prefix.len()..];
+            &rest[..rest.find('\n').unwrap_or(rest.len())]
+        })
+        .collect()
+}
+
+// The register job: a hosted runner, the identity token and nothing else,
+// the policy call's own uploads, a join that mints the agent job's key, and
+// `agentic-job register`, whose output and the key leave it as job outputs.
+#[test]
+fn register_job_is_hosted_and_holds_the_only_identity_token() {
+    for file in [DISPATCH, REVIEW] {
+        register_job(&read(file));
+    }
+}
+
+fn register_job(text: &str) {
+    let body = job(text, "register");
+    excludes(
+        body,
         &[
-            "pull-requests: write",
-            "contents: write",
-            "issues: write",
             "secrets.",
+            "actions/checkout",
+            ".agentic-job-source",
+            "uses: ./",
         ],
     );
-    for name in ["policy", "check", "apply"] {
-        includes(job(&text, name), &[&format!("/{name}.yml@{PIN}")]);
-    }
-    for name in jobs
-        .as_hash()
+    let source = yaml(text);
+    let register = &source["jobs"]["register"];
+    assert!(register["uses"].is_badvalue());
+    assert_eq!(register["runs-on"].as_str(), Some("ubuntu-26.04"));
+    assert_eq!(register["permissions"], yaml("id-token: write"));
+    assert_eq!(
+        register["if"].as_str(),
+        Some("${{ needs.policy.outputs.admitted == 'true' }}")
+    );
+    assert_eq!(
+        register["outputs"],
+        yaml(
+            "run-token: ${{ steps.register.outputs.run-token }}\ntailnet-key: ${{ steps.tailnet.outputs.key }}"
+        )
+    );
+    let steps: Vec<_> = register["steps"]
+        .as_vec()
         .unwrap()
-        .keys()
-        .map(|key| key.as_str().unwrap())
-    {
-        if name != "apply" {
-            excludes(job(&text, name), &["secrets."]);
-        }
-    }
+        .iter()
+        .map(|step| {
+            step["name"]
+                .as_str()
+                .or(step["uses"].as_str())
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            "The policy call's source and uploads",
+            "Join the tailnet and mint the agent job's key",
+            "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+            "Register the run at the inference proxy",
+        ]
+    );
+    includes(
+        body,
+        &[
+            "EXPECTED_REPOSITORY: cgwalters-forge/agentic-job",
+            "[[ \"$BINARY\" =~ ^[1-9][0-9]*$ && \"$POLICY\" =~ ^[1-9][0-9]*$ ]] ||",
+            "mint: 'true'",
+            "artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}",
+            "\"$JOB_DIR/agentic-job\" register --config \"$JOB_DIR/config.toml\" --output \"$GITHUB_OUTPUT\"",
+        ],
+    );
 }
 
 #[test]
 fn both_wrappers_retain_release_pins_and_check_proxy_between_join_and_setup() {
-    let (sha, version) = PIN.split_once(" # v").unwrap();
+    let (sha, comment) = PIN.split_once(" # ").unwrap();
+    let version = comment.strip_prefix('v').unwrap_or(comment);
     assert_eq!(sha.len(), 40);
     assert!(
         sha.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     );
-    let parts: Vec<_> = version.split('.').collect();
-    assert_eq!(parts.len(), 3);
-    assert!(
-        parts
-            .iter()
-            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
-    );
+    // vX.Y.Z, or a CI build's tag, build-DIGEST.
+    let build = version.strip_prefix("build-");
+    if let Some(digest) = build {
+        assert_eq!(digest.len(), 64);
+        assert!(
+            digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
+    } else {
+        let parts: Vec<_> = version.split('.').collect();
+        assert_eq!(parts.len(), 3);
+        assert!(
+            parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        );
+    }
     for file in [DISPATCH, REVIEW] {
         wrapper_release_and_order(&read(file));
     }
@@ -724,7 +931,6 @@ fn both_wrappers_retain_release_pins_and_check_proxy_between_join_and_setup() {
 
 fn wrapper_release_and_order(text: &str) {
     let file = "wrapper fixture";
-    let text = host_source(text, "agent");
     let calls: Vec<_> = text
         .lines()
         .filter_map(|line| line.trim().strip_prefix("uses: "))
@@ -744,47 +950,56 @@ fn wrapper_release_and_order(text: &str) {
         assert!(call.starts_with("cgwalters-forge/agentic-job/"), "{file}");
         assert_eq!(call.split_once('@').unwrap().1, PIN, "{file}");
     }
-    let source = yaml(&text);
+    let source = yaml(text);
     assert_eq!(
         source["jobs"]["policy"]["permissions"]["actions"].as_str(),
         Some("read")
     );
-    let agent = job(&text, "agent");
-    let check = "run: agentic-job secure-host inference /var/tmp/agentic-job/config.toml";
-    assert_eq!(agent.matches(check).count(), 1);
-    let join = agent.find("name: Join the tailnet").unwrap();
-    let inference = agent.find(check).unwrap();
-    let host = agent
-        .find("uses: ./.agentic-job-source/secure-host")
-        .unwrap();
-    let run = agent.find("uses: ./.agentic-job-source/run").unwrap();
-    assert!(join < inference && inference < host && host < run, "{file}");
-    excludes(agent, &["steps.secure-host.outputs.session-endpoint"]);
+    calls_register_then_agent(text);
+    excludes(
+        text,
+        &[
+            "agent-user",
+            "runner-home",
+            "secure-host inference",
+            "session-endpoint",
+        ],
+    );
 }
 
-// A second user prevents the agent minting tokens using the runner's OIDC capability.
+// The agent is the runner's user (agentic-job#2989): the host's file has no
+// setup.script, which the runner's user runs after secure-host; `run` gets
+// its home and the register job's run token, and no key, MCP credential or
+// second user.
 #[test]
 fn both_agents_use_trusted_host_public_binary_private_inputs_and_proposals_digest() {
+    agent_inputs(&read(AGENT));
     for file in [DISPATCH, REVIEW] {
-        wrapper_inputs(&read(file));
+        includes(
+            job(&read(file), "check"),
+            &[
+                "\n      safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}",
+            ],
+        );
     }
 }
 
-fn wrapper_inputs(text: &str) {
+fn agent_inputs(text: &str) {
     let text = host_source(text, "agent");
     let agent = job(&text, "agent");
     includes(
         agent,
         &[
-            "run: install -d -m 0711 /var/tmp/agentic-job",
-            "chmod 0600 /var/tmp/agentic-job/*\n          chmod 0755 /var/tmp/agentic-job/agentic-job",
-            "run: agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin > \"$RUNNER_TEMP/agentic-job-host.toml\"",
+            "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
+            "agentic-job config --host --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
             "config: ${{ runner.temp }}/agentic-job-host.toml",
-            "agent-user: sandbox\n",
+            "AGENT_USER: runner\n",
+            "run: python3 .agentic-job-source/workflow/runner-setup.py admit",
+            "runner-home: ${{ runner.temp }}/agent-home\n",
+            "AGENT_HOME: ${{ runner.temp }}/agent-home\n",
             "\n      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}\n",
         ],
     );
-    assert_eq!(agent.matches("job-dir: /var/tmp/agentic-job\n").count(), 2);
     let source = yaml(&text);
     let hosts: Vec<_> = source["jobs"]["agent"]["steps"]
         .as_vec()
@@ -796,12 +1011,16 @@ fn wrapper_inputs(text: &str) {
     assert_eq!(hosts, ["./.agentic-job-source/secure-host"]);
     excludes(
         agent,
-        &["runner-home:", "--no-script", "secure-host/internal"],
-    );
-    includes(
-        job(&text, "check"),
         &[
-            "\n      safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}",
+            "agent-user:",
+            "job-dir:",
+            "/var/tmp/agentic-job",
+            "sandbox.env",
+            "--no-script",
+            "secure-host/internal",
+            "inference-api-key",
+            "mcp-token",
+            "check: false",
         ],
     );
 }
@@ -825,11 +1044,11 @@ fn steering_receives_dispatch_item_through_policy_metadata_or_review_event() {
 
 #[test]
 fn runner_smoke_uses_same_policy_binary_and_host_sequence_as_wrappers() {
-    smoke_source(&read(".github/workflows/secure-host.yml"));
+    smoke_source(&read(SMOKE));
 }
 
 fn smoke_source(text: &str) {
-    let text = host_source(text, "wrapper-sandbox");
+    let text = host_source(text, "wrapper-runner");
     includes(&text, &[&format!("policy.yml@{PIN}")]);
     let policy = job(&text, "wrapper-policy");
     includes(policy, &["max-requests: '0'", "budget: '1'"]);
@@ -837,23 +1056,31 @@ fn smoke_source(text: &str) {
         yaml(&text)["jobs"]["wrapper-policy"]["permissions"]["actions"].as_str(),
         Some("read")
     );
-    let smoke = job(&text, "wrapper-sandbox");
+    let smoke = job(&text, "wrapper-runner");
     includes(smoke, &[&format!("ref: {PIN}")]);
+    // The agent job's own sequence, the same lines.
+    let agent = host_source(&read(AGENT), "agent");
     let mut previous = None;
     for step in [
-        "install -d -m 0711 /var/tmp/agentic-job",
         "uses: ./.agentic-job-source/prepare",
-        "job-dir: /var/tmp/agentic-job",
-        "chmod 0600 /var/tmp/agentic-job/*",
-        "chmod 0755 /var/tmp/agentic-job/agentic-job",
-        "agentic-job secure-host inference /var/tmp/agentic-job/config.toml",
-        "agentic-job config --host --from /var/tmp/agentic-job/config.toml --string sandbox.env.PATH=/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin",
+        "run: python3 .agentic-job-source/workflow/runner-setup.py admit",
+        "run: agentic-job secure-host inference .agentic-job/config.toml",
+        "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
+        "agentic-job config --host --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
         "uses: ./.agentic-job-source/secure-host",
-        "python3 workflow/sandbox-binary-check.py",
+        "run: python3 .agentic-job-source/workflow/runner-setup.py setup",
+        "agentic-job sandbox check --unless-passed",
+        "if sudo -n true 2> /dev/null; then",
+        "found=$(env -i PATH=\"$path\" sh -c 'command -v agentic-job')",
+        "cmp \"$found\" .agentic-job/agentic-job ||",
     ] {
         let index = smoke.find(step).unwrap_or_else(|| panic!("missing {step}"));
         assert!(previous.is_none_or(|p| index > p), "{step}");
         previous = Some(index);
+        if step.starts_with("uses: ") || step.starts_with("run: ") || step.contains("$RUNNER_TEMP")
+        {
+            assert!(agent.contains(step), "the agent job runs {step}");
+        }
     }
     excludes(
         smoke,
@@ -863,14 +1090,8 @@ fn smoke_source(text: &str) {
             "check: 'false",
             "check: \"false",
             "secrets.",
-        ],
-    );
-    includes(
-        &read("workflow/sandbox-binary-check.py"),
-        &[
-            "\"helper\", \"enter\"",
-            "exec agentic-job --version",
-            "test \"$(id -u)\" = \"$1\"",
+            "/var/tmp/agentic-job",
+            "sandbox.env",
         ],
     );
 }
@@ -879,29 +1100,14 @@ fn smoke_source(text: &str) {
 fn separate_immutable_host_pin_retains_wrapper_and_smoke_contracts() {
     let direct = format!("cgwalters-forge/actions/secure-host@{}", "a".repeat(40));
     assert!(!PIN.starts_with(&"a".repeat(40)));
-    for file in [DISPATCH, REVIEW, ".github/workflows/secure-host.yml"] {
+    for (file, name) in [(AGENT, "agent"), (SMOKE, "wrapper-runner")] {
         let text = read(file);
-        let name = if file == ".github/workflows/secure-host.yml" {
-            "wrapper-sandbox"
-        } else {
-            "agent"
-        };
         // Also works after production has moved from the forwarder to a direct pin.
         let local = host_source(&text, name);
         let fixture = local.replace(LOCAL_HOST, &direct);
         if name == "agent" {
-            wrapper_release_and_order(&fixture);
-            wrapper_inputs(&fixture);
-            if file == REVIEW {
-                review_source(&fixture);
-            }
-            for call in ["policy", "check", "apply"] {
-                let changed = fixture.replace(
-                    &format!("/{call}.yml@{PIN}"),
-                    &format!("/{call}.yml@{} # v0.6.9", "b".repeat(40)),
-                );
-                assert!(std::panic::catch_unwind(|| wrapper_release_and_order(&changed)).is_err());
-            }
+            agent_source(&fixture);
+            agent_inputs(&fixture);
         } else {
             smoke_source(&fixture);
         }
@@ -919,6 +1125,20 @@ fn separate_immutable_host_pin_retains_wrapper_and_smoke_contracts() {
         ] {
             let changed = local.replace(LOCAL_HOST, &invalid);
             assert!(std::panic::catch_unwind(|| host_source(&changed, name)).is_err());
+        }
+    }
+    for file in [DISPATCH, REVIEW] {
+        let text = read(file);
+        wrapper_release_and_order(&text);
+        if file == REVIEW {
+            review_source(&text);
+        }
+        for call in ["policy", "check", "apply"] {
+            let changed = text.replace(
+                &format!("/{call}.yml@{PIN}"),
+                &format!("/{call}.yml@{} # v0.6.9", "b".repeat(40)),
+            );
+            assert!(std::panic::catch_unwind(|| wrapper_release_and_order(&changed)).is_err());
         }
     }
 }
@@ -960,21 +1180,6 @@ fn review_bounds_scope_forge_tables_to_github() {
 }
 
 #[test]
-fn runner_probe_checks_identity_binary_execution_output_bounds_and_failures() {
-    let out = Command::new("python3")
-        .args(["-B", "workflow/sandbox-binary-check.test.py"])
-        .current_dir(root())
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-#[test]
 fn real_reviews_are_opt_in_and_use_only_checked_artifact_at_admitted_head() {
     let text = read(REVIEW);
     includes(
@@ -1006,13 +1211,10 @@ fn real_reviews_are_opt_in_and_use_only_checked_artifact_at_admitted_head() {
 #[test]
 fn publication_uses_policy_binary_not_removed_javascript_helpers() {
     let review = read(REVIEW);
-    let dispatch = read(DISPATCH);
-    let session = job(&dispatch, "session");
     for body in [
         job(&review, "refusal"),
         job(&review, "submit"),
         job(&review, "status"),
-        session,
     ] {
         includes(
             body,
@@ -1033,7 +1235,8 @@ fn publication_uses_policy_binary_not_removed_javascript_helpers() {
         job(&review, "refusal"),
         &["TEXT: ${{ needs.policy.outputs.refusal }}"],
     );
-    for body in [job(&review, "refusal"), session] {
-        includes(body, &["\"$RUNNER_TEMP/bin/agentic-job\" status"]);
-    }
+    includes(
+        job(&review, "refusal"),
+        &["\"$RUNNER_TEMP/bin/agentic-job\" status"],
+    );
 }

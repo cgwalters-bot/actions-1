@@ -48,51 +48,61 @@ Before adopting v0.6.5, callers must migrate every bounds file (`allow`,
 selectors at the top level; exactly one forge section is required.
 Policy calls also require `actions: read` in the caller's permissions.
 
-Both wrappers pin agentic-job v0.6.11, by its commit, and check inference
-reachability after the unchanged tailnet join, before securing the host.
-Like upstream's agent.yml with `agent-user: sandbox`, they write the host
-configuration with `agentic-job config --host`, keeping `setup.script`,
-and pass it to the public `secure-host` forwarder. Its pinned image runs
-the script and creates the second user. The agent must be that sandbox
-user, not the runner's: the job retains `id-token: write` for the tailnet
-and inference registration. The dispatch wrapper rejects `fake` before
-provisioning because v0.6.5 supports its scripted profile only as the
-runner's user.
+Both wrappers pin agentic-job by commit: `427ce22`, main's commit seven
+past v0.6.12 that adds the `own_author` push bound (agentic-job#3164),
+which tracker's fix runs need for pull requests the bot authored. Its
+comment is the tag of that commit's CI build, `build-e9bea05...`, since
+zizmor resolves the comment. Move the pins to the first release after it
+(v0.6.13); a proposal of v0.6.12 would be a downgrade.
 
-The v0.6.12 upgrade is deferred until the wrappers and smoke job adopt its
-runner-only credential boundary; it refuses `agent-user: sandbox`.
+Since v0.6.12 the agent is the runner's user, the only agent user
+(agentic-job#2989), and the wrappers follow upstream's runner-only
+boundary. The agent can read whatever its job holds, so the agent job,
+[cgwalters-agent.yml](.github/workflows/cgwalters-agent.yml), has no
+`id-token` and no repository secret: only read permissions, the run token
+and a spent tailnet key. Before it, each wrapper's register job, the one
+job with an identity token, runs on a hosted runner where nothing of the
+agent's or the target's runs. It stays in the wrapper's own file because
+the token's `job_workflow_ref` names the file that defines the job, and
+that is what the broker and the tailnet admit. It joins the tailnet, mints
+a single-use ephemeral key for the agent job's join
+([tailscale](tailscale/README.md#a-job-without-an-identity-token)), and
+registers the run at the broker with the policy job's binary. Both values
+reach the agent job only as secrets of its call, which masks them in its
+log; the agent job is called by local path, so at the wrapper's commit.
+Re-running only a failed agent job fails at the join, since the first
+attempt spent the key: re-run all jobs. The agent job then runs upstream's agent.yml sequence: prepare,
+agentic-job's runner-user admission, the join, the reachability check,
+`agentic-job config --host` (with no `setup.script`), the pinned
+`secure-host` forwarder, the setup script as the runner's user, and `run`
+with `--runner-home`. The pinned image installs its own, older
+`agentic-job` in `/usr/local/bin`, so the host configuration puts a copy
+of the policy binary first on the agent's `PATH`: the agent's
+`agentic-job handback` commands must match the binary `run` starts. The
+`wrapper-runner` CI job in
+[secure-host.yml](.github/workflows/secure-host.yml) runs that sequence up
+to `run` on a fresh runner, with no inference or tailnet, and checks that
+the host passes run's own probe, the runner has lost sudo and the agent's
+`PATH` finds the policy binary.
 
-The release train may replace only the local `secure-host` forwarder in both
-wrappers and the wrapper smoke job with
+What needed a second user is refused before anything is provisioned: the
+dispatch wrapper's `session` (and `idle-minutes`), `inference-register:
+api-key`, `inference-provider` and an `INFERENCE_API_KEY`. The inputs stay
+declared so a caller passing them gets that message. The scripted agent
+`fake` stays unsupported. Upstream's own admission refuses a configuration
+with `[mcp]`, `api-key` or a session listener, and `run` refuses
+`[child-agent]`.
+
+The release train may replace only the local `secure-host` forwarder in the
+agent job and the wrapper smoke job with
 `cgwalters-forge/actions/secure-host@<full immutable commit>`: the verified
 image PR's merge commit, independently of the agentic-job release commit.
 Mutable refs and other action sources are not accepted by the contract tests.
 Policy, check, apply and the policy-source checkout/prepare/run sequence stay
-on the agentic-job release; private inputs, host configuration projection and
-join/probe/host/run ordering remain unchanged. This prepares tests; it doesn't
-update the image or enable the train. A matching image and successful handback
-have not been verified in hosted runs.
-
-Both `prepare` and `run` use `/var/tmp/agentic-job`, outside the private
-workspace, with a traversable, non-listable directory (0711), private
-inputs (0600) and an executable binary (0755). This is the policy binary
-`run` actually starts, not `/usr/local/bin/agentic-job`, which the image
-replaces with its own version. The `wrapper-sandbox` CI job in
-[secure-host.yml](.github/workflows/secure-host.yml) runs policy, prepare,
-host configuration and the pinned forwarder on a fresh runner, then
-executes `agentic-job --version` through the sandbox user's PATH and compares
-it to the policy binary's version. Both wrappers set `sandbox.env.PATH` in
-the host configuration to `/var/tmp/agentic-job:/usr/local/bin:/usr/bin:/bin`,
-so the agent's handback CLI uses the policy release too, not the older
-image's CLI. This changes only the sandbox user's command search path,
-not root's or the helper's binary. The job does not run inference,
-join a tailnet or upload agent results. The v0.6.5 forwarder uses a
-v0.6.4 image; the sandbox's PATH override remains necessary to select the
-v0.6.5 policy CLI instead of the image's CLI.
+on the agentic-job pin.
 
 Since v0.6.0 the agent's home no longer copies the
-runner image's `/etc/skel`, including toolchains and dotfiles. The pinned `run` action publishes
-the session endpoint itself; no extra endpoint step is needed here.
+runner image's `/etc/skel`, including toolchains and dotfiles.
 Mid-run steering stays off unless the caller's runner configuration enables
 `[session] watch-item = true`. Policy derives the watched item from the
 dispatch wrapper's `issue` (in `output-repo`) or the review event;
@@ -129,9 +139,10 @@ jobs:
 ## Review
 
 [cgwalters-review](.github/workflows/cgwalters-review.yml) is the reusable
-event-review wrapper. It composes agentic-job **v0.6.11**'s policy, check,
-apply and review helpers, so that the tailnet and the inference broker admit
-this file's `job_workflow_ref`. agentic-job's review workflow can now run a
+event-review wrapper. It composes agentic-job's policy, check, apply and
+review helpers at the pinned commit, with the dispatch wrapper's register
+and agent jobs, so that the tailnet and the inference broker admit this
+file's `job_workflow_ref`. agentic-job's review workflow can now run a
 caller's own network step instead (its #705), but callers have not switched
 to it. It refuses private repositories, as the dispatch wrapper does. It adds
 our tailnet join and defaults: opencode, the model from
@@ -299,8 +310,8 @@ laundering arbitrary agent prose (or an ordinary implementation run) into a
 verified quick classification by attaching a trusted writer job name. An
 ordinary checked APPROVE is not a checked draft-classifier result.
 
-The pinned agentic-job v0.6.11 commit
-`3f9f6425119b97bb3620a38fe0adc8e79be7dc8e` cannot carry this contract safely:
+agentic-job v0.6.11 (`3f9f6425119b97bb3620a38fe0adc8e79be7dc8e`), the
+pin when this was written, could not carry this contract safely:
 `crates/agentic-job/src/review/mod.rs`'s `Dispatch::resolve` unconditionally
 rejects drafts with a requested head, and `review verdict` / `review submit`
 validate a verdict comment, not the embedded classifier JSON. The latter

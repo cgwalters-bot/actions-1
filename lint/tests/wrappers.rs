@@ -15,6 +15,8 @@ use yaml_rust2::{Yaml, YamlLoader};
 const AGENTIC_JOB: &str = ".github/workflows/cgwalters-agentic-job.yml";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const REVIEW_CALLER: &str = ".github/workflows/review.yml";
+// Both wrappers' agent job, called by local path.
+const AGENT: &str = ".github/workflows/cgwalters-agent.yml";
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -354,17 +356,28 @@ jobs:
 }
 
 // Moving main must not change privileged review code behind a caller's
-// reviewed wrapper pin. Check every own-repository call, not just tailscale.
+// reviewed wrapper pin. Check every own-repository call, not just tailscale,
+// and the tailnet join of each wrapper's register job and of the agent job
+// both call, which is privileged for every kind.
 #[test]
 fn review_wrapper_pins_its_own_actions_by_full_commit() {
-    let text = read(REVIEW);
-    let refs = own_action_refs(&text);
-    assert_eq!(
-        refs.iter().map(|r| r.0).collect::<Vec<_>>(),
-        ["admit", "deployment", "tailscale"]
-    );
-    for (action, r) in refs {
-        assert!(is_commit(r), "{action}: {r}");
+    for (file, actions) in [
+        (REVIEW, &["admit", "deployment", "tailscale"][..]),
+        (AGENT, &["tailscale"]),
+    ] {
+        let text = read(file);
+        let refs = own_action_refs(&text);
+        assert_eq!(
+            refs.iter().map(|r| r.0).collect::<Vec<_>>(),
+            actions,
+            "{file}"
+        );
+        for (action, r) in refs {
+            assert!(is_commit(r), "{file}: {action}: {r}");
+        }
+        for r in captures(&text, "uses: cgwalters-forge/actions/tailscale@") {
+            assert!(main_pin(r), "{file}: {r}");
+        }
     }
 }
 
@@ -377,13 +390,9 @@ fn dispatch_wrapper_still_follows_main_for_its_own_actions() {
             .copied()
             .filter(|(_, r)| *r == "main")
             .collect::<Vec<_>>(),
-        [
-            ("admit", "main"),
-            ("deployment", "main"),
-            ("tailscale", "main")
-        ]
+        [("admit", "main"), ("deployment", "main")]
     );
-    assert_eq!(refs.len(), 6);
+    assert_eq!(refs.len(), 5);
     for (action, r) in refs.into_iter().filter(|(_, r)| *r != "main") {
         assert!(is_commit(r), "{action}: {r}");
     }
@@ -455,10 +464,12 @@ fn review_caller_grants_exactly_the_union_of_the_wrappers_job_grants() {
 // full commit. Every such job, so that a recomposition cannot drop it.
 #[test]
 fn every_job_checks_the_policy_calls_source_before_checking_it_out() {
-    const CHECKOUT: &str = "repository: ${{ needs.policy.outputs.source-repository }}";
+    const CHECKOUT: &str = "repository: ${{ fromJSON(inputs.policy).source-repository }}";
+    // The repository both wrappers' policy `uses:` names.
+    let mut called = BTreeSet::new();
     for file in [AGENTIC_JOB, REVIEW] {
         let workflow = read(file);
-        let called = workflow
+        let repo = workflow
             .match_indices("\n    uses: ")
             .map(|(i, p)| &workflow[i + p.len()..])
             .map(|rest| &rest[..rest.find('\n').unwrap_or(rest.len())])
@@ -469,79 +480,65 @@ fn every_job_checks_the_policy_calls_source_before_checking_it_out() {
                     && !name.is_empty()
                     && !name.contains('/')
                     && !repo.contains(char::is_whitespace))
-                .then_some(repo)
+                .then_some(repo.to_owned())
             })
             .unwrap_or_else(|| panic!("{file}: policy call"));
-        let starts = key_starts(&workflow, 2);
-        let jobs: Vec<_> = starts
+        called.insert(repo);
+        // The wrappers check out nothing of the source themselves.
+        assert!(!workflow.contains(CHECKOUT), "{file}");
+    }
+    let [called] = Vec::from_iter(called).try_into().unwrap();
+    // The agent job checks out the source; each register job runs the
+    // policy call's binary and checks the same first.
+    for (file, part, checks_out) in [
+        (AGENT, "agent", true),
+        (AGENTIC_JOB, "register", false),
+        (REVIEW, "register", false),
+    ] {
+        let workflow = job(&read(file), part);
+        let checkout_text = if checks_out {
+            CHECKOUT
+        } else {
+            "repository: ${{ needs.policy.outputs.source-repository }}"
+        };
+        let steps: Vec<_> = workflow.split("\n      - ").collect();
+        let checkout = steps.iter().position(|step| step.contains(checkout_text));
+        assert_eq!(checkout.is_some(), checks_out, "{file}");
+        let guard = steps[..checkout.unwrap_or(steps.len())]
             .iter()
-            .enumerate()
-            .map(|(index, &start)| {
-                let end = starts
-                    .get(index + 1)
-                    .map_or(workflow.len(), |&next| next - 3);
-                &workflow[start..end]
-            })
-            .collect();
-        let checked: Vec<_> = jobs.iter().filter(|job| job.contains(CHECKOUT)).collect();
-        assert_eq!(
-            checked
-                .iter()
-                .map(|job| job.split(':').next().unwrap())
-                .collect::<Vec<_>>(),
-            ["agent"],
-            "{file}: jobs checking out the source"
-        );
-        for job in checked {
-            let name = job.split(':').next().unwrap();
-            let steps: Vec<_> = job.split("\n      - ").collect();
-            let checkout = steps
-                .iter()
-                .position(|step| step.contains(CHECKOUT))
-                .unwrap();
-            let guard = steps[..checkout]
-                .iter()
-                .find(|step| step.starts_with("name: The policy call's source repository"));
-            let guard = guard.unwrap_or_else(|| panic!("{file}: {name} checks the source first"));
-            assert!(
-                guard.contains(&line(
-                    10,
-                    "SOURCE_REPOSITORY: ${{ needs.policy.outputs.source-repository }}"
-                )),
-                "{file}: {name}"
-            );
-            assert!(
-                guard.contains(&line(
-                    10,
-                    "SOURCE_SHA: ${{ needs.policy.outputs.source-sha }}"
-                )),
-                "{file}: {name}"
-            );
-            let expected = captures(guard, "\n          EXPECTED_REPOSITORY: ")
-                .into_iter()
-                .next()
-                .filter(|v| !v.is_empty() && !v.contains(char::is_whitespace));
-            assert_eq!(expected, Some(called), "{file}: {name}");
-            assert!(
-                guard.contains(
-                    "[[ \"$SOURCE_REPOSITORY\" == \"$EXPECTED_REPOSITORY\" && \"$SOURCE_SHA\" =~ ^[0-9a-f]{40}$ ]] ||\n            { echo \"::error::the policy call is not $EXPECTED_REPOSITORY at a full commit\"; exit 1; }"
-                ),
-                "{file}: {name}"
-            );
+            .find(|step| step.starts_with("name: The policy call's source"))
+            .unwrap_or_else(|| panic!("{file}: checks the source first"));
+        let source = if checks_out {
+            "fromJSON(inputs.policy)"
+        } else {
+            "needs.policy.outputs"
+        };
+        for env in [
+            format!("SOURCE_REPOSITORY: ${{{{ {source}.source-repository }}}}"),
+            format!("SOURCE_SHA: ${{{{ {source}.source-sha }}}}"),
+        ] {
+            assert!(guard.contains(&line(10, &env)), "{file}: {env}");
         }
+        let expected = captures(guard, "\n          EXPECTED_REPOSITORY: ")
+            .into_iter()
+            .next()
+            .filter(|v| !v.is_empty() && !v.contains(char::is_whitespace));
+        assert_eq!(expected, Some(called.as_str()), "{file}");
+        assert!(
+            guard.contains(
+                "[[ \"$SOURCE_REPOSITORY\" == \"$EXPECTED_REPOSITORY\" && \"$SOURCE_SHA\" =~ ^[0-9a-f]{40}$ ]] ||\n            { echo \"::error::the policy call is not $EXPECTED_REPOSITORY at a full commit\"; exit 1; }"
+            ),
+            "{file}"
+        );
     }
 }
 
 #[test]
 fn composed_review_links_its_pinned_helper_to_the_agent_job() {
     let workflow = read(REVIEW);
-    let agent = workflow
-        .split("\n  agent:\n")
-        .nth(1)
-        .unwrap()
-        .split("\n  check:\n")
-        .next()
-        .unwrap();
+    let shared = read(AGENT);
+    assert!(shared.contains("\n      job:\n        value: ${{ jobs.agent.outputs.job }}\n"));
+    let agent = job(&shared, "agent");
     let submit = workflow
         .split("\n  submit:\n")
         .nth(1)
@@ -656,8 +653,8 @@ fn review_task_treats_the_head_as_hostile_and_defers_to_the_merge_policy() {
 // agentic-job is called at one release: check, apply, prepare and run
 // refuse calls that resolved to different commits, which following main
 // produced for runs spanning an agentic-job merge (tracker#544).
-// workflow/review.test.cjs checks that release's pin. Our own admit and
-// tailscale actions still follow main.
+// Our own admit and deployment actions still follow main for every kind but
+// review.
 #[test]
 fn agentic_job_is_called_at_one_release_our_own_actions_at_main() {
     let workflow = read(AGENTIC_JOB);
@@ -687,7 +684,6 @@ fn agentic_job_is_called_at_one_release_our_own_actions_at_main() {
             "actions/deployment",
             "agentic-job/.github/workflows/policy.yml",
             "actions/tailscale",
-            "actions/tailscale",
             "agentic-job/.github/workflows/check.yml",
             "agentic-job/.github/workflows/apply.yml",
         ]
@@ -698,10 +694,15 @@ fn agentic_job_is_called_at_one_release_our_own_actions_at_main() {
         }
     }
     assert!(!workflow.contains("PINNED_SHA"));
-    assert!(workflow.contains(&line(
-        10,
-        "EXPECTED_REPOSITORY: cgwalters-forge/agentic-job"
-    )));
+    for file in [AGENT, AGENTIC_JOB, REVIEW] {
+        assert!(
+            read(file).contains(&line(
+                10,
+                "EXPECTED_REPOSITORY: cgwalters-forge/agentic-job"
+            )),
+            "{file}"
+        );
+    }
 }
 
 // Without `issue`, apply opens an implement pull request with no closing
@@ -860,39 +861,36 @@ fn policy_is_given_max_requests_only_from_the_target_job() {
     )));
 }
 
+// The agent job has no identity token: it joins with the key the register
+// job minted, as root before anything of the agent's, for every kind.
 #[test]
-fn tailnet_join_is_for_a_real_agent_or_a_session() {
-    assert!(job(&read(AGENTIC_JOB), "agent").contains(
-        "- name: Join the tailnet\n        if: ${{ inputs.kind != 'review' && (needs.target.outputs.agent != 'fake' || needs.target.outputs.session == 'true') }}\n"
+fn agent_joins_the_tailnet_with_the_register_jobs_key() {
+    let agent = job(&read(AGENT), "agent");
+    assert!(agent.contains(
+        "\n      - name: Join the tailnet\n        uses: cgwalters-forge/actions/tailscale@"
     ));
-}
-
-#[test]
-fn session_job_posts_the_endpoint_before_apply_concludes_and_only_for_a_session() {
-    let workflow = read(AGENTIC_JOB);
-    let session = job(&workflow, "session");
-    assert!(session.contains(&line(4, "needs: [target, policy]")));
-    assert!(session.contains(&line(
-        4,
-        "if: ${{ needs.policy.outputs.admitted == 'true' && needs.target.outputs.session == 'true' && needs.policy.outputs.notified == 'true' && needs.policy.outputs.notify == 'comment' && needs.policy.outputs.binary-artifact-id != '' }}"
-    )));
-    assert!(session.contains(
-        "\n    concurrency:\n      group: agentic-job-status-${{ needs.policy.outputs.notify-repo }}-${{ needs.policy.outputs.notify-item }}\n      cancel-in-progress: false\n"
-    ));
-    assert!(session.contains(&line(4, "runs-on: ubuntu-26.04")));
-    assert!(session.contains(&line(4, "continue-on-error: true")));
-    assert!(session.contains("`${{ needs.target.outputs.session-endpoint }}`"));
-    assert!(session.contains(
-        "\n          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}\n          path: ${{ runner.temp }}/bin\n"
-    ));
-    assert!(session.contains(
-        "\n          chmod +x \"$RUNNER_TEMP/bin/agentic-job\"\n          \"$RUNNER_TEMP/bin/agentic-job\" status\n"
-    ));
-    // Only the policy binary, never an agent-uploaded executable.
-    for agents in ["actions/checkout", ".agentic-job-source", "needs.agent"] {
-        assert!(!session.contains(agents), "{agents}");
+    assert!(agent.contains(&line(10, "authkey: ${{ secrets.TAILNET_KEY }}")));
+    for file in [AGENTIC_JOB, REVIEW] {
+        let workflow = read(file);
+        let register = job(&workflow, "register");
+        assert!(register.contains(&line(10, "mint: 'true'")), "{file}");
+        assert!(
+            register.contains(&line(6, "tailnet-key: ${{ steps.tailnet.outputs.key }}")),
+            "{file}"
+        );
+        assert_eq!(
+            workflow.matches("- name: Join the tailnet").count(),
+            1,
+            "{file}"
+        );
+        assert!(
+            job(&workflow, "agent").contains(&line(
+                6,
+                "TAILNET_KEY: ${{ needs.register.outputs.tailnet-key }}"
+            )),
+            "{file}"
+        );
     }
-    assert!(job(&workflow, "apply").contains(&line(4, "needs: [policy, agent, check, session]")));
 }
 
 /// Appends its arguments to CALL_LOG, each followed by a tab, one call to
@@ -908,7 +906,7 @@ const FAKE_SUDO: &str = r#"#!/bin/sh
 fn only_rhel_10_installs_git_node_and_gh_and_links_agentic_job_into_sudos_path() {
     use std::os::unix::fs::PermissionsExt;
 
-    let agent = job(&read(AGENTIC_JOB), "agent");
+    let agent = job(&read(AGENT), "agent");
     let step = agent
         .split("      - name: Install RHEL prerequisites\n")
         .nth(1)
