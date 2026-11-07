@@ -26,7 +26,8 @@ user's processes start.
     INFERENCE_PROXY: ${{ steps.tailnet.outputs.proxy }}
 ```
 
-The job needs `permissions: id-token: write` for the OIDC login.
+The job needs `permissions: id-token: write` for the OIDC login, or a
+key minted by an earlier job that had it ([below](#a-job-without-an-identity-token)).
 
 ## Settings by organization
 
@@ -47,7 +48,9 @@ A nonempty input overrides the organization's setting.
 
 | Input | Meaning |
 | --- | --- |
-| `oauth-client-id` | Client ID of the OIDC federated identity (the only login passed on; no OAuth secret or auth key) |
+| `oauth-client-id` | Client ID of the OIDC federated identity (no OAuth secret is ever passed on) |
+| `authkey` | A key `mint` made in an earlier job, joined with in place of the federated login |
+| `mint` | `true` to mint such a key after the join, as the `key` output |
 | `audience` | Audience of the OIDC federated identity (default: from the client ID) |
 | `tags` | Comma-separated tags for the node |
 | `proxy` | Inference proxy URL |
@@ -57,6 +60,48 @@ A nonempty input overrides the organization's setting.
 
 The `proxy` output is the inference proxy URL, for the caller to pass
 on.
+
+## A job without an identity token
+
+A job whose later steps run code it does not trust, such as an agent
+that is the runner's user, must not have `id-token: write`: anything
+running as that user could mint identity tokens for any audience. Such a
+job joins with a key instead. An earlier job, with the identity token,
+joins with `mint: 'true'`; after its join the action exchanges a fresh
+identity token and asks Tailscale for a key like the one the CLI makes
+from a federated login: single-use, ephemeral and preauthorized, with the
+same tags, valid for an hour. The `key` output goes to the later job only
+as a secret of a reusable workflow call, which masks it in that job's
+log, and that job passes it as `authkey`:
+
+```yaml
+jobs:
+  register:
+    permissions:
+      id-token: write
+    outputs:
+      key: ${{ steps.tailnet.outputs.key }}
+    steps:
+      - uses: cgwalters-forge/actions/tailscale@main
+        id: tailnet
+        with:
+          mint: 'true'
+  agent:
+    needs: register
+    uses: ./.github/workflows/agent.yml
+    secrets:
+      TAILNET_KEY: ${{ needs.register.outputs.key }}
+# and in agent.yml's job, before anything untrusted runs:
+#     - uses: cgwalters-forge/actions/tailscale@main
+#       with:
+#         authkey: ${{ secrets.TAILNET_KEY }}
+```
+
+The join spends the key, so it is worth nothing to what runs after it.
+The output is not masked, since GitHub drops a job output holding a
+masked value, and nothing prints it; with step debug logging on the
+runner would log it as it is set, so `mint` then refuses. `mint` with
+`authkey` is refused too.
 
 ## Checking a tailnet's setup
 

@@ -10,7 +10,7 @@ import { test } from 'node:test';
 test('hardening runs after both successful and failed joins', () => {
   const action = readFileSync(new URL('./action.yml', import.meta.url), 'utf8');
   const step = action.split('    - name: Make tailscaled\'s LocalAPI root\'s only\n')[1]
-    .split('    - name: Check tailnet identity and proxy\n')[0];
+    .split('    # After the join, so that a key is minted only for a login that works.\n')[0];
   assert.match(step, /if: always\(\)/);
   assert.match(step, /JOINED: \$\{\{ steps\.join\.outcome == 'success' \}\}/);
   const script = step.split('      run: |\n')[1]
