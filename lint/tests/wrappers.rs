@@ -1003,6 +1003,77 @@ fn agent_joins_the_tailnet_with_the_register_jobs_key() {
     }
 }
 
+// The key a re-run of only the agent job reuses, or one that expired while
+// the job waited, is refused before the join with what to do. Both
+// wrappers pass the register job's attempt and mint time; the step order
+// and the register job's outputs are review_wrapper.rs's.
+#[test]
+fn agent_refuses_a_spent_or_expired_tailnet_key_before_the_join() {
+    let agent = job(&read(AGENT), "agent");
+    let step = agent
+        .split("      - name: Check the tailnet key is this attempt's and unexpired\n")
+        .nth(1)
+        .map(|rest| rest.split("\n      - ").next().unwrap())
+        .expect("the agent job has no tailnet key check");
+    let mint = read("tailscale/mint.mjs");
+    assert_eq!(
+        captures(&mint, "export const KEY_EXPIRY_SECONDS = "),
+        ["3600;"]
+    );
+    assert!(step.contains(&line(10, "KEY_EXPIRY_SECONDS: 3600")));
+    for file in [AGENTIC_JOB, REVIEW] {
+        let call = job(&read(file), "agent");
+        for input in ["tailnet-key-attempt", "tailnet-key-minted-at"] {
+            assert!(
+                call.contains(&line(
+                    6,
+                    &format!("{input}: ${{{{ needs.register.outputs.{input} }}}}")
+                )),
+                "{file}: {input}"
+            );
+        }
+    }
+    let script = step.split("        run: |\n").nth(1).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let fresh = (now - 60).to_string();
+    let stale = (now - 3600).to_string();
+    // (minted in attempt, this attempt, mint time, error)
+    for (minted, attempt, minted_at, want) in [
+        ("2", "2", fresh.as_str(), None),
+        ("1", "1", stale.as_str(), Some("expired")),
+        ("1", "2", fresh.as_str(), Some("attempt 1's")),
+        ("1", "1", "", Some("no mint time")),
+    ] {
+        let run = Command::new("bash")
+            .args([
+                "--noprofile",
+                "--norc",
+                "-e",
+                "-o",
+                "pipefail",
+                "-c",
+                script,
+            ])
+            .env("MINTED_ATTEMPT", minted)
+            .env("GITHUB_RUN_ATTEMPT", attempt)
+            .env("MINTED_AT", minted_at)
+            .env("KEY_EXPIRY_SECONDS", "3600")
+            .output()
+            .expect("bash");
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        match want {
+            None => assert!(run.status.success(), "{stdout}"),
+            Some(error) => {
+                assert_eq!(run.status.code(), Some(1), "{stdout}");
+                assert!(stdout.contains(error), "{stdout}");
+            }
+        }
+    }
+}
+
 /// Appends its arguments to CALL_LOG, each followed by a tab, one call to
 /// a line.
 const FAKE_SUDO: &str = r#"#!/bin/sh

@@ -833,6 +833,7 @@ fn agent_source(text: &str) {
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "./.agentic-job-source/prepare",
             "Admit the runner-user configuration",
+            "Check the tailnet key is this attempt's and unexpired",
             "Join the tailnet",
             "Check inference proxy reachability",
             "The host's configuration",
@@ -917,7 +918,8 @@ fn register_job(text: &str) {
     assert_eq!(
         register["outputs"],
         yaml(
-            "run-token: ${{ steps.register.outputs.run-token }}\ntailnet-key: ${{ steps.tailnet.outputs.key }}"
+            "run-token: ${{ steps.register.outputs.run-token }}\ntailnet-key: ${{ steps.tailnet.outputs.key }}\n\
+             tailnet-key-attempt: ${{ github.run_attempt }}\ntailnet-key-minted-at: ${{ steps.minted.outputs.at }}"
         )
     );
     let steps: Vec<_> = register["steps"]
@@ -936,6 +938,7 @@ fn register_job(text: &str) {
         steps,
         [
             "The policy call's source and uploads",
+            "The key's mint time",
             "Join the tailnet and mint the agent job's key",
             "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
             "Register the run at the inference proxy",
