@@ -9,6 +9,118 @@ but its runtime is unverified.
 
 ## This repository's CI
 
+### Adoption checkpoint (2026-11-08)
+
+Actions main at `eef41d3b216c731fda0960d6c9876a6ab3cd159a` still selects
+**v0.6.9**, digest
+`sha256:008d34bf9598ef83d7859772200f26637814d2cd105028457208ddc87d69788b`.
+The update belongs to existing
+[Dependabot #211](https://github.com/cgwalters-forge/actions/pull/211), head
+`502522ad437a469da99120f89e848219434f16a7`, branch
+`dependabot/docker/secure-host/cgwalters-forge/secure-host-v0.6.12`.
+Continue that branch through normal follow-through/rebase and review
+gates; this checkpoint neither introduces a competing bump nor merges it.
+
+GitHub's releases API still reports
+[v0.6.12](https://github.com/cgwalters-forge/agentic-job/releases/tag/v0.6.12)
+as the latest numbered release, published 2026-11-06, source
+`eecc8c434e67a7607264ab3f7d90c88b6d02042a`. Its published secure-host digest
+in #211 is
+`sha256:d5fd0f3e102c589807df68656d5623f6d6cbc9ecb257bdd3c9af431242d7b73a`.
+At this checkpoint, `gh attestation verify` against that digest succeeded
+with `--repo cgwalters-forge/agentic-job`, certificate identity
+`https://github.com/cgwalters-forge/agentic-job/.github/workflows/release.yml@refs/heads/main`,
+`--source-ref refs/heads/main` and `--deny-self-hosted-runners`.
+The verified source digest is the release source above; its invocation is
+[release run 42147098496, attempt 1](https://github.com/cgwalters-forge/agentic-job/actions/runs/42147098496/attempts/1).
+Later `build-*` binary releases do not establish a published successor
+secure-host image. No successor image pin is proposed here.
+
+#### Published standalone binary: Ubuntu acceptance
+
+[#211's run 42239832020](https://github.com/cgwalters-forge/actions/actions/runs/42239832020)
+checked out merge revision `4fee1321fdbc729e120bbe731481f27ff9e874ea`
+(head above, base `d38a1379dd1d41f84460806b05ffa90a4a5eea7c`).
+The local `./secure-host` action in build and egress-policy selected the
+**v0.6.12 digest above**, verified its attestation and inspected image ID
+`66d5e188ca2b0a411db2b3f81e932dea9e00eaf6c8db379baa08c376ba17bc89`.
+That ID, not a tag or a different action's pin, ran config and setup.
+
+| Passed Ubuntu 26.04 job | Evidence at that revision |
+| --- | --- |
+| [build / 127966866848](https://github.com/cgwalters-forge/actions/actions/runs/42239832020/job/127966866848) | `config --host` via `/agentic-job`, setup installing `/usr/local/bin/secure-host` and `/usr/local/bin/agentic-job`, and 35 sandbox checks; GET allowed, POST refused by proxy, npm audit POST allowed; artifact upload |
+| [egress-policy / 127966867002](https://github.com/cgwalters-forge/actions/actions/runs/42239832020/job/127966867002) | same image and 35 checks; replacement policy permits POST `/secure-host-ci` (origin 405), refuses other POST and npm audit; artifact upload |
+| [publish / 127967054430](https://github.com/cgwalters-forge/actions/actions/runs/42239832020/job/127967054430) | build artifact ID `13515411164`, ZIP digest `a391689de33812461eb937d7ce672578f71584544bc18713072ab6cb91dd6e76` verified, download and commit-data validation passed |
+
+This proves standalone-binary compatibility, not the later host-table or
+core-pattern changes. Compatibility calls remain `/agentic-job config
+--host` in the container and `agentic-job sandbox check` on the host.
+Local regression tests cover those calls, digest selection, single-image
+archive loading and setup by inspected ID. They do not attest an archive
+or substitute for hosted acceptance.
+
+#### Scripted wrapper: a separate image selection
+
+The green `wrapper-sandbox` job in #211 used action
+`c763a8950778743f51857a37b2a59daf9e96ee23`, selecting digest
+`sha256:df9133ce3d7ca05c9de0c5eb7d1f6c662065288191ac857d6c877ab5833e5b49`,
+not the local action or #211's v0.6.12 image. It is not v0.6.12 acceptance.
+
+The newer scripted dispatch at actions revision
+`eef41d3b216c731fda0960d6c9876a6ab3cd159a`,
+[run 42488914828](https://github.com/cgwalters-forge/actions/actions/runs/42488914828),
+used agentic-job source `427ce2295925654be9c35e91ca5cee91bbc2c9ea`:
+
+- [wrapper-runner / 128756867072](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756867072)
+  passed prepare, runner-user admission, setup, 98 sandbox checks and
+  scripted run. Its forwarder selected actions secure-host
+  `466a490e983ff07e6fb076fa4bd8b4d5f918fcd6`, hence the **v0.6.9 digest**
+  above. The policy binary was 0.6.12, not proof of a 0.6.12 host image.
+- [wrapper-check / check / 128757099791](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128757099791)
+  accepted the scripted handback.
+- [wrapper-scripted-dispatch / 128757171343](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128757171343)
+  passed with agent exit 0, successful check, checked artifact present,
+  no refusal and no patch. No model or production dispatch was exercised.
+
+#### Remaining gates and ownership
+
+1. Follow through #211 rather than another image bump. Its separate
+   `ci` check failed in
+   [run 42239830706](https://github.com/cgwalters-forge/actions/actions/runs/42239830706);
+   online zizmor reported three `ref-version-mismatch` findings for
+   immutable self-pins commented `# main` (admit, deployment, tailscale).
+   A green host job alone does not admit the pin. Coordinate recurring
+   immutable-self-pin lint repair with
+   [actions#229](https://github.com/cgwalters-forge/actions/issues/229),
+   and the v0.6.12 release train
+   [tracker#1369](https://github.com/cgwalters-forge/tracker/issues/1369).
+2. A successor secure-host image must be published and attested from a
+   source containing both host-table parsing
+   [#3144](https://github.com/cgwalters-forge/agentic-job/pull/3144)
+   (`420967bf3e26e64b5180e36899950b5df877fd8e`) and core protection
+   [#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154)
+   (`773322d503987eac40845ce49d5bc0b9acbd8b30`). Neither is in v0.6.12.
+   Resolve the actual published digest and verify provenance before
+   updating tag and full digest together. Do not invent a v0.6.13 pin.
+3. After adoption, record fresh Ubuntu setup/check, egress/artifact and
+   scripted-wrapper jobs with their effective action and image selections.
+   For the containing image only, require `core-pattern` plus confined
+   run/JavaScript main/post controls and `confined-cleanup` orphan-process
+   evidence. The upstream forced-core result below is not this acceptance.
+4. Agentic-job forwarder/site pins belong to
+   [#2070](https://github.com/cgwalters-forge/agentic-job/issues/2070), and
+   prepare/config adoption to
+   [#2656](https://github.com/cgwalters-forge/agentic-job/issues/2656).
+   Leave example-plain-ci's action pin to
+   [actions#226](https://github.com/cgwalters-forge/actions/issues/226)/
+   [#228](https://github.com/cgwalters-forge/actions/pull/228).
+
+RHEL 10 remains separately runtime-unverified. Skipped probes or jobs are
+not acceptance. Required publication and hosted acceptance remain pending;
+[actions#230](https://github.com/cgwalters-forge/actions/issues/230) is not complete.
+
+### Workflow coverage
+
 [The secure-host workflow](../../.github/workflows/secure-host.yml) runs
 the pinned image on `ubuntu-26.04`, on every pull request and push to
 main. Each job has a read-only token and no secrets and runs code as

@@ -198,6 +198,13 @@ attestation with `gh attestation verify`, against the signer in
 branch, on a GitHub-hosted runner. Every host fix takes an agentic-job
 release, then a pin update here.
 
+The [adoption checkpoint](docs/evidence.md#adoption-checkpoint-2026-11-08)
+records #211's attested v0.6.12 standalone-binary acceptance separately
+from the still-old wrapper image and the unpublished successor needed
+for the host-table and core-pattern changes. The existing Dependabot
+branch owns the image bump; these docs continue to describe v0.6.9
+until it is adopted.
+
 The effective pin is still **v0.6.9**: a step can force another process
 of the runner's user to dump core and read its memory, despite the
 runner-read rule and Yama. Upstream
