@@ -237,19 +237,35 @@ function job(name) {
   return `\n${workflow.split(`\n  ${name}:\n`)[1].split(/\n {2}[a-z-]+:\n/)[0]}`;
 }
 
-// A session's listener and a provider key both needed the sandbox user:
-// with the runner as the only agent user (agentic-job#2989) the agent can
-// read whatever its job holds. Refused before anything is provisioned,
-// for every profile; the inputs stay so a caller passing one gets this.
-test('session, idle-minutes and provider-key mode are refused before provisioning', async () => {
+// The pinned upstream rejects session.listen during runner admission and
+// run. Every profile must fail here, before policy or registration.
+test('sessions are refused before provisioning until the upstream pin supports them', async () => {
   assert.match(workflow, /\n {6}session:\n {8}description: [^\n]*\n {8}type: boolean\n {8}default: false\n/);
   assert.match(workflow, /\n {6}idle-minutes:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
+  for (const profile of ['implement', 'fix', 'triage', 'research', 'review', 'session']) {
+    for (const env of [{ SESSION: 'true' }, { SESSION: 'true', IDLE_MINUTES: '60' }, { IDLE_MINUTES: '10' }, { IDLE_MINUTES: '0' }]) {
+      await assert.rejects(target({ ...env, PROFILE: profile }, { pull: true, allowPolicyRead: false }),
+        /session and idle-minutes are refused: the pinned agentic-job/, `${profile}: ${JSON.stringify(env)}`);
+    }
+  }
+  const outputs = await target({});
+  for (const name of ['session', 'idle-minutes', 'session-host', 'session-endpoint']) {
+    assert.equal(Object.hasOwn(outputs, name), false, name);
+  }
+  assert.doesNotMatch(job('policy'), /\n {6}session:|idle-minutes/);
+  assert.doesNotMatch(job('agent'), /\n {6}session:/);
+  assert.doesNotMatch(read('./cgwalters-agent.yml'), /inputs\.session|statedir:/);
+});
+
+// A provider key needed the sandbox user: with the runner as the only
+// agent user (agentic-job#2989) the agent can read whatever its job holds.
+// Refused before anything is provisioned, for every profile; the inputs
+// stay so a caller passing one gets this.
+test('provider-key mode is refused before provisioning', async () => {
   assert.match(workflow, /\n {6}inference-register:\n {8}description: [^\n]*\n {8}type: string\n {8}default: github-oidc\n/);
   assert.match(workflow, /\n {6}inference-provider:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
   assert.match(workflow, /\n {6}INFERENCE_API_KEY:\n {8}required: false\n/);
   const refusals = [
-    [{ SESSION: 'true' }, /session and idle-minutes are refused/],
-    [{ IDLE_MINUTES: '10' }, /session and idle-minutes are refused/],
     [{ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }, /inference-register must be github-oidc/],
     [{ INFERENCE_REGISTER: '' }, /inference-register must be github-oidc/],
     [{ INFERENCE_PROVIDER: 'anthropic' }, /inference-register must be github-oidc/],
@@ -260,16 +276,12 @@ test('session, idle-minutes and provider-key mode are refused before provisionin
     await assert.rejects(target(env, { allowPolicyRead: false }), error, JSON.stringify(env));
     await assert.rejects(review(env, { pull: true, allowPolicyRead: false }), error, JSON.stringify(env));
   }
-  const outputs = await target({});
-  for (const name of ['session', 'idle-minutes', 'session-host', 'session-endpoint']) {
-    assert.equal(Object.hasOwn(outputs, name), false, name);
-  }
   // The key's presence reaches the target job as a boolean, and the key
   // nowhere else; policy is given only the broker's registration.
   assert.deepEqual([...workflow.matchAll(/secrets\.INFERENCE_API_KEY\b[^\n]*/g)].map(m => m[0]), ["secrets.INFERENCE_API_KEY != '' }}"]);
   assert.match(workflow, /\n {10}INFERENCE_API_KEY_SET: \$\{\{ secrets\.INFERENCE_API_KEY != '' \}\}\n/);
   assert.match(job('policy'), /\n {6}inference-register: github-oidc\n/);
-  assert.doesNotMatch(job('policy'), /inference-provider|\n {6}session:|idle-minutes/);
+  assert.doesNotMatch(job('policy'), /inference-provider/);
   assert.doesNotMatch(workflow, /TAILNET_DOMAIN|session-host|session-endpoint|inference-api-key/);
   assert.doesNotMatch(read('./cgwalters-agent.yml'), /inference-api-key|mcp-token|agent-user|INFERENCE_API_KEY/);
 });
