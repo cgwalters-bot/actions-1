@@ -114,11 +114,11 @@ on:
         type: string
         default: "400"
       # Refused, and kept only so that a caller passing them fails with
-      # this file's message rather than GitHub's: a session's listener
-      # needs a second user, which agentic-job#2989 removed. Unrelated to
+      # this file's message rather than GitHub's: the pinned upstream
+      # does not support a listener as the runner user. Unrelated to
       # `kind: session`, a repository-triage run that listens for nothing.
       session:
-        description: "Refused: a session needs the sandbox user, which agentic-job removed (its #2989)"
+        description: "Refused until the pinned agentic-job supports session listeners as the runner user"
         type: boolean
         default: false
       idle-minutes:
@@ -272,12 +272,14 @@ jobs:
             if (!['implement', 'triage', 'research', 'session', 'review', 'fix'].includes(profile)) {
               throw new Error('Unknown dispatch profile');
             }
+            // The pinned upstream refuses session.listen in runner admission
+            // and run. Reject here, before registration mints credentials.
+            if (process.env.SESSION === 'true' || process.env.IDLE_MINUTES !== '') {
+              throw new Error('session and idle-minutes are refused: the pinned agentic-job does not support session listeners as the runner user');
+            }
             // What needed the sandbox user, refused before anything is
             // provisioned: the runner is the only agent user since
             // agentic-job#2989, and the agent can read whatever its job holds.
-            if (process.env.SESSION === 'true' || process.env.IDLE_MINUTES !== '') {
-              throw new Error('session and idle-minutes are refused: a session needs the sandbox user, which agentic-job removed (its #2989)');
-            }
             if (process.env.INFERENCE_REGISTER !== 'github-oidc' || process.env.INFERENCE_PROVIDER !== '' ||
                 process.env.INFERENCE_API_KEY_SET !== 'false') {
               throw new Error('inference-register must be github-oidc, with no inference-provider or INFERENCE_API_KEY: a provider key would be readable by the agent, the runner\'s user (agentic-job#2989)');

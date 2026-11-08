@@ -101,6 +101,12 @@ declared so a caller passing them gets that message. The scripted agent
 with `[mcp]`, `api-key` or a session listener, and `run` refuses
 `[child-agent]`.
 
+Session listener support requires a compatible agentic-job pin first: the
+current pin rejects `session.listen` in both runner admission and `run`.
+Keep the wrapper's early refusal until that dependency is updated, so a
+listener request cannot register an inference run or mint a tailnet key
+only to fail in the agent job.
+
 `kind: session` is not that listener. It is a repository-triage run
 (tracker#1505): one pass over the target repository, started from an
 issue (not a pull request), that runs once and accepts no attach.
