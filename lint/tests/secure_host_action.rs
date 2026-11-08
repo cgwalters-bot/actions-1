@@ -18,7 +18,13 @@ const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef012
 
 /// Records its arguments, one to a line, and answers as FAKE_SUDO_* say.
 const FAKE_SUDO: &str = r#"#!/bin/sh
-printf '%s\n' "$@" > "$FAKE_SUDO_ARGS"
+printf '%s\n' "$@" >> "$FAKE_SUDO_ARGS"
+if [ -n "${FAKE_IMAGE_ID:-}" ]; then
+  case "$2 $3" in
+    'image inspect') printf '%s\n' "$FAKE_IMAGE_ID"; exit 0 ;;
+    'pull --quiet') exit 0 ;;
+  esac
+fi
 printf '%s' "$FAKE_SUDO_STDOUT"
 printf '%s' "$FAKE_SUDO_STDERR" >&2
 exit "${FAKE_SUDO_STATUS:-0}"
@@ -414,6 +420,98 @@ fn failed_attestation_stops_before_image_acquisition_and_setup() {
                 assert!(temp.read("sudo-args").unwrap().contains("\n--privileged\n"));
             }
         }
+    }
+}
+
+// Both the standalone image's compatibility entrypoint and the older
+// image accept this interface. Select by inspected ID, never by a mutable
+// tag, including when the caller tests an unreleased image archive.
+#[test]
+fn selected_image_is_inspected_and_setup_uses_its_id() {
+    let image = format!("ghcr.io/example/secure-host@{DIGEST}");
+    let id = "a".repeat(64);
+    for archive in ["", "image archive.tar"] {
+        let temp = TempDir::new();
+        let out = step("Get the image").run(
+            &temp,
+            &[
+                ("IMAGE", Path::new(&image)),
+                ("ARCHIVE", Path::new(archive)),
+            ],
+            &[
+                ("FAKE_IMAGE_ID", &id),
+                (
+                    "FAKE_SUDO_STDOUT",
+                    "Loaded image: localhost/unreleased:latest\n",
+                ),
+            ],
+        );
+        succeeded(&out);
+        assert_eq!(temp.read("output").unwrap(), format!("id={id}\n"));
+        let (load, selected) = if archive.is_empty() {
+            (format!("podman\npull\n--quiet\n{image}\n"), image.as_str())
+        } else {
+            (
+                format!("podman\nload\n--quiet\n--input\n{archive}\n"),
+                "localhost/unreleased:latest",
+            )
+        };
+        assert_eq!(
+            temp.read("sudo-args").unwrap(),
+            format!("{load}podman\nimage\ninspect\n--format\n{{{{.Id}}}}\n{selected}\n")
+        );
+        fs::remove_file(temp.path("sudo-args")).unwrap();
+        succeeded(&step("Secure the host").run(&temp, &[("ID", Path::new(&id))], &[]));
+        assert_eq!(
+            temp.read("sudo-args").unwrap(),
+            format!(
+                "podman\nrun\n--rm\n--privileged\n--pid=host\n--network=none\n-v\n/:/host\n{id}\n{}/secure-host/config.toml\n",
+                temp.0.display()
+            )
+        );
+    }
+}
+
+#[test]
+fn setup_uses_the_inspected_image_id_and_host_check_is_unchanged() {
+    let text = fs::read_to_string(secure_host().join("action.yml")).unwrap();
+    let action = YamlLoader::load_from_str(&text).unwrap().remove(0);
+    let steps = action["runs"]["steps"].as_vec().unwrap();
+    for name in [CONFIG_STEP, "Secure the host"] {
+        let s = steps
+            .iter()
+            .find(|s| s["name"].as_str() == Some(name))
+            .unwrap();
+        assert_eq!(
+            s["env"]["ID"].as_str(),
+            Some("${{ steps.image.outputs.id }}")
+        );
+    }
+    assert_eq!(step("Prove it").run.trim(), "agentic-job sandbox check");
+}
+
+#[test]
+fn archive_without_exactly_one_image_and_malformed_image_ids_are_refused() {
+    for (loaded, id, want) in [
+        ("", "a".repeat(64), "must hold exactly one image"),
+        (
+            "Loaded image: first\nLoaded image: second\n",
+            "a".repeat(64),
+            "must hold exactly one image",
+        ),
+        ("Loaded image: first\n", "not-an-id".to_owned(), ""),
+    ] {
+        let temp = TempDir::new();
+        let out = step("Get the image").run(
+            &temp,
+            &[
+                ("IMAGE", Path::new("unused")),
+                ("ARCHIVE", Path::new("test.tar")),
+            ],
+            &[("FAKE_IMAGE_ID", &id), ("FAKE_SUDO_STDOUT", loaded)],
+        );
+        failed_with(&out, want);
+        assert_eq!(temp.read("output"), None);
     }
 }
 
