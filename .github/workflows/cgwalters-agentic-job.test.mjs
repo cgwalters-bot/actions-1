@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +9,59 @@ import { test } from 'node:test';
 // The wrappers' tests that execute no JavaScript are in lint/tests/wrappers.rs.
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
+
+test('both register jobs refuse child agents from composed policy before acquiring credentials', () => {
+  const scripts = [];
+  for (const file of ['./cgwalters-agentic-job.yml', './cgwalters-review.yml']) {
+    const register = read(file).split('\n  register:\n')[1].split('\n  agent:\n')[0];
+    const preflight = register.indexOf('- name: Refuse unsupported child agents before credentials');
+    const download = register.indexOf('uses: actions/download-artifact@');
+    const provenance = register.indexOf('- name: The policy call\'s source and uploads');
+    assert.ok(provenance >= 0 && download > provenance && preflight > download, file);
+    assert.ok(register.indexOf('- name: Join the tailnet and mint') > preflight, file);
+    assert.ok(register.indexOf('- id: register') > preflight, file);
+    assert.doesNotMatch(register.slice(0, preflight), /uses: .*tailscale|agentic-job" register|uses: .*checkout|secrets\./);
+    assert.match(register.slice(provenance, download), /\[\[ "\$SOURCE_REPOSITORY" == "\$EXPECTED_REPOSITORY" && "\$SOURCE_SHA" =~ \^\[0-9a-f\]\{40\}\$/);
+    assert.match(register.slice(provenance, download), /"\$BINARY" =~ \^\[1-9\]\[0-9\]\*\$ && "\$POLICY" =~ \^\[1-9\]\[0-9\]\*\$/);
+    assert.ok(register.slice(download, preflight).includes('artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}'));
+    const step = register.slice(preflight).split('\n      # Pinned,')[0];
+    assert.match(step, /shell: python3 \{0\}/);
+    assert.ok(step.includes('JOB_DIR: ${{ runner.temp }}/agentic-job'));
+    const script = step.split('        run: |\n')[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+    scripts.push(script);
+    const dir = mkdtempSync(join(tmpdir(), 'register-preflight-'));
+    try {
+      const cases = [
+        ['ordinary', '[agent]\nname = "opencode"\n[session]\nwatch-item = true', 0],
+        ['comment/string is not a child', '# [child-agent]\n[agent]\nname = "claude"\n[host.env]\nNOTE = "[child-agent]"', 0],
+        ['child table', '[agent]\nname = "vibe"\n[child-agent]\nname = "vibe"', 1],
+        ['empty child', '[child-agent]', 1],
+        ['quoted child', '["child-agent"]\nname = "vibe"', 1],
+        ['dotted child', 'child-agent.name = "vibe"', 1],
+        ['inline child', 'child-agent = {name = "vibe"}', 1],
+        ['false child', 'child-agent = false', 1],
+        ['malformed', '[agent', 1],
+        ['duplicate', '[agent]\nname = "vibe"\nname = "claude"', 1],
+        ['invalid utf8', Buffer.from([0xff]), 1],
+        ['empty', '', 1],
+        ['oversized', '#'.repeat(1048577), 1],
+        ['missing', null, 1],
+      ];
+      for (const [label, config, status] of cases) {
+        const path = join(dir, 'config.toml');
+        if (config === null) rmSync(path); else writeFileSync(path, config);
+        const result = spawnSync('python3', ['-c', script], { env: { ...process.env, JOB_DIR: dir }, encoding: 'utf8' });
+        assert.equal(result.status, status, `${file}: ${label}: ${result.stderr}`);
+        if (status) assert.match(result.stderr, /register preflight:/);
+        if (status && label.includes('child')) assert.match(result.stderr, /acp-experiment is unsupported under the pinned runner-only implementation; remove \[child-agent\]/);
+        if (config !== null) assert.deepEqual(readFileSync(path), Buffer.from(config), 'preflight must not rewrite configuration');
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  assert.equal(scripts[0], scripts[1], 'both wrappers must enforce the same preflight');
+});
 
 // A repository without INFERENCE_URL falls back to the broker its runner
 // joins the tailnet to reach: the wrappers and tailnets.json move together.
