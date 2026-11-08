@@ -93,13 +93,29 @@ repository's own base configuration; the wrappers still refuse `fake` from
 callers. It covers the shared agent job's steps and check's input, not the
 tailnet join, registration or apply, which only real runs exercise.
 
-What needed a second user is refused before anything is provisioned: the
-dispatch wrapper's `session` (and `idle-minutes`), `inference-register:
+The dispatch wrapper refuses these inputs before anything is provisioned:
+`session` (and `idle-minutes`), `inference-register:
 api-key`, `inference-provider` and an `INFERENCE_API_KEY`. The inputs stay
 declared so a caller passing them gets that message. The scripted agent
 `fake` stays unsupported. Upstream's own admission refuses a configuration
-with `[mcp]`, `api-key` or a session listener, and `run` refuses
-`[child-agent]`.
+with `[mcp]`, `api-key` or a session listener. ACP's `[child-agent]`
+(`acp-experiment`) is also unsupported under the pinned runner-only
+implementation. To avoid joining the tailnet, minting a key and registering
+inference for a run that `run` will refuse, both register jobs first parse
+only the policy-composed `config.toml`, downloaded by policy's validated
+artifact IDs after the existing source/provenance checks. Missing, empty,
+malformed or over-1-MiB configuration fails closed, as does any top-level
+`child-agent` key, including quoted, dotted and inline TOML forms. There is
+no opt-in, automatic child removal or fallback experiment: remove the child
+configuration explicitly or wait for supported ACP.
+
+This is only the early ACP refusal slice of #219. Session work is separate
+in #225; this pin still refuses session listeners, and this change enables
+neither sessions nor a second user. #220 proposes an actionable pre-join
+refusal for spent/expired keys with the re-run-all-jobs mitigation, not fresh
+keys per attempt. Queue expiry is still unfixed: a review queued for over
+an hour can hold an expired key. KVM access and self-pin policy remain
+separate #219 checklist items too.
 
 Session listener support requires a compatible agentic-job pin first: the
 current pin rejects `session.listen` in both runner admission and `run`.

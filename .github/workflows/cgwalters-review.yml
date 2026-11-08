@@ -146,6 +146,32 @@ jobs:
             { echo "::error::the policy call is not $EXPECTED_REPOSITORY at a full commit"; exit 1; }
           [[ "$BINARY" =~ ^[1-9][0-9]*$ && "$POLICY" =~ ^[1-9][0-9]*$ ]] ||
             { echo '::error::register requires binary and policy upload IDs from policy'; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}
+          path: ${{ runner.temp }}/agentic-job
+          merge-multiple: true
+      # Avoid provisioning credentials for a run that runner-only will refuse.
+      # Read only policy's composed config, never a caller/head checkout.
+      # Keep this small preflight identical in both register jobs.
+      - name: Refuse unsupported child agents before credentials
+        shell: python3 {0}
+        env:
+          JOB_DIR: ${{ runner.temp }}/agentic-job
+        run: |
+          import os, pathlib, sys, tomllib
+          try:
+              with (pathlib.Path(os.environ['JOB_DIR']) / 'config.toml').open('rb') as source:
+                  data = source.read(1048577)
+              if len(data) > 1048576:
+                  raise ValueError('configuration exceeds 1 MiB')
+              config = tomllib.loads(data.decode('utf-8'))
+              if not config:
+                  raise ValueError('configuration is empty')
+          except (OSError, UnicodeError, ValueError):
+              sys.exit('register preflight: missing, malformed or oversized policy configuration; rerun policy to produce a valid config.toml')
+          if 'child-agent' in config:
+              sys.exit('register preflight: [child-agent] / acp-experiment is unsupported under the pinned runner-only implementation; remove [child-agent] from the caller configuration or wait for supported ACP; no credentials were acquired')
       # Pinned, as in cgwalters-agent.yml: main must not change privileged
       # code behind a caller's reviewed wrapper pin. The calling
       # repository's tailnet login, for an organization tailnets.json
@@ -160,11 +186,6 @@ jobs:
           oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}
           tags: ${{ vars.AGENTIC_JOB_TAILSCALE_TAGS }}
           mint: 'true'
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}
-          path: ${{ runner.temp }}/agentic-job
-          merge-multiple: true
       - id: register
         name: Register the run at the inference proxy
         env:

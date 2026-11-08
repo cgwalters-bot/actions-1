@@ -937,8 +937,9 @@ fn register_job(text: &str) {
         steps,
         [
             "The policy call's source and uploads",
-            "Join the tailnet and mint the agent job's key",
             "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+            "Refuse unsupported child agents before credentials",
+            "Join the tailnet and mint the agent job's key",
             "Register the run at the inference proxy",
         ]
     );
