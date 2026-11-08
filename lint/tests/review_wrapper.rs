@@ -1051,7 +1051,23 @@ fn smoke_source(text: &str) {
     let text = host_source(text, "wrapper-runner");
     includes(&text, &[&format!("policy.yml@{PIN}")]);
     let policy = job(&text, "wrapper-policy");
-    includes(policy, &["max-requests: '0'", "budget: '1'"]);
+    // A scripted dispatch: upstream's comment session, no model or broker.
+    includes(
+        policy,
+        &[
+            "max-requests: '0'",
+            "budget: '1'",
+            "      agent: fake\n",
+            "      fake-profile: comment\n",
+            "      outputs: add_comment,noop\n",
+            "      max-outputs: '1'\n",
+            "      notify: none\n",
+        ],
+    );
+    excludes(
+        policy,
+        &["inference-", "apply-environment", "setup:", "secrets"],
+    );
     assert_eq!(
         yaml(&text)["jobs"]["wrapper-policy"]["permissions"]["actions"].as_str(),
         Some("read")
@@ -1073,6 +1089,9 @@ fn smoke_source(text: &str) {
         "if sudo -n true 2> /dev/null; then",
         "found=$(env -i PATH=\"$path\" sh -c 'command -v agentic-job')",
         "cmp \"$found\" .agentic-job/agentic-job ||",
+        "uses: ./.agentic-job-source/run",
+        "runner-home: ${{ runner.temp }}/agent-home\n",
+        "github-token: ''\n",
     ] {
         let index = smoke.find(step).unwrap_or_else(|| panic!("missing {step}"));
         assert!(previous.is_none_or(|p| index > p), "{step}");
@@ -1092,8 +1111,45 @@ fn smoke_source(text: &str) {
             "secrets.",
             "/var/tmp/agentic-job",
             "sandbox.env",
+            "inference-run-token",
         ],
     );
+    // Read only, as the agent job: no identity token where the agent runs.
+    assert_eq!(
+        yaml(&text)["jobs"]["wrapper-runner"]["permissions"],
+        yaml("{contents: read, actions: read}")
+    );
+    // The handback goes through the wrappers' check, and only there:
+    // nothing applies or publishes it.
+    let check = job(&text, "wrapper-check");
+    includes(
+        check,
+        &[
+            &format!("check.yml@{PIN}"),
+            "policy: ${{ toJSON(needs.wrapper-policy.outputs) }}",
+            "safe-outputs-artifact-id: ${{ needs.wrapper-runner.outputs.safe-outputs-artifact-id }}",
+            "safe-outputs-artifact-digest: ${{ needs.wrapper-runner.outputs.safe-outputs-artifact-digest }}",
+        ],
+    );
+    excludes(check, &["secrets"]);
+    assert_eq!(
+        yaml(&text)["jobs"]["wrapper-check"]["permissions"],
+        yaml("{contents: read, actions: read, id-token: write}")
+    );
+    // Runs, and fails, when check was skipped for want of a handback.
+    let verdict = job(&text, "wrapper-scripted-dispatch");
+    includes(
+        verdict,
+        &[
+            "needs: [wrapper-runner, wrapper-check]",
+            "if: ${{ !cancelled() }}",
+            "permissions: {}",
+            "EXIT: ${{ needs.wrapper-runner.outputs.exit }}",
+            "CHECKED: ${{ needs.wrapper-check.outputs.artifact-id }}",
+            "[[ \"$EXIT\" == 0 && \"$CHECK\" == success && \"$CHECKED\" =~ ^[1-9][0-9]*$ && -z \"$REFUSAL\" && \"$PATCH\" != true ]]",
+        ],
+    );
+    excludes(&text, &["apply.yml", "SAFE_OUTPUTS_PAT", "pull-requests: write", "issues: write"]);
 }
 
 #[test]

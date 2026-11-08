@@ -154,7 +154,7 @@ jobs:
       # organization may already set for an OAuth client of another use.
       - name: Join the tailnet and mint the agent job's key
         id: tailnet
-        uses: cgwalters-forge/actions/tailscale@abc3dba8f7a5c67df4f05300e4e204566d627417 # main
+        uses: cgwalters-forge/actions/tailscale@e084c52a9aa07f1279182cfc738de68b96016278 # main
         with:
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}
           oauth-client-id: ${{ vars.AGENTIC_JOB_TAILSCALE_OAUTH_CLIENT_ID }}

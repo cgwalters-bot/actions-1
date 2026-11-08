@@ -80,10 +80,18 @@ with `--runner-home`. The pinned image installs its own, older
 of the policy binary first on the agent's `PATH`: the agent's
 `agentic-job handback` commands must match the binary `run` starts. The
 `wrapper-runner` CI job in
-[secure-host.yml](.github/workflows/secure-host.yml) runs that sequence up
-to `run` on a fresh runner, with no inference or tailnet, and checks that
-the host passes run's own probe, the runner has lost sudo and the agent's
-`PATH` finds the policy binary.
+[secure-host.yml](.github/workflows/secure-host.yml) runs that sequence on
+a fresh runner, with no inference or tailnet, and checks that the host
+passes run's own probe, the runner has lost sudo and the agent's `PATH`
+finds the policy binary. It is also a deterministic scripted dispatch: the
+policy call selects the pinned helper's scripted agent (`fake`, comment
+profile), `run` starts it with an empty GitHub token and no run token, the
+pinned `check.yml` checks its handback, and `wrapper-scripted-dispatch`
+passes only for an agent exit of 0 and one checked comment with no patch.
+Nothing is applied, and the job holds no secret. This is the
+repository's own base configuration; the wrappers still refuse `fake` from
+callers. It covers the shared agent job's steps and check's input, not the
+tailnet join, registration or apply, which only real runs exercise.
 
 What needed a second user is refused before anything is provisioned: the
 dispatch wrapper's `session` (and `idle-minutes`), `inference-register:
@@ -179,6 +187,32 @@ resolve the wrappers and shared agent job to `ba6c569`, and the helpers to
 `5906e674` and helpers v0.6.1, so it is not acceptance of this migration.
 These are real agent runs, not the host smoke test; they do not prove
 primary-plus-secondary publication or complete #138's required canary rollout.
+
+Two later runs record the runner-only boundary at each wrapper revision
+(actions#103). Tracker dispatch
+[42320486895](https://github.com/cgwalters-forge/tracker/actions/runs/42320486895)
+(research on actions#196): its `run` job resolves the dispatch wrapper and
+shared agent job to `ba6c569` and policy, check and apply to `427ce22`.
+The `3f9f642` helpers that `referenced_workflows` also lists belong to
+tracker's skipped `review` job, pinned to wrapper `f05e237`. Register, agent,
+check and apply all succeeded, and apply posted the checked comment
+[6699900595](https://github.com/cgwalters-forge/actions/issues/196#issuecomment-6699900595),
+showing the agent as `runner` running the policy binary 0.6.12.
+Event review
+[42376903094](https://github.com/cgwalters-forge/actions/actions/runs/42376903094)
+of #223 resolves the review wrapper and agent job to `abc3dba` and the
+helpers to `427ce22`. Its submit job posted APPROVED review
+[5812467802](https://github.com/cgwalters-forge/actions/pull/223#pullrequestreview-5812467802)
+with `commit_id` `7a3ffdd`, the admitted head, and apply was skipped. In
+both, the agent job's token had only Actions, Contents, Issues,
+PullRequests and Metadata read and no `id-token`. Both checkouts set
+`persist-credentials: false`, and only the register job minted the tailnet
+key, "a single-use, ephemeral key, valid for 60 minutes", which the agent
+job's join spent. Between `ba6c569` and `e084c52` the wrappers changed
+only their `# main` self-pins. Those pins moved from `1e867fc`, and across
+that range `admit`, `deployment` and `tailscale` changed only in
+`tailscale/setup.test.mjs`. A real dispatch and review at a
+later wrapper revision with other changes still need recording again.
 
 ## Review
 
