@@ -17,11 +17,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Exercise the wrappers' agent job, cgwalters-agent.yml, on a fresh VM:
-  # prepare, agentic-job's runner-user admission, config --host and the
-  # pinned forwarder, then the setup script and run's own proof that the
-  # host is secured, all as the runner's user. No inference, tailnet
-  # credentials or agent uploads.
+  # A scripted dispatch through the wrappers' agent job, cgwalters-agent.yml,
+  # on a fresh VM: prepare, agentic-job's runner-user admission, config
+  # --host and the pinned forwarder, then the setup script and run's own
+  # proof that the host is secured, all as the runner's user; then the
+  # pinned scripted agent (agentic-job's `fake`, comment profile) through
+  # run with no GitHub token, and its handback through the pinned check.
+  # Deterministic: no model, inference, tailnet credentials or secrets,
+  # and no apply, so nothing is published. The wrappers keep refusing
+  # `fake` from callers; this is the repository's own base configuration.
   wrapper-policy:
     permissions:
       actions: read
@@ -33,11 +37,16 @@ jobs:
       repo: cgwalters-forge/actions
       allow: workflow/review.toml
       kind: analysis
-      outputs: noop
+      outputs: add_comment,noop
       max-outputs: '1'
+      # Any issue would do: check consults none, and no apply job posts.
+      comment-target: '103'
+      notify: none
+      agent: fake
+      fake-profile: comment
       max-requests: '0'
       budget: '1'
-      task: Prove the agent job's host is secured for the runner's user.
+      task: Prove the agent job's host is secured for the runner's user and hand back a checked comment.
       config: .agentic-job-source/secure-host/hosted.toml
       artifact-prefix: wrapper-smoke-
 
@@ -48,6 +57,10 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      exit: ${{ steps.run.outputs.exit }}
+      safe-outputs-artifact-id: ${{ steps.run.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ steps.run.outputs.safe-outputs-artifact-digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,6 +107,52 @@ jobs:
           found=$(env -i PATH="$path" sh -c 'command -v agentic-job')
           echo "policy binary: $(.agentic-job/agentic-job --version); on the agent's PATH: $found, $("$found" --version)"
           cmp "$found" .agentic-job/agentic-job || { echo "::error::the agent's PATH finds $found, not the policy binary"; exit 1; }
+      # The agent job's run step, with the empty GitHub token a review
+      # gets and no run token: the scripted agent reaches no proxy.
+      - id: run
+        timeout-minutes: 10
+        uses: ./.agentic-job-source/run
+        with:
+          runner-home: ${{ runner.temp }}/agent-home
+          github-token: ''
+
+  # The wrappers' check, at their pin, on the scripted handback. GitHub
+  # validates detect's `id-token` request even though it uses it only
+  # with AGENTIC_JOB_DETECT_MODEL set, which this repository leaves unset
+  # (setting it would run a model here); nothing of the agent's runs there.
+  wrapper-check:
+    needs: [wrapper-policy, wrapper-runner]
+    if: ${{ needs.wrapper-runner.outputs.safe-outputs-artifact-id != '' }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@427ce2295925654be9c35e91ca5cee91bbc2c9ea # build-e9bea055d71d86a461b8956e1e550398f8a8253d32539b253969bf6f17527a9d
+    with:
+      policy: ${{ toJSON(needs.wrapper-policy.outputs) }}
+      safe-outputs-artifact-id: ${{ needs.wrapper-runner.outputs.safe-outputs-artifact-id }}
+      safe-outputs-artifact-digest: ${{ needs.wrapper-runner.outputs.safe-outputs-artifact-digest }}
+
+  # The scripted dispatch passes only if the agent ended well and check
+  # accepted its one comment, with no patch.
+  wrapper-scripted-dispatch:
+    needs: [wrapper-runner, wrapper-check]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: The scripted handback was checked
+        env:
+          EXIT: ${{ needs.wrapper-runner.outputs.exit }}
+          CHECK: ${{ needs.wrapper-check.result }}
+          CHECKED: ${{ needs.wrapper-check.outputs.artifact-id }}
+          REFUSAL: ${{ needs.wrapper-check.outputs.refusal }}
+          PATCH: ${{ needs.wrapper-check.outputs.has-patch }}
+        run: |
+          echo "agent exit $EXIT, check $CHECK, checked upload ${CHECKED:-none}, patch ${PATCH:-none}"
+          [[ "$EXIT" == 0 && "$CHECK" == success && "$CHECKED" =~ ^[1-9][0-9]*$ && -z "$REFUSAL" && "$PATCH" != true ]] ||
+            { echo "::error::the scripted dispatch did not hand back a checked comment; check's log has any refusal"; exit 1; }
 
   # The README's example: an untrusted job with nothing worth stealing,
   # whose output a second job takes by artifact ID and digest, as data.
