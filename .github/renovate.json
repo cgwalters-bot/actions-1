@@ -5,7 +5,7 @@
     {
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/cgwalters-(?:review|agentic-job|agent)\\.yml$/"],
-      "matchStrings": ["uses: cgwalters-forge/actions/(?:admit|deployment|tailscale)@(?<currentDigest>[0-9a-f]{40}) # main"],
+      "matchStrings": ["uses: cgwalters-forge/actions/(?:admit|deployment|tailscale)@(?<currentDigest>[0-9a-f]{40}) # from main"],
       "currentValueTemplate": "main",
       "depNameTemplate": "review-actions",
       "packageNameTemplate": "https://github.com/cgwalters-forge/actions",

@@ -86,10 +86,71 @@ fn is_commit(r: &str) -> bool {
     r.len() == 40 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+// Marks a commit pin of our own actions as taken from main, for Renovate
+// (.github/renovate.json). More than one word, so not a ref to zizmor.
+const MAIN_PIN_COMMENT: &str = "# from main";
+
 /// Whether R, what follows a `uses:` line's `@`, is a full commit marked as
 /// taken from main.
 fn main_pin(r: &str) -> bool {
-    r.strip_suffix(" # main").is_some_and(is_commit)
+    r.strip_suffix(MAIN_PIN_COMMENT)
+        .and_then(|r| r.strip_suffix(' '))
+        .is_some_and(is_commit)
+}
+
+/// Whether zizmor's ref-version-mismatch (models/version.rs, 1.32.0) reads
+/// a `uses:` line's COMMENT as a ref, which online it then requires to
+/// point at the pinned commit: a single word after `#`, optionally behind
+/// `tag`, `version` or `ver` and `:` or `=`.
+fn zizmor_reads_a_ref(comment: &str) -> bool {
+    let Some(rest) = comment.strip_prefix('#') else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    let rest = ["tag", "version", "ver"]
+        .into_iter()
+        .find_map(|prefix| {
+            let after = rest.strip_prefix(prefix)?.trim_start();
+            Some(after.strip_prefix([':', '='])?.trim_start())
+        })
+        .unwrap_or(rest);
+    !rest.is_empty() && !rest.contains(char::is_whitespace)
+}
+
+// A ref comment of main would hold the pin to main's tip, failing lint at
+// every merge after the pin's commit; a pin taken from main need not stay
+// its tip, so the marker must not be one.
+#[test]
+fn main_pin_comment_is_not_a_ref_to_zizmor() {
+    for (comment, expected) in [
+        ("# main", true),
+        ("#main", true),
+        ("# v8.0.2", true),
+        ("# tag: main", true),
+        ("# version=main", true),
+        (MAIN_PIN_COMMENT, false),
+        ("# main on 2026-11-02", false),
+    ] {
+        assert_eq!(zizmor_reads_a_ref(comment), expected, "{comment}");
+    }
+    let commit = "e084c52a9aa07f1279182cfc738de68b96016278";
+    assert!(main_pin(&format!("{commit} {MAIN_PIN_COMMENT}")));
+    assert!(!main_pin(&format!("{commit} # main")));
+    for file in [AGENTIC_JOB, REVIEW, AGENT] {
+        let text = read(file);
+        for (action, r) in own_action_refs(&text) {
+            if is_commit(r) {
+                let pin = captures(
+                    &text,
+                    &format!("uses: cgwalters-forge/actions/{action}@{r}"),
+                );
+                assert!(
+                    pin.iter().all(|c| c.trim() == MAIN_PIN_COMMENT),
+                    "{file}: {action}@{r}: {pin:?}"
+                );
+            }
+        }
+    }
 }
 
 /// Each (action, ref) of TEXT's calls of this repository's actions.
@@ -664,7 +725,7 @@ fn agentic_job_is_called_at_one_release_our_own_actions_at_main() {
             let (token, comment) = rest
                 .split_once(' ')
                 .map_or((rest, None), |(t, c)| (t, Some(c)));
-            if let Some(comment) = comment {
+            if let Some(comment) = comment.filter(|c| *c != MAIN_PIN_COMMENT) {
                 let tag = comment.strip_prefix("# ")?;
                 if tag.is_empty() || tag.contains(char::is_whitespace) {
                     return None;
