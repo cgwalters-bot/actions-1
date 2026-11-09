@@ -10,8 +10,7 @@ rules:
   # (./.agentic-job-source is another repository's checkout anyway).
   self-repository:
     disable: true
-  # The review wrapper pins our own actions at a commit, with `# main` for
-  # Renovate to follow, so every later merge here makes the comment "mismatch".
-  ref-version-mismatch:
-    ignore:
-      - cgwalters-review.yml
+# The wrappers' commit pins of our own actions say `# from main`, not
+# `# main`: zizmor reads a one-word comment as a ref and requires it to
+# point at the pinned commit, which fails as soon as main moves on, while
+# impostor-commit still checks that the commit is this repository's.
