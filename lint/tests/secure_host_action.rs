@@ -272,6 +272,151 @@ fn checked_in_pin_and_signer_are_valid_and_written_as_outputs() {
     );
 }
 
+// A failed provenance check must not let untrusted image bytes reach
+// acquisition, config or privileged setup. Run the real scripts with a
+// refusing gh, not just a string assertion about their ordering.
+#[test]
+fn failed_attestation_stops_before_image_acquisition_and_setup() {
+    let text = fs::read_to_string(secure_host().join("action.yml")).unwrap();
+    let action = YamlLoader::load_from_str(&text).unwrap().remove(0);
+    let names = [
+        "Verify the image attestation",
+        "Get the image",
+        CONFIG_STEP,
+        "Secure the host",
+    ];
+    // Do not silently ignore a new acquisition/setup step under another
+    // name. The two preparatory steps may precede verification; only trust
+    // export and the final check follow the image setup sequence.
+    assert_eq!(
+        action["runs"]["steps"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            PIN_STEP,
+            "Install podman where the runner lacks it",
+            names[0],
+            names[1],
+            names[2],
+            names[3],
+            PROXY_STEP,
+            "Prove it",
+        ]
+    );
+    let steps: Vec<_> = action["runs"]["steps"]
+        .as_vec()
+        .unwrap()
+        .iter()
+        .filter(|s| names.contains(&s["name"].as_str().unwrap()))
+        .collect();
+    assert_eq!(steps.len(), names.len());
+    for s in &steps {
+        // Model only default success gating, never always() or a swallowed
+        // failure. An archive deliberately skips the provenance check.
+        assert!(s["continue-on-error"].is_badvalue());
+        if s["name"].as_str() == Some(names[0]) {
+            assert_eq!(s["if"].as_str(), Some("${{ inputs.image-archive == '' }}"));
+            for (key, value) in [
+                ("IMAGE", "${{ steps.pin.outputs.image }}"),
+                ("REPOSITORY", "${{ steps.pin.outputs.repository }}"),
+                ("CERT_IDENTITY", "${{ steps.pin.outputs.cert-identity }}"),
+                ("SOURCE_REF", "${{ steps.pin.outputs.source-ref }}"),
+            ] {
+                assert_eq!(s["env"][key].as_str(), Some(value));
+            }
+        } else {
+            assert!(s["if"].is_badvalue());
+        }
+    }
+    let image = format!("ghcr.io/example/secure-host@{DIGEST}");
+    let id = "a".repeat(64);
+    let action_path = secure_host();
+    for (status, archive) in [("42", ""), ("0", ""), ("42", "image archive.tar")] {
+        let temp = TempDir::new();
+        fs::create_dir(temp.path("bin")).unwrap();
+        let gh = temp.write(
+            "bin/gh",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RUNNER_TEMP/gh-args\"\necho 'attestation test verifier' >&2\nexit \"$VERIFY_STATUS\"\n",
+        );
+        fs::set_permissions(gh, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut attempted = Vec::new();
+        let mut last = None;
+        for s in &steps {
+            let name = s["name"].as_str().unwrap();
+            if name == names[0] && !archive.is_empty() {
+                continue;
+            }
+            attempted.push(name);
+            let env = match name {
+                "Verify the image attestation" => vec![
+                    ("GH_TOKEN", Path::new("")),
+                    ("IMAGE", Path::new(&image)),
+                    ("REPOSITORY", Path::new("example/builder")),
+                    (
+                        "CERT_IDENTITY",
+                        Path::new(
+                            "https://github.com/example/builder/.github/workflows/release.yml@refs/heads/main",
+                        ),
+                    ),
+                    ("SOURCE_REF", Path::new("refs/heads/main")),
+                ],
+                "Get the image" => vec![
+                    ("IMAGE", Path::new(&image)),
+                    ("ARCHIVE", Path::new(archive)),
+                ],
+                CONFIG_STEP => vec![
+                    ("ACTION", action_path.as_path()),
+                    ("CONFIG", Path::new("")),
+                    ("EGRESS", Path::new("off")),
+                    ("EGRESS_POLICY", Path::new("")),
+                    ("ID", Path::new(&id)),
+                ],
+                "Secure the host" => vec![("ID", Path::new(&id))],
+                _ => unreachable!(),
+            };
+            let out = step(name).run(
+                &temp,
+                &env,
+                &[("VERIFY_STATUS", status), ("FAKE_SUDO_STDOUT", &id)],
+            );
+            let success = out.status.success();
+            last = Some(out);
+            if !success {
+                break; // GitHub's default success() gating.
+            }
+        }
+        let out = last.unwrap();
+        if !archive.is_empty() {
+            // The acquisition stub does not supply an archive image; only
+            // prove the documented bypass reaches load without invoking gh.
+            assert_eq!(temp.read("gh-args"), None);
+            assert!(temp.read("sudo-args").unwrap().contains("\nload\n"));
+        } else {
+            assert_eq!(
+                temp.read("gh-args").unwrap(),
+                format!(
+                    "attestation\nverify\noci://{image}\n--repo\nexample/builder\n--cert-identity\nhttps://github.com/example/builder/.github/workflows/release.yml@refs/heads/main\n--source-ref\nrefs/heads/main\n--deny-self-hosted-runners\n"
+                )
+            );
+            if status == "42" {
+                failed_with(&out, "attestation test verifier");
+                assert_eq!(out.status.code(), Some(42));
+                assert_eq!(attempted, [names[0]]);
+                assert_eq!(temp.read("sudo-args"), None);
+                assert_eq!(temp.read("output"), None);
+                assert_eq!(temp.read("secure-host/config.toml"), None);
+            } else {
+                succeeded(&out);
+                assert_eq!(attempted, names);
+                assert!(temp.read("sudo-args").unwrap().contains("\n--privileged\n"));
+            }
+        }
+    }
+}
+
 fn runner_user() -> String {
     let out = Command::new("id").arg("-un").output().unwrap();
     String::from_utf8(out.stdout).unwrap().trim_end().to_owned()

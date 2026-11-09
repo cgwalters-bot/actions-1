@@ -45,6 +45,57 @@ secrets or a release environment. That separate work is covered by
 [#169](https://github.com/cgwalters-forge/actions/issues/169) and
 [PR #171](https://github.com/cgwalters-forge/actions/pull/171).
 
+### Acceptance recheck (2026-11-09)
+
+Main is still `eef41d3b216c731fda0960d6c9876a6ab3cd159a`.
+[#231](https://github.com/cgwalters-forge/actions/pull/231) remains open at
+`5b45a813fb72e834033829589f82ce6723447178`; reuse its standalone-image
+compatibility tests and v0.6.12 evidence when landed, rather than recreate
+them. [Dependabot #211](https://github.com/cgwalters-forge/actions/pull/211)
+still owns the image update, at `502522ad437a469da99120f89e848219434f16a7`.
+The new local regression executes the action's attestation script with a
+refusing verifier: no image acquisition, configuration or privileged setup
+runs. A successful-verification control reaches setup; the trusted-archive
+exception still reaches load without verification. This tests fail-closed
+step behavior and signer arguments, not real provenance or host hardening.
+
+The existing main [run 42488914828](https://github.com/cgwalters-forge/actions/actions/runs/42488914828)
+was rechecked through job conclusions and logs, not dispatched again.
+Its local `./secure-host` action selected **v0.6.9**, source
+`57119eeffa17ea41b383cfdaf8370b8abeba8868`, digest
+`sha256:008d34bf9598ef83d7859772200f26637814d2cd105028457208ddc87d69788b`,
+inspected ID `5b7c37feafd24ceb8583ce87e0dde6d1cb65821c0e5cf86d4db8a99c20513021`.
+
+| Passed Ubuntu 26.04 job | Rechecked result |
+| --- | --- |
+| [build / 128756761122](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756761122) | attestation, config, setup, 98 sandbox checks and artifact upload |
+| [egress-policy / 128756761255](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756761255) | same image, 98 checks; POST refused, policy POST allowed (origin 405), npm audit refused by replacement policy; artifact upload |
+| [publish / 128756898212](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756898212) | artifact `13620478208` downloaded and ZIP digest `a93fe74a24d20aeaa0cd9408441caf9bc21b984c35d27b42a47eed76941a395f` matched; commit-data validation passed |
+
+The same run's passed scripted-wrapper jobs and their **forwarder-selected**
+action/image revisions are already recorded in #231's adoption checkpoint;
+reuse that record when landed. They are not selected by `./secure-host`,
+and neither those jobs nor the local old-image results above establish
+containing-image acceptance.
+
+The publication gate was checked again with GitHub's paginated releases,
+release-workflow runs and `skopeo list-tags --no-creds` against
+`ghcr.io/cgwalters-forge/secure-host`: there is still no numbered release or
+published image beyond v0.6.12. The newer binary release
+`build-2f87b8a21974f1c5552ff1225f9560cb4ad60e5cec1c4fd3446d304433fd05f9`,
+source `4692b7525a07a5e8682bcdef358e9876701454a9`, does not publish an image.
+Thus #231's exact publication, provenance, adoption and hosted-acceptance
+prerequisites for #3144/#3154 remain outstanding. Only a containing
+effective image can substantiate `core-pattern`, confined run/JavaScript
+main/post and `confined-cleanup`; the source-built result below and skipped
+jobs are not deployed proof. RHEL remains separately unverified and
+[#230](https://github.com/cgwalters-forge/actions/issues/230) stays open.
+
+[#229's lint repair](https://github.com/cgwalters-forge/actions/issues/229)
+and [tracker#1369's release train](https://github.com/cgwalters-forge/tracker/issues/1369)
+are still open; #231's ownership boundaries are unchanged. No pins or
+production dispatches are changed by this recheck.
+
 ## Run-time controls through the action on hosted Ubuntu 26.04
 
 agentic-job's CI runs its image built from the commit under test, which
