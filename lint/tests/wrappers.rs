@@ -711,6 +711,22 @@ fn review_task_treats_the_head_as_hostile_and_defers_to_the_merge_policy() {
     }
 }
 
+#[test]
+fn review_task_requires_project_visibility_before_claiming_missing_membership() {
+    let task = read("workflow/review.md");
+    let task = task.split_whitespace().collect::<Vec<_>>().join(" ");
+    for contract in [
+        "An empty `gh issue view --json projectItems` result is not proof",
+        "same token can read the exact target Project",
+        "complete membership query",
+        "membership could not be verified",
+        "Do not turn that uncertainty into a missing-membership finding or blocker",
+        "Do not request broader credentials",
+    ] {
+        assert!(task.contains(contract), "{contract}");
+    }
+}
+
 // agentic-job is called at one release: check, apply, prepare and run
 // refuse calls that resolved to different commits, which following main
 // produced for runs spanning an agentic-job merge (tracker#544).

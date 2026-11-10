@@ -273,6 +273,14 @@ cancel the old agent, comments do not. The head is data inside the sandbox,
 never executed by a privileged step. Each review is bounded to 150 requests,
 500 AIC and 75 agent minutes.
 
+The agent keeps the read-only job token; it has no organization Projects
+credential. To avoid false missing-board blockers, `workflow/review.md`
+requires visibility of the exact Project and a complete membership query
+before reporting an item absent. Hidden, denied or ambiguous membership is
+reported as "membership could not be verified", not as missing. Callers that
+keep their own copy of the review task must copy this guidance too; changing
+the reusable workflow alone does not update a caller's task.
+
 `AGENT_REAL_REVIEWS=true` opts into checked APPROVE/REQUEST_CHANGES
 submission with the job token, at the admitted head. Leaving it unset keeps this off. Enable
 GitHub Actions' permission to create/approve PRs for this feature. A stale
