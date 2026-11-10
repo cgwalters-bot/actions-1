@@ -178,10 +178,7 @@ jobs:
       - name: Another process's environment is readable before the action
         env:
           SECURE_HOST_READ_PROBE: not-a-secret
-        run: |
-          setsid /usr/bin/sleep 600 < /dev/null > /dev/null 2>&1 &
-          echo "$!" > "$RUNNER_TEMP/secure-host-read-probe.pid"
-          grep -qxzF SECURE_HOST_READ_PROBE=not-a-secret "/proc/$!/environ"
+        run: node secure-host/read-probe.mjs
       - uses: ./secure-host
         with:
           egress: write-policy
