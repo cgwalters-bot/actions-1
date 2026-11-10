@@ -274,6 +274,24 @@ test('session, idle-minutes and provider-key mode are refused before provisionin
   assert.doesNotMatch(read('./cgwalters-agent.yml'), /inference-api-key|mcp-token|agent-user|INFERENCE_API_KEY/);
 });
 
+// A repository-triage session (tracker#1505) is a comment-only analysis
+// run on an issue, with triage's checks; the listener input stays refused.
+test('kind session is admitted on an issue as a comment-only run', async () => {
+  const outputs = await target({ PROFILE: 'session', SKILLS: 'true', AGENT: 'claude' });
+  assert.equal(outputs.skills, 'false');
+  assert.equal(outputs['max-requests'], '400');
+  assert.match(outputs.task, /^Profile: session\. [^\n]*Triage, research and session leave the tree clean and return one add_comment\./);
+  await assert.rejects(target({ PROFILE: 'session' }, { pull: true }), /requires an issue, not a pull request/);
+  await assert.rejects(target({ PROFILE: 'session', SESSION: 'true' }), /session and idle-minutes are refused/);
+  await assert.rejects(target({ PROFILE: 'session', IDLE_MINUTES: '10' }), /session and idle-minutes are refused/);
+  await assert.rejects(target({ PROFILE: 'session', AGENT: 'fake' }), /fake is unsupported/);
+  await assert.rejects(target({ PROFILE: 'session', MAX_REQUESTS: '1001' }), /max-requests must be/);
+  await assert.rejects(target({ PROFILE: 'session', APPLY_ENVIRONMENT: '' }), /Missing the apply-environment/);
+  for (const profile of ['Session', 'sessions', ' session', '']) {
+    await assert.rejects(target({ PROFILE: profile }), /Unknown dispatch profile/, JSON.stringify(profile));
+  }
+});
+
 test('the broker audience goes to policy only with the broker registration', async () => {
   assert.equal((await target({}))['inference-audience'], 'aud');
   assert.match(workflow, /\n {10}INFERENCE_REGISTER: \$\{\{ inputs\.inference-register \}\}\n/);

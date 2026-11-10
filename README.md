@@ -101,6 +101,19 @@ declared so a caller passing them gets that message. The scripted agent
 with `[mcp]`, `api-key` or a session listener, and `run` refuses
 `[child-agent]`.
 
+`kind: session` is not that listener. It is a repository-triage run
+(tracker#1505): one pass over the target repository, started from an
+issue (not a pull request), that runs once and accepts no attach.
+The wrapper sends it through the triage path unchanged: policy's
+`analysis` kind, so the tree stays clean and no branch is pushed;
+`add_comment`, `noop`, `missing_tool` and `missing_data` against the
+caller's `allow` file, at most 3 outputs; the checked apply; and the
+caller's `budget` and `max-requests` (defaults 500 AIC and 400 requests,
+requests at most 1000), the 75-minute timeout and the broker's aggregate
+limits. A session needs no other
+caller setting than adding `session` to its `kind` choices, and the
+`session` boolean stays refused with it.
+
 The release train may replace only the local `secure-host` forwarder in the
 agent job and the wrapper smoke job with
 `cgwalters-forge/actions/secure-host@<full immutable commit>`: the verified
@@ -126,7 +139,7 @@ on:
       task: {type: string, required: true}
       repo: {type: string, required: true}
       item: {type: string, required: true}
-      kind: {type: choice, required: true, options: [implement, triage, research, review, fix]}
+      kind: {type: choice, required: true, options: [implement, triage, research, session, review, fix]}
 permissions: {}
 concurrency:
   group: dispatch-${{ inputs.kind }}-${{ inputs.repo }}-${{ inputs.item }}

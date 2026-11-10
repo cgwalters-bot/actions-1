@@ -257,11 +257,60 @@ impl Expr {
     }
 }
 
-fn evaluate(source: &str, context: &BTreeMap<&str, Yaml>) -> bool {
+fn value(source: &str, context: &BTreeMap<&str, Yaml>) -> Yaml {
     let mut parser = Parser(source);
     let expr = parser.expression(0);
     assert!(parser.0.trim().is_empty(), "unparsed: {}", parser.0);
-    truthy(&expr.eval(context))
+    expr.eval(context)
+}
+
+fn evaluate(source: &str, context: &BTreeMap<&str, Yaml>) -> bool {
+    truthy(&value(source, context))
+}
+
+// A session is triage under another name: every policy input that names
+// no kind in its text resolves as triage's does, so it is an analysis run
+// with comment outputs and the same bounds, caps and publication.
+#[test]
+fn session_dispatch_gets_triage_policy_inputs() {
+    let workflow = yaml(&read(DISPATCH));
+    let with = workflow["jobs"]["policy"]["with"].as_hash().unwrap();
+    let resolve = |kind: &str| -> BTreeMap<String, String> {
+        let context = BTreeMap::from([
+            ("inputs.kind", Yaml::String(kind.to_owned())),
+            // The scripted agent, so fake-profile resolves too.
+            (
+                "needs.target.outputs.agent",
+                Yaml::String("fake".to_owned()),
+            ),
+        ]);
+        with.iter()
+            .filter_map(|(key, source)| {
+                let expr = source
+                    .as_str()?
+                    .trim()
+                    .strip_prefix("${{")?
+                    .strip_suffix("}}")?;
+                (!expr.contains("format(") && !expr.contains("${{")).then(|| {
+                    (
+                        key.as_str().unwrap().to_owned(),
+                        string(&value(expr, &context)),
+                    )
+                })
+            })
+            .collect()
+    };
+    let session = resolve("session");
+    assert_eq!(session, resolve("triage"));
+    assert_eq!(session["kind"], "analysis");
+    assert_eq!(
+        session["outputs"],
+        "add_comment,noop,missing_tool,missing_data"
+    );
+    assert_eq!(session["max-outputs"], "3");
+    assert_eq!(session["fake-profile"], "comment");
+    assert_eq!(session["apply-partial"], "true");
+    assert_eq!(session["notify"], "comment");
 }
 
 #[test]
@@ -292,7 +341,7 @@ fn ordinary_review_submit_fails_closed_and_never_enters_pat_apply() {
     for (key, values) in [
         (
             "inputs.kind",
-            vec!["implement", "fix", "triage", "research", ""],
+            vec!["implement", "fix", "triage", "research", "session", ""],
         ),
         ("vars.AGENT_REAL_REVIEWS", vec!["", "false"]),
         ("needs.policy.outputs.review-head", vec![""]),
@@ -333,7 +382,7 @@ fn ordinary_review_submit_fails_closed_and_never_enters_pat_apply() {
         .unwrap();
     changed.insert("needs.policy.result", Yaml::String("success".to_owned()));
     assert!(!evaluate(apply, &changed));
-    for kind in ["implement", "fix", "triage", "research"] {
+    for kind in ["implement", "fix", "triage", "research", "session"] {
         changed.insert("inputs.kind", Yaml::String(kind.to_owned()));
         assert!(evaluate(apply, &changed));
     }
@@ -355,7 +404,14 @@ fn ordinary_review_privileged_dependencies_are_exclusive_literal_pins() {
             })
             .collect();
         assert_eq!(steps.len(), 2);
-        for kind in ["review", "implement", "fix", "triage", "research"] {
+        for kind in [
+            "review",
+            "implement",
+            "fix",
+            "triage",
+            "research",
+            "session",
+        ] {
             let context = BTreeMap::from([
                 ("inputs.kind", Yaml::String(kind.to_owned())),
                 (
