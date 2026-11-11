@@ -173,6 +173,21 @@ jobs:
         run: |
           install -D -m 0755 .agentic-job/agentic-job "$RUNNER_TEMP/agentic-job-bin/agentic-job"
           agentic-job config --host --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
+      # Every Ubuntu mirror the runner lists is an ubuntu.com name, so
+      # Canonical's DNS outage of 2026-11-11 failed secure-host's package
+      # install on every run (agentic-job#3419). kernel.org mirrors the same
+      # signed archive, security pocket included; at the lowest priority
+      # apt tries it only after the runner's own mirrors, and still checks
+      # it against the Ubuntu keys. It has no ubuntu-ports, and RHEL hosts
+      # have no mirror lists, so elsewhere nothing changes.
+      - name: Add a last-resort Ubuntu mirror
+        run: |
+          for list in /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-security.txt; do
+            if [ -f "$list" ] && grep -qE '^https?://(archive|security)\.ubuntu\.com/ubuntu' "$list" &&
+              ! grep -q 'mirrors\.edge\.kernel\.org' "$list"; then
+              printf 'https://mirrors.edge.kernel.org/ubuntu/\tpriority:9\n' | sudo tee -a "$list" >/dev/null
+            fi
+          done
       - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
