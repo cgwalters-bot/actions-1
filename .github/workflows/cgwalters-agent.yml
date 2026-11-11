@@ -173,6 +173,26 @@ jobs:
         run: |
           install -D -m 0755 .agentic-job/agentic-job "$RUNNER_TEMP/agentic-job-bin/agentic-job"
           agentic-job config --host --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
+      # Every mirror in the runner's apt-mirrors.txt (archive and security
+      # alike) is an ubuntu.com name, so Canonical's DNS outage of 2026-11-11
+      # failed secure-host's package install on every run
+      # (agentic-job#3419). These mirror the same signed archive, which apt
+      # still checks against the Ubuntu keys, outside Canonical's DNS: Azure's
+      # own load balancer behind azure.archive.ubuntu.com (Azure DNS,
+      # http only), Princeton, kernel.org and Waterloo. At lower priorities
+      # apt tries them only after the runner's own mirrors. On resolute that
+      # covers arm64 too; RHEL hosts have no mirror list, so nothing changes.
+      - name: Add last-resort Ubuntu mirrors
+        run: |
+          list=/etc/apt/apt-mirrors.txt
+          if [ -f "$list" ] && grep -qE '^https?://(archive|security)\.ubuntu\.com/ubuntu' "$list" &&
+            ! grep -q 'mirrors\.edge\.kernel\.org' "$list"; then
+            printf '%s\tpriority:%s\n' \
+              http://cloud-mirror-lb.eastus.cloudapp.azure.com/ubuntu/ 4 \
+              https://mirror.math.princeton.edu/pub/ubuntu/ 5 \
+              https://mirrors.edge.kernel.org/ubuntu/ 6 \
+              https://mirror.csclub.uwaterloo.ca/ubuntu/ 7 | sudo tee -a "$list" >/dev/null
+          fi
       - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml

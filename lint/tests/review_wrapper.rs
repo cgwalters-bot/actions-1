@@ -836,6 +836,7 @@ fn agent_source(text: &str) {
             "Join the tailnet",
             "Check inference proxy reachability",
             "The host's configuration",
+            "Add last-resort Ubuntu mirrors",
             "./.agentic-job-source/secure-host",
             "The setup script",
             "run",
