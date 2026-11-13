@@ -98,41 +98,12 @@ fn main_pin(r: &str) -> bool {
         .is_some_and(is_commit)
 }
 
-/// Whether zizmor's ref-version-mismatch (models/version.rs, 1.32.0) reads
-/// a `uses:` line's COMMENT as a ref, which online it then requires to
-/// point at the pinned commit: a single word after `#`, optionally behind
-/// `tag`, `version` or `ver` and `:` or `=`.
-fn zizmor_reads_a_ref(comment: &str) -> bool {
-    let Some(rest) = comment.strip_prefix('#') else {
-        return false;
-    };
-    let rest = rest.trim_start();
-    let rest = ["tag", "version", "ver"]
-        .into_iter()
-        .find_map(|prefix| {
-            let after = rest.strip_prefix(prefix)?.trim_start();
-            Some(after.strip_prefix([':', '='])?.trim_start())
-        })
-        .unwrap_or(rest);
-    !rest.is_empty() && !rest.contains(char::is_whitespace)
-}
-
 // A ref comment of main would hold the pin to main's tip, failing lint at
 // every merge after the pin's commit; a pin taken from main need not stay
-// its tip, so the marker must not be one.
+// its tip. The online test in zizmor.rs checks the real audit, not a model
+// of its parser; this offline contract keeps every wrapper on that marker.
 #[test]
-fn main_pin_comment_is_not_a_ref_to_zizmor() {
-    for (comment, expected) in [
-        ("# main", true),
-        ("#main", true),
-        ("# v8.0.2", true),
-        ("# tag: main", true),
-        ("# version=main", true),
-        (MAIN_PIN_COMMENT, false),
-        ("# main on 2026-11-02", false),
-    ] {
-        assert_eq!(zizmor_reads_a_ref(comment), expected, "{comment}");
-    }
+fn main_pins_use_the_tested_annotation() {
     let commit = "e084c52a9aa07f1279182cfc738de68b96016278";
     assert!(main_pin(&format!("{commit} {MAIN_PIN_COMMENT}")));
     assert!(!main_pin(&format!("{commit} # main")));
