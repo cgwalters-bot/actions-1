@@ -102,9 +102,19 @@ test('Renovate tracks the wrappers\' own-action pins from main without automerge
   const pins = [...wrapper.matchAll(pattern)];
   assert.equal(pins.length, 3);
   for (const pin of pins) assert.match(pin.groups.currentDigest, /^[0-9a-f]{40}$/);
-  // Exercise the digest-only replacement: preserve the action paths and branch.
-  const updated = wrapper.replace(pattern, match => match.replace(/[0-9a-f]{40}/, 'a'.repeat(40)));
-  assert.equal([...updated.matchAll(pattern)].filter(pin => pin.groups.currentDigest === 'a'.repeat(40)).length, 3);
+  // Exercise successive digest-only updates, including after main advances
+  // again: preserve paths and the prose marker, never generate `# main`.
+  for (const file of ['./cgwalters-review.yml', './cgwalters-agentic-job.yml', './cgwalters-agent.yml']) {
+    const original = read(file);
+    const count = [...original.matchAll(pattern)].length;
+    let updated = original;
+    for (const digest of ['a'.repeat(40), 'b'.repeat(40)]) {
+      updated = updated.replace(pattern, match => match.replace(/[0-9a-f]{40}/, digest));
+      assert.equal([...updated.matchAll(pattern)].filter(pin => pin.groups.currentDigest === digest).length, count);
+      assert.equal(updated.replace(pattern, '<self-pin>'), original.replace(pattern, '<self-pin>'));
+      assert.doesNotMatch(updated, /@[0-9a-f]{40} # main(?:\r?\n|$)/);
+    }
+  }
   // admit and deployment for the dispatch wrapper's review path, and each
   // wrapper's register job's tailnet join; the shared agent job's join.
   for (const [file, count] of [['./cgwalters-agentic-job.yml', 3], ['./cgwalters-agent.yml', 1]]) {

@@ -62,6 +62,21 @@ just --justfile path/to/actions/lint/Justfile --working-directory . check
 `CONTAINER=podman` runs the linters with podman. Without `GH_TOKEN`
 (`GH_TOKEN=$(gh auth token)`), zizmor runs offline and says so.
 
+This repository's immutable wrapper self-pins use `# from main`: prose,
+not an assertion that the reviewed commit is still the branch tip. Keep
+that marker when updating the SHA; the scoped Renovate manager tracks
+`main` separately. No audit exception is needed, and third-party version
+comments and impostor-commit checks remain active.
+
+With `GH_TOKEN` and zizmor 1.32.0 (the version in `Containerfile.pin`)
+installed, run the opt-in online regression:
+`just --justfile lint/Justfile test-online-self-pins`.
+`ZIZMOR` may name its executable. It audits all seven wrapper self-pins,
+then proves that reverting to `# main` fails against the advanced branch
+and a wrong third-party version comment still fails. Ordinary
+`just test-lint` stays offline; `just lint` runs the repository's online
+audits when `GH_TOKEN` is set.
+
 ## workflows-check
 
 The same crate builds the check an organization ruleset requires of every
