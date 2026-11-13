@@ -795,9 +795,115 @@ fn policy_is_given_the_dispatched_item_as_issue_and_nothing_else() {
         ["${{ inputs.item }}"]
     );
     assert!(job(&workflow, "policy").contains("\n      issue: "));
-    // With the item in `repo` itself apply writes `Closes`; an `item-repo`
-    // would make it a mere `Refs`.
-    assert!(!workflow.contains("item-repo:"));
+    // Policy carries the optional item repository through status, check and
+    // apply; cross-repository PR references are Refs rather than Closes.
+    let policy = job(&workflow, "policy");
+    for input in [
+        "item-repo: ${{ inputs.item-repo }}",
+        "id: ${{ inputs.item-repo || inputs.repo }}#${{ inputs.item }}",
+        "repo: ${{ inputs.repo }}",
+        "output-repo: ${{ inputs.repo }}",
+        "comment-target: ${{ inputs.item }}",
+    ] {
+        assert!(policy.contains(&line(6, input)), "{input}");
+    }
+}
+
+#[test]
+fn dispatch_item_repository_defaults_and_routes_issue_text_without_moving_work() {
+    let workflow = YamlLoader::load_from_str(&read(AGENTIC_JOB))
+        .unwrap()
+        .remove(0);
+    let input = &workflow["on"]["workflow_call"]["inputs"]["item-repo"];
+    assert_eq!(input["type"].as_str(), Some("string"));
+    assert_eq!(input["default"].as_str(), Some(""));
+    assert_ne!(input["required"].as_bool(), Some(true));
+    let step = workflow["jobs"]["target"]["steps"]
+        .as_vec()
+        .unwrap()
+        .iter()
+        .find(|step| step["id"].as_str() == Some("target"))
+        .unwrap();
+    assert_eq!(
+        step["env"]["ITEM_REPO"].as_str(),
+        Some("${{ inputs.item-repo }}")
+    );
+    assert_eq!(
+        step["env"]["TARGET_REPO"].as_str(),
+        Some("${{ inputs.repo }}")
+    );
+    let harness = r#"
+const assert = require('node:assert/strict');
+let task;
+let calls = 0;
+const github = { rest: {
+  repos: { get: async () => ({ data: { private: false, visibility: 'public' } }) },
+  issues: { get: async args => {
+    calls++;
+    assert.deepEqual(args, { owner: 'forge', repo: process.env.ITEM_REPO ? 'tracker' : 'work', issue_number: 42 });
+    return { data: { number: 42, title: 'Staged issue', body: 'Task body', user: { login: 'operator' }, author_association: 'OWNER' } };
+  } }
+} };
+const localRequire = name => name === 'node:fs/promises'
+  ? { writeFile: async (_path, text) => { task = text; } } : require(name);
+const run = new (Object.getPrototypeOf(async function(){}).constructor)('github', 'context', 'core', 'require', process.argv[1]);
+run(github, { repo: { owner: 'forge', repo: 'caller' } }, { setOutput() {} }, localRequire).then(() => {
+  assert.equal(process.env.EXPECT_ERROR, '');
+  assert.equal(calls, 1);
+  const event = JSON.parse(task.split('<agentic-job-event>\n')[1].split('\n</agentic-job-event>')[0]);
+  assert.equal(event.repository, process.env.ITEM_REPO || 'forge/work');
+  assert.equal(event.number, 42);
+}).catch(error => {
+  if (!process.env.EXPECT_ERROR) throw error;
+  assert.match(error.message, new RegExp(process.env.EXPECT_ERROR));
+  assert.equal(calls, 0);
+});
+"#;
+    for (item_repo, profile, error) in [
+        ("", "implement", ""),
+        ("forge/tracker", "implement", ""),
+        ("forge/tracker", "triage", ""),
+        ("forge/tracker", "research", ""),
+        ("forge/tracker", "session", ""),
+        (
+            "forge/tracker",
+            "review",
+            "item-repo is not for review or fix",
+        ),
+        ("forge/tracker", "fix", "item-repo is not for review or fix"),
+        (" forge/tracker", "implement", "Expected OWNER/NAME"),
+        ("forge/tracker/extra", "implement", "Expected OWNER/NAME"),
+    ] {
+        let output = Command::new("node")
+            .args(["-e", harness, step["with"]["script"].as_str().unwrap()])
+            .envs([
+                ("TARGET_REPO", "forge/work"),
+                ("TARGET_ITEM", "42"),
+                ("ITEM_REPO", item_repo),
+                ("PROFILE", profile),
+                ("EXPECT_ERROR", error),
+                ("SESSION", "false"),
+                ("IDLE_MINUTES", ""),
+                ("INFERENCE_REGISTER", "github-oidc"),
+                ("INFERENCE_PROVIDER", ""),
+                ("INFERENCE_API_KEY_SET", "false"),
+                ("AGENT", "opencode"),
+                ("AGENT_RUNNER", "\"ubuntu-26.04\""),
+                ("APPLY_ENVIRONMENT", "agent-apply"),
+                ("MAX_REQUESTS", "400"),
+                ("INFERENCE_URL", ""),
+                ("INFERENCE_AUDIENCE", ""),
+                ("AGENT_CONFIG_REPO", "forge/config"),
+                ("RUNNER_TEMP", "/tmp/opencode"),
+            ])
+            .output()
+            .expect("node");
+        assert!(
+            output.status.success(),
+            "{item_repo:?}/{profile}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 // Dependabot moves the tag, all three calls in one pull request, without

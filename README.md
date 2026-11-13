@@ -41,6 +41,14 @@ runner configuration at `.github/agentic-job/hosted.toml`, and an
 environment that gates the apply token; cgwalters-forge/tracker has all four
 to copy. The file's header says what else a caller may set.
 
+For an issue tracked outside the work repository, pass optional `item-repo`
+as `OWNER/NAME`. Empty keeps the issue in `repo`; `repo` and `output-repo`
+still select the work and PR target. Issue lookup, status comments, steering
+and hand-back references use `item-repo`. The pinned policy requires it to
+be public and within the caller's `repos` bounds, and check enforces those
+bounds so an agent cannot redirect privileged comments to an unapproved
+repository. It is not supported for `review` or `fix`.
+
 Before adopting v0.6.5, callers must migrate every bounds file (`allow`,
 `fix-allow` and both review bounds): move `[outputs]`, `[trigger]`,
 `[memory]` and `[secondary_pull_request]`, when present, under `[github]`
@@ -148,7 +156,7 @@ Since v0.6.0 the agent's home no longer copies the
 runner image's `/etc/skel`, including toolchains and dotfiles.
 Mid-run steering stays off unless the caller's runner configuration enables
 `[session] watch-item = true`. Policy derives the watched item from the
-dispatch wrapper's `issue` (in `output-repo`) or the review event;
+dispatch wrapper's `issue` (in `item-repo`, or `output-repo` by default) or the review event;
 `run` doesn't need any additional input. Upstream limits delivery to 10 updates of
 8000 characters, quoted as untrusted item text, not instructions.
 
