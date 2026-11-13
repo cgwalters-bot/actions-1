@@ -314,6 +314,86 @@ fn session_dispatch_gets_triage_policy_inputs() {
 }
 
 #[test]
+fn research_artifact_only_never_applies_with_or_without_a_pat() {
+    let workflow = yaml(&read(DISPATCH));
+    let jobs = &workflow["jobs"];
+    let resolve = |source: &Yaml, context: &BTreeMap<&str, Yaml>| {
+        let expr = source.as_str().unwrap().trim();
+        value(
+            expr.strip_prefix("${{")
+                .unwrap()
+                .strip_suffix("}}")
+                .unwrap(),
+            context,
+        )
+    };
+    for kind in [
+        "implement",
+        "triage",
+        "research",
+        "session",
+        "review",
+        "fix",
+    ] {
+        for mode in [None, Some(false), Some(true)] {
+            for pat in ["", "fixture-pat"] {
+                let mut context = BTreeMap::from([
+                    ("inputs.kind", Yaml::String(kind.into())),
+                    ("needs.policy.result", Yaml::String("success".into())),
+                    ("inputs.apply-environment", Yaml::String("apply".into())),
+                    ("secrets.SAFE_OUTPUTS_PAT", Yaml::String(pat.into())),
+                ]);
+                if let Some(mode) = mode {
+                    context.insert("inputs.research-artifact-only", Yaml::Boolean(mode));
+                }
+                let only = mode == Some(true);
+                assert_eq!(
+                    truthy(&resolve(&jobs["apply"]["if"], &context)),
+                    !only && kind != "review"
+                );
+                let policy = &jobs["policy"]["with"];
+                assert_eq!(
+                    string(&resolve(&policy["notify"], &context)),
+                    if only || kind == "review" {
+                        "none"
+                    } else {
+                        "comment"
+                    }
+                );
+                assert_eq!(
+                    string(&resolve(&policy["apply-environment"], &context)),
+                    if only || kind == "review" {
+                        ""
+                    } else {
+                        "apply"
+                    }
+                );
+                assert_eq!(
+                    string(&resolve(
+                        &jobs["policy"]["secrets"]["SAFE_OUTPUTS_PAT"],
+                        &context
+                    )),
+                    if only || kind == "review" { "" } else { pat }
+                );
+                assert_eq!(
+                    truthy(&resolve(&policy["apply-partial"], &context)),
+                    !only && ["implement", "research", "triage", "session"].contains(&kind)
+                );
+                assert_eq!(
+                    truthy(&resolve(&jobs["research-handback"]["if"], &context)),
+                    only && kind == "research"
+                );
+                context.insert("cancelled", Yaml::Boolean(true));
+                assert!(!truthy(&resolve(
+                    &jobs["research-handback"]["if"],
+                    &context
+                )));
+            }
+        }
+    }
+}
+
+#[test]
 fn ordinary_review_submit_fails_closed_and_never_enters_pat_apply() {
     let workflow = yaml(&read(DISPATCH));
     let condition = workflow["jobs"]["submit"]["if"].as_str().unwrap();

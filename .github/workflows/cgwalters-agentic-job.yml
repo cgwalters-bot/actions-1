@@ -100,6 +100,12 @@ on:
         description: "The caller's environment whose token applies the outputs; empty: the variable APPLY_ENVIRONMENT. Required"
         type: string
         default: ""
+      # Stop attacker-controlled supervisor prose reaching GitHub as the bot
+      # before the caller's executor admits it. No apply, even with an empty PAT.
+      research-artifact-only:
+        description: "Research only: return checked original hand-back identity without applying any proposal; no status comment"
+        type: boolean
+        default: false
       # Deployment settings, for a caller that must differ; see the header.
       agent:
         description: "opencode, claude or vibe; empty: the variable AGENT, else opencode. fake is unsupported"
@@ -178,6 +184,27 @@ on:
       result-url:
         description: What the run posted or opened
         value: ${{ jobs.submit.outputs.review-url || jobs.apply.outputs.result-url }}
+      research-status:
+        description: "Artifact-only research: ready or unavailable; empty for ordinary calls"
+        value: ${{ jobs.research-handback.outputs.status }}
+      safe-outputs-artifact-id:
+        description: Original untrusted hand-back upload ID, only for ready artifact-only research
+        value: ${{ jobs.research-handback.outputs.artifact-id }}
+      safe-outputs-artifact-digest:
+        description: Original upload SHA-256 in hex, not the checked artifact digest
+        value: ${{ jobs.research-handback.outputs.artifact-digest }}
+      handback-repository:
+        description: Repository holding the artifact
+        value: ${{ jobs.research-handback.outputs.repository }}
+      handback-run-id:
+        description: Producing workflow run ID
+        value: ${{ jobs.research-handback.outputs.run-id }}
+      handback-run-attempt:
+        description: Reporting attempt; caller must verify the producer belongs to this attempt
+        value: ${{ jobs.research-handback.outputs.run-attempt }}
+      handback-agent-job:
+        description: Producer check run ID; verify against the run attempt jobs API
+        value: ${{ jobs.research-handback.outputs.agent-job }}
 
 permissions: {}
 
@@ -227,6 +254,7 @@ jobs:
           ITEM_REPO: ${{ inputs.item-repo }}
           TARGET_ITEM: ${{ inputs.item }}
           PROFILE: ${{ inputs.kind }}
+          RESEARCH_ARTIFACT_ONLY: ${{ inputs.research-artifact-only }}
           EXPECTED_HEAD: ${{ inputs.head }}
           REVIEW_POOL: ${{ inputs.pool }}
           REVIEW_POOLS: ${{ vars.REVIEW_POOLS }}
@@ -276,6 +304,10 @@ jobs:
             // policy's `analysis` kind with triage's outputs, bounds and caps.
             if (!['implement', 'triage', 'research', 'session', 'review', 'fix'].includes(profile)) {
               throw new Error('Unknown dispatch profile');
+            }
+            const artifactOnly = process.env.RESEARCH_ARTIFACT_ONLY === 'true';
+            if (artifactOnly && profile !== 'research') {
+              throw new Error('research-artifact-only requires kind research');
             }
             const itemRepo = process.env.ITEM_REPO || process.env.TARGET_REPO;
             // Prevent item text from another repository being attributed to
@@ -419,7 +451,7 @@ jobs:
                 !/^[1-9][0-9]*$/.test(item) || !Number.isSafeInteger(Number(item))) {
               throw new Error('Expected OWNER/NAME and a positive safe issue number');
             }
-            if (agent !== 'fake' && !process.env.APPLY_ENVIRONMENT?.trim()) {
+            if (!artifactOnly && agent !== 'fake' && !process.env.APPLY_ENVIRONMENT?.trim()) {
               throw new Error('Missing the apply-environment input (or the variable APPLY_ENVIRONMENT)');
             }
             // The scripted agent has no model and reaches no proxy, and only
@@ -515,7 +547,7 @@ jobs:
     # token lets notify post it on an item of another repository, which the
     # job token cannot write to.
     secrets:
-      SAFE_OUTPUTS_PAT: ${{ inputs.kind != 'review' && secrets.SAFE_OUTPUTS_PAT || '' }}
+      SAFE_OUTPUTS_PAT: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && secrets.SAFE_OUTPUTS_PAT || '' }}
     permissions:
       actions: read
       contents: read
@@ -563,16 +595,16 @@ jobs:
       # For implement, apply also links a new PR to this issue (Closes, or
       # Refs for partial work); other profiles do not open a new PR.
       issue: ${{ inputs.item }}
-      apply-environment: ${{ inputs.kind != 'review' && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}
+      apply-environment: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}
       budget: ${{ inputs.kind == 'review' && '500' || inputs.budget }}
       timeout: '75'
       # Keep the finished work of a run that stops on its budget, except for
       # a fix or a review, whose partial result is not worth applying.
-      apply-partial: ${{ inputs.kind == 'implement' || inputs.kind == 'research' || inputs.kind == 'triage' || inputs.kind == 'session' }}
+      apply-partial: ${{ !inputs.research-artifact-only && (inputs.kind == 'implement' || inputs.kind == 'research' || inputs.kind == 'triage' || inputs.kind == 'session') }}
       # One status comment, edited as the run goes, on the item in the
       # item repository (repo by default); a review stays silent, as in agentic-job's
       # dispatch.
-      notify: ${{ inputs.kind == 'review' && 'none' || 'comment' }}
+      notify: ${{ (inputs.kind == 'review' || inputs.research-artifact-only) && 'none' || 'comment' }}
       artifact-prefix: dispatch-${{ inputs.kind }}-
       branch-prefix: dispatch/${{ inputs.kind }}/
 
@@ -762,11 +794,55 @@ jobs:
           chmod +x "$RUNNER_TEMP/bin/agentic-job"
           "$RUNNER_TEMP/bin/agentic-job" review submit --accepted "$RUNNER_TEMP/checked/agent_output.json" --output "$GITHUB_OUTPUT"
 
+  research-handback:
+    # Metadata only, no payload or credentials. Check verifies the original
+    # upload by ID/digest under the pinned policy.
+    needs: [target, policy, agent, check]
+    if: ${{ !cancelled() && inputs.research-artifact-only && inputs.kind == 'research' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      status: ${{ steps.handback.outputs.status }}
+      artifact-id: ${{ steps.handback.outputs.artifact-id }}
+      artifact-digest: ${{ steps.handback.outputs.artifact-digest }}
+      repository: ${{ steps.handback.outputs.repository }}
+      run-id: ${{ steps.handback.outputs.run-id }}
+      run-attempt: ${{ steps.handback.outputs.run-attempt }}
+      agent-job: ${{ steps.handback.outputs.agent-job }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: handback
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS);
+            const agent = needs.agent.outputs;
+            const checked = needs.check.outputs;
+            const id = value => typeof value === 'string' && /^[1-9][0-9]*$/.test(value);
+            const digest = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+            const ready = ['target', 'policy', 'agent', 'check'].every(job => needs[job].result === 'success') &&
+              needs.policy.outputs.admitted === 'true' && agent.exit === '0' && agent['stopped-early'] !== 'true' &&
+              checked['has-patch'] === 'false' && id(checked['artifact-id']) && digest(checked['artifact-digest']) &&
+              id(agent['safe-outputs-artifact-id']) && digest(agent['safe-outputs-artifact-digest']) && id(agent.job);
+            core.setOutput('status', ready ? 'ready' : 'unavailable');
+            await core.summary.addRaw(ready
+              ? 'Research hand-back ready. No proposals applied. Payload remains untrusted.'
+              : 'Research hand-back unavailable. No proposals applied.').write();
+            if (!ready) return;
+            core.setOutput('artifact-id', agent['safe-outputs-artifact-id']);
+            core.setOutput('artifact-digest', agent['safe-outputs-artifact-digest']);
+            core.setOutput('repository', `${context.repo.owner}/${context.repo.repo}`);
+            core.setOutput('run-id', process.env.GITHUB_RUN_ID);
+            core.setOutput('run-attempt', process.env.GITHUB_RUN_ATTEMPT);
+            core.setOutput('agent-job', agent.job);
+
   apply:
     needs: [policy, agent, check]
     # Reviews publish only through checked submit, never through the PAT or
     # as an unbound comment when stale, cancelled, noop or opted out.
-    if: ${{ always() && inputs.kind != 'review' && needs.policy.result == 'success' }}
+    if: ${{ always() && inputs.kind != 'review' && !inputs.research-artifact-only && needs.policy.result == 'success' }}
     uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@427ce2295925654be9c35e91ca5cee91bbc2c9ea # build-e9bea055d71d86a461b8956e1e550398f8a8253d32539b253969bf6f17527a9d
     # The caller's token for applying, under the generic name both workflows
     # declare: only the apply job reads it, in the environment

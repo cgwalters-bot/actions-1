@@ -187,6 +187,63 @@ jobs:
       SAFE_OUTPUTS_PAT: ${{ secrets.CGWALTERS_BOT_PAT }}
 ```
 
+### Artifact-only research (dormant)
+
+The concrete threat is posting attacker-controlled supervisor requests as the
+bot before the trusted executor admits them. The caller-owned boolean
+`research-artifact-only` defaults to **false** and is accepted only with
+`kind: research`. It rejects implement, triage, fix, review and repository
+sessions; the `session` listener and `idle-minutes` remain refused too.
+The existing pinned policy/run/check path still enforces the caller's bounds,
+analysis-only tree and three-output ceiling. No supervisor decoder, admission,
+cap or ledger logic moves here.
+
+When opted in, **apply is never called**, even with an empty PAT (which ordinary
+apply would replace with the job token). No proposed effect is applied, including
+comments, missing-data/tool reports and noops. The apply environment is not
+required, and the PAT is not forwarded to policy. Policy notification is `none`:
+there is no start or final status comment or reaction. A fixed, bounded job
+summary and `research-status` report `ready` or `unavailable`, never agent prose.
+Ordinary calls and both review paths keep their existing behavior.
+
+Only successful target, admitted policy, successful agent with exit 0 and no
+reported early stop, and successful check with a checked artifact and no patch
+release identity outputs. Failed, missing or partial results are unavailable;
+budget/timeout hand-backs are not accepted in this mode. Cancellation may skip
+the reporting job and leave status empty. Treat empty status as unavailable too.
+An agent can misreport completion; `ready` is transport/check status, not a
+supervisor authorization or proof that its claims are true.
+
+For `ready`, `safe-outputs-artifact-id` and `safe-outputs-artifact-digest` name
+the **original untrusted upload**, not check's sanitized artifact. The digest is
+64 lowercase hex characters. `handback-repository`, `handback-run-id`,
+`handback-run-attempt` and `handback-agent-job` identify the current reporting
+attempt and producer (the last is the agent job's check run ID). No payload body
+is a workflow output. A trusted
+caller must bind these to its own expected repository/run/latest attempt and
+reviewed workflow revision, confirm the producer in that attempt's jobs API,
+and fetch artifact metadata **by ID**, requiring the same workflow run and
+`sha256:<digest>`. Download that ID with digest-mismatch failure, never by an
+unchecked artifact name. Partial reruns can retain an earlier attempt's agent
+outputs: reject them when the producer is absent from the reporting attempt,
+even if status is `ready`; start a new dispatch rather than consuming them.
+The archive's `outputs.jsonl` is attacker-controlled
+data, not shell, a configuration source or direct GitHub write authority.
+The pinned check already verifies the original ID/digest and same-run ownership;
+the caller's provenance checks must not substitute an artifact from another run.
+
+Tracker migration and activation remain outstanding (tracker#939). Its trusted
+`.github/workflows/supervisor.yml` caller must opt in only after downloading
+same-run requests for `supervise execute --requests FILE --ledger-out LEDGER`.
+Follow [agent-board's hand-back contract](https://github.com/cgwalters-forge/agent-board/blob/main/docs/supervisor-requests.md#hand-back):
+authenticate the newest prior executor ledger and its run, keep executor and
+agent artifacts separate, serialize executors, fail closed on missing or invalid
+ledger continuity, and persist reservations/ledger even after write failures.
+Prove that continuity before activation; merging this wrapper does not satisfy
+the deployment gate. For rollback to comment/result-url delivery, keep write
+caps at zero for a day to avoid undercounting the ledger's writes. This change
+enables no caller, settings, credentials, admission or live dispatch.
+
 ### Secondary pull requests
 
 The wrappers need no secondary-specific input. At the audited wrapper revision
