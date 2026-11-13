@@ -258,6 +258,86 @@ test('skills are off by default and the task keeps its one-line contract', async
   assert.match(outputs.task, /^Profile: implement\. Implement proposes one draft pull request\./);
 });
 
+test('artifact-only is default-off and admits only research without an apply environment', async () => {
+  assert.match(workflow, /research-artifact-only:\n {8}description: [^\n]*\n {8}type: boolean\n {8}default: false/);
+  assert.ok(job('target').includes('RESEARCH_ARTIFACT_ONLY: ${{ inputs.research-artifact-only }}'));
+  for (const profile of ['implement', 'triage', 'session', 'fix', 'review']) {
+    await assert.rejects(target({ PROFILE: profile, RESEARCH_ARTIFACT_ONLY: 'true' }), /requires kind research/);
+  }
+  await assert.rejects(target({ PROFILE: 'research', APPLY_ENVIRONMENT: '' }), /Missing the apply-environment/);
+  const outputs = await target({ PROFILE: 'research', RESEARCH_ARTIFACT_ONLY: 'true', APPLY_ENVIRONMENT: '' });
+  assert.match(outputs.task, /^Profile: research\./);
+  for (const env of [{ SESSION: 'true' }, { IDLE_MINUTES: '10' }]) {
+    await assert.rejects(target({ PROFILE: 'research', RESEARCH_ARTIFACT_ONLY: 'true', ...env }), /session and idle-minutes are refused/);
+  }
+});
+
+test('artifact-only skips every proposal effect and policy notification, not just PAT publication', () => {
+  assert.ok(job('apply').includes("always() && inputs.kind != 'review' && !inputs.research-artifact-only"));
+  assert.ok(job('policy').includes("SAFE_OUTPUTS_PAT: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && secrets.SAFE_OUTPUTS_PAT || '' }}"));
+  assert.ok(job('policy').includes("notify: ${{ (inputs.kind == 'review' || inputs.research-artifact-only) && 'none' || 'comment' }}"));
+  assert.ok(job('policy').includes("apply-environment: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}"));
+  assert.ok(job('policy').includes('apply-partial: ${{ !inputs.research-artifact-only && ('));
+  assert.ok(job('check').includes('safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}'));
+  assert.ok(job('check').includes('safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}'));
+  const handback = job('research-handback');
+  assert.ok(handback.includes("!cancelled() && inputs.research-artifact-only && inputs.kind == 'research'"));
+  assert.match(handback, /permissions: \{\}/);
+  assert.doesNotMatch(handback, /secrets\.|github\.token|download-artifact|checkout|run:/);
+  for (const [output, field] of [['research-status', 'status'], ['safe-outputs-artifact-id', 'artifact-id'],
+    ['safe-outputs-artifact-digest', 'artifact-digest'], ['handback-repository', 'repository'],
+    ['handback-run-id', 'run-id'], ['handback-run-attempt', 'run-attempt'], ['handback-agent-job', 'agent-job']]) {
+    assert.ok(workflow.includes(`value: \u0024{{ jobs.research-handback.outputs.${field} }}`), output);
+  }
+  assert.doesNotMatch(read('./cgwalters-review.yml'), /research-artifact-only|research-handback/);
+});
+
+test('hand-back releases original identity only after complete successful checked research', async () => {
+  const handbackScript = job('research-handback').split('          script: |\n')[1]
+    .split('\n').map(line => line.replace(/^ {12}/, '')).join('\n');
+  const original = {
+    target: { result: 'success', outputs: {} },
+    policy: { result: 'success', outputs: { admitted: 'true' } },
+    agent: { result: 'success', outputs: { exit: '0', job: '123',
+      'safe-outputs-artifact-id': '456', 'safe-outputs-artifact-digest': 'a'.repeat(64) } },
+    check: { result: 'success', outputs: { 'artifact-id': '789', 'artifact-digest': 'b'.repeat(64), 'has-patch': 'false' } },
+  };
+  const run = async needs => {
+    const outputs = {};
+    let summary;
+    const core = { setOutput: (k, v) => { outputs[k] = v; }, summary: {
+      addRaw: value => { summary = value; return { write: async () => {} }; },
+    } };
+    await new AsyncFunction('core', 'context', 'process', handbackScript)(core,
+      { repo: { owner: 'caller', repo: 'repo' } },
+      { env: { NEEDS: JSON.stringify(needs), GITHUB_RUN_ID: '12', GITHUB_RUN_ATTEMPT: '2' } });
+    assert.match(summary, /No proposals applied/);
+    return outputs;
+  };
+  assert.deepEqual(await run(original), { status: 'ready', 'artifact-id': '456', 'artifact-digest': 'a'.repeat(64),
+    repository: 'caller/repo', 'run-id': '12', 'run-attempt': '2', 'agent-job': '123' });
+  const refuse = async mutate => {
+    const needs = structuredClone(original);
+    mutate(needs);
+    assert.deepEqual(await run(needs), { status: 'unavailable' });
+  };
+  for (const name of ['target', 'policy', 'agent', 'check']) {
+    for (const result of ['failure', 'cancelled', 'skipped']) await refuse(n => { n[name].result = result; });
+  }
+  for (const exit of ['', '3', '124', '1']) await refuse(n => { n.agent.outputs.exit = exit; });
+  await refuse(n => { n.agent.outputs['stopped-early'] = 'true'; });
+  await refuse(n => { n.policy.outputs.admitted = 'false'; });
+  for (const value of ['', 'true']) await refuse(n => { n.check.outputs['has-patch'] = value; });
+  for (const [name, fields] of [['agent', ['safe-outputs-artifact-id', 'safe-outputs-artifact-digest', 'job']],
+    ['check', ['artifact-id', 'artifact-digest']]]) {
+    for (const field of fields) {
+      for (const value of ['', undefined, 'unchecked-name', '1\ninjected=true']) {
+        await refuse(n => { n[name].outputs[field] = value; });
+      }
+    }
+  }
+});
+
 test('skills turn on only for implement or fix with claude or opencode', async () => {
   for (const agent of ['claude', 'opencode']) {
     const outputs = await target({ SKILLS: 'true', AGENT: agent });
