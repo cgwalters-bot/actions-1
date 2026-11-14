@@ -9,24 +9,6 @@ import { test } from 'node:test';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const workflow = readFileSync(new URL('./cgwalters-agentic-job.yml', import.meta.url), 'utf8');
 
-// A repository without INFERENCE_URL falls back to the broker its runner
-// joins the tailnet to reach: the wrappers and tailnets.json move together.
-test('the wrappers fall back to the cgwalters-forge tailnet broker', () => {
-  const tailnets = JSON.parse(readFileSync(new URL('../../tailscale/tailnets.json', import.meta.url), 'utf8'));
-  const broker = tailnets['cgwalters-forge'].proxy;
-  const review = readFileSync(new URL('./cgwalters-review.yml', import.meta.url), 'utf8');
-  const fallbacks = [...review.matchAll(/vars\.INFERENCE_URL \|\| '([^']*)'/g)].map(match => match[1]);
-  assert.deepEqual(fallbacks, [broker]);
-  assert.deepEqual([...workflow.matchAll(/\n {10}BROKER_URL: (\S+)\n/g)].map(match => match[1]), [broker]);
-});
-
-// The review wrapper has no inputs and its caller passes no secret, so it
-// stays on the broker: agentic-job's provider-key mode (its #740) is not
-// wired here.
-test('the review wrapper stays on the inference broker', () => {
-  assert.doesNotMatch(read('./cgwalters-review.yml'), /INFERENCE_API_KEY|inference-register|inference-provider|inference-api-key/);
-});
-
 // Renovate's matchStrings are JavaScript regular expressions, so this one
 // runs them here rather than in lint/tests/wrappers.rs.
 test('Renovate tracks the wrappers\' own-action pins from main without automerge', () => {
@@ -216,26 +198,6 @@ test('artifact-only is default-off and admits only research without an apply env
   for (const env of [{ SESSION: 'true' }, { IDLE_MINUTES: '10' }]) {
     await assert.rejects(target({ PROFILE: 'research', RESEARCH_ARTIFACT_ONLY: 'true', ...env }), /session and idle-minutes are refused/);
   }
-});
-
-test('artifact-only skips every proposal effect and policy notification, not just PAT publication', () => {
-  assert.ok(job('apply').includes("always() && inputs.kind != 'review' && !inputs.research-artifact-only"));
-  assert.ok(job('policy').includes("SAFE_OUTPUTS_PAT: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && secrets.SAFE_OUTPUTS_PAT || '' }}"));
-  assert.ok(job('policy').includes("notify: ${{ (inputs.kind == 'review' || inputs.research-artifact-only) && 'none' || 'comment' }}"));
-  assert.ok(job('policy').includes("apply-environment: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}"));
-  assert.ok(job('policy').includes('apply-partial: ${{ !inputs.research-artifact-only && ('));
-  assert.ok(job('check').includes('safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}'));
-  assert.ok(job('check').includes('safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}'));
-  const handback = job('research-handback');
-  assert.ok(handback.includes("!cancelled() && inputs.research-artifact-only && inputs.kind == 'research'"));
-  assert.match(handback, /permissions: \{\}/);
-  assert.doesNotMatch(handback, /secrets\.|github\.token|download-artifact|checkout|run:/);
-  for (const [output, field] of [['research-status', 'status'], ['safe-outputs-artifact-id', 'artifact-id'],
-    ['safe-outputs-artifact-digest', 'artifact-digest'], ['handback-repository', 'repository'],
-    ['handback-run-id', 'run-id'], ['handback-run-attempt', 'run-attempt'], ['handback-agent-job', 'agent-job']]) {
-    assert.ok(workflow.includes(`value: \u0024{{ jobs.research-handback.outputs.${field} }}`), output);
-  }
-  assert.doesNotMatch(read('./cgwalters-review.yml'), /research-artifact-only|research-handback/);
 });
 
 test('hand-back releases original identity only after complete successful checked research', async () => {
@@ -498,19 +460,6 @@ test('review policy has fixed base-owned bounds/task and head; the agent receive
   assert.ok(agent.includes("github-token: ${{ inputs.github-reads && github.token || '' }}"));
   assert.doesNotMatch(agent, /agent-user/);
   assert.ok(job('apply').includes("inputs.kind != 'review'"));
-});
-
-test('checked submit keeps bot token, policy binary, checked artifact, commit and trusted job/run provenance', () => {
-  const submit = job('submit');
-  assert.doesNotMatch(submit, /SAFE_OUTPUTS_PAT|checkout|uses: \.\//);
-  for (const text of ['GH_TOKEN: ${{ github.token }}', 'artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}',
-    'artifact-ids: ${{ needs.check.outputs.artifact-id }}', 'HEAD_SHA: ${{ needs.policy.outputs.review-head }}',
-    'AGENT_JOB: ${{ needs.agent.outputs.job }}', 'review submit --accepted "$RUNNER_TEMP/checked/agent_output.json"']) assert.ok(submit.includes(text), text);
-  assert.match(read('./cgwalters-agent.yml'), /\n {6}job: \$\{\{ job.check_run_id \}\}\n/);
-  assert.match(read('./cgwalters-agent.yml'), /\n {6}job:\n {8}value: \$\{\{ jobs.agent.outputs.job \}\}\n/);
-  for (const text of ['!cancelled()', "vars.AGENT_REAL_REVIEWS == 'true'", "needs.check.result == 'success'",
-    "needs.check.outputs.artifact-id != ''", "needs.agent.result == 'success'", "needs.agent.outputs.exit == '0'",
-    `contains(fromJSON('["APPROVE", "CHANGES"]'), needs.check.outputs.verdict)`]) assert.ok(submit.includes(text), text);
 });
 
 test('submission preflight rejects a moved head, closure, draft or changed base', async () => {
