@@ -1,7 +1,7 @@
 //! The wrapper workflows' structure, read as text from .github/workflows,
 //! and the few steps of theirs that are shell, run through bash. The tests
 //! that execute the target job's github-script step or Renovate's regular
-//! expressions, and those about inference credentials, stay in
+//! expressions stay in
 //! cgwalters-agentic-job.test.mjs.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -178,6 +178,142 @@ fn job(workflow: &str, name: &str) -> String {
         .nth(1)
         .unwrap_or_else(|| panic!("no job {name}"));
     format!("\n{}", until_key(after, 2))
+}
+
+#[test]
+fn broker_defaults_follow_the_tailnet_configuration() {
+    let tailnets: serde_json::Value =
+        serde_json::from_str(&read("tailscale/tailnets.json")).unwrap();
+    let broker = tailnets["cgwalters-forge"]["proxy"].as_str().unwrap();
+    let review = read(REVIEW);
+    let fallbacks: Vec<_> = review
+        .split("vars.INFERENCE_URL || '")
+        .skip(1)
+        .map(|suffix| suffix.split_once('\'').unwrap().0)
+        .collect();
+    assert_eq!(fallbacks, [broker]);
+    let dispatch = read(AGENTIC_JOB);
+    assert_eq!(captures(&dispatch, "\n          BROKER_URL: "), [broker]);
+}
+
+#[test]
+fn review_stays_on_the_inference_broker() {
+    let review = read(REVIEW);
+    for forbidden in [
+        "INFERENCE_API_KEY",
+        "inference-register",
+        "inference-provider",
+        "inference-api-key",
+    ] {
+        assert!(!review.contains(forbidden), "unexpected {forbidden}");
+    }
+}
+
+#[test]
+fn artifact_only_skips_proposals_and_notifications() {
+    let workflow = read(AGENTIC_JOB);
+    for (name, required) in [
+        (
+            "apply",
+            "always() && inputs.kind != 'review' && !inputs.research-artifact-only",
+        ),
+        (
+            "policy",
+            "SAFE_OUTPUTS_PAT: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && secrets.SAFE_OUTPUTS_PAT || '' }}",
+        ),
+        (
+            "policy",
+            "notify: ${{ (inputs.kind == 'review' || inputs.research-artifact-only) && 'none' || 'comment' }}",
+        ),
+        (
+            "policy",
+            "apply-environment: ${{ inputs.kind != 'review' && !inputs.research-artifact-only && (inputs.apply-environment || vars.APPLY_ENVIRONMENT) || '' }}",
+        ),
+        (
+            "policy",
+            "apply-partial: ${{ !inputs.research-artifact-only && (",
+        ),
+        (
+            "check",
+            "safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}",
+        ),
+        (
+            "check",
+            "safe-outputs-artifact-digest: ${{ needs.agent.outputs.safe-outputs-artifact-digest }}",
+        ),
+        (
+            "research-handback",
+            "!cancelled() && inputs.research-artifact-only && inputs.kind == 'research'",
+        ),
+        ("research-handback", "permissions: {}"),
+    ] {
+        assert!(
+            job(&workflow, name).contains(required),
+            "{name}: missing {required}"
+        );
+    }
+    let handback = job(&workflow, "research-handback");
+    for forbidden in [
+        "secrets.",
+        "github.token",
+        "download-artifact",
+        "checkout",
+        "run:",
+    ] {
+        assert!(
+            !handback.contains(forbidden),
+            "handback contains {forbidden}"
+        );
+    }
+    let parsed = YamlLoader::load_from_str(&workflow).unwrap();
+    for (output, field) in [
+        ("research-status", "status"),
+        ("safe-outputs-artifact-id", "artifact-id"),
+        ("safe-outputs-artifact-digest", "artifact-digest"),
+        ("handback-repository", "repository"),
+        ("handback-run-id", "run-id"),
+        ("handback-run-attempt", "run-attempt"),
+        ("handback-agent-job", "agent-job"),
+    ] {
+        assert_eq!(
+            parsed[0]["on"]["workflow_call"]["outputs"][output]["value"].as_str(),
+            Some(format!("${{{{ jobs.research-handback.outputs.{field} }}}}").as_str()),
+            "{output}",
+        );
+    }
+    let review = read(REVIEW);
+    for forbidden in ["research-artifact-only", "research-handback"] {
+        assert!(!review.contains(forbidden), "review contains {forbidden}");
+    }
+}
+
+#[test]
+fn checked_submit_preserves_credentials_and_provenance() {
+    let workflow = read(AGENTIC_JOB);
+    let submit = job(&workflow, "submit");
+    for forbidden in ["SAFE_OUTPUTS_PAT", "checkout", "uses: ./"] {
+        assert!(!submit.contains(forbidden), "submit contains {forbidden}");
+    }
+    for required in [
+        "GH_TOKEN: ${{ github.token }}",
+        "artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }}",
+        "artifact-ids: ${{ needs.check.outputs.artifact-id }}",
+        "HEAD_SHA: ${{ needs.policy.outputs.review-head }}",
+        "AGENT_JOB: ${{ needs.agent.outputs.job }}",
+        "review submit --accepted \"$RUNNER_TEMP/checked/agent_output.json\"",
+        "!cancelled()",
+        "vars.AGENT_REAL_REVIEWS == 'true'",
+        "needs.check.result == 'success'",
+        "needs.check.outputs.artifact-id != ''",
+        "needs.agent.result == 'success'",
+        "needs.agent.outputs.exit == '0'",
+        "contains(fromJSON('[\"APPROVE\", \"CHANGES\"]'), needs.check.outputs.verdict)",
+    ] {
+        assert!(submit.contains(required), "submit missing {required}");
+    }
+    let agent = read(AGENT);
+    assert!(agent.contains(&line(6, "job: ${{ job.check_run_id }}")));
+    assert!(agent.contains("\n      job:\n        value: ${{ jobs.agent.outputs.job }}\n"));
 }
 
 struct Job {

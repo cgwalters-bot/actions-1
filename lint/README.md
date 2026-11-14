@@ -55,6 +55,15 @@ commas; `ubuntu-latest` stays on it whatever the input says.
 
 ## Locally
 
+`just test-lint` also runs `tests/wrappers.rs` without Node: its structural
+contracts include tailnet broker defaults, broker-only review, artifact-only
+research's no-publication wiring and checked-submit provenance. The research
+outputs are checked by YAML key, so swapping two output names cannot pass.
+These are static wiring checks, not live broker or publication tests. The
+JavaScript execution tests (including research hand-back and submit preflight)
+and Renovate's JavaScript-regex tests remain in the Node suite, alongside
+review-policy assertions.
+
 `just test-lint` includes the Rust register-preflight harness in
 `tests/register_preflight.rs`. It needs Python 3.11+ (`tomllib`) to execute
 both wrappers' actual Python steps against temporary configuration files,
