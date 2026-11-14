@@ -31,6 +31,11 @@ token lasts an hour and is revoked when the job ends. Mint it only in a step tha
 runs no agent or other untrusted code; agents keep the read-only job
 token.
 
+`just test-lint` tests the action's scope guard and permission wiring in Rust,
+executing the real Bash guard and reading remint's permission list with Node.
+`node --test app-token/remint.test.mjs` covers the runtime helper with generated
+keys and mocked API responses. Neither suite mints a real installation token.
+
 ## Steps longer than the token
 
 A step that may run past the hour gets a fresh token from `remint.mjs`,

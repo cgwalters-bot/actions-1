@@ -93,6 +93,13 @@ join/hardening/mint ordering, matching federated settings and key output.
 No credentials or network are needed; `tailscale/mint.test.mjs` retains the
 runtime HTTP exchange and key-validation tests until the helper port ships.
 
+App-token's scope guard and permission forwarding run in
+`tests/app_token_action.rs`. The Rust harness executes the actual Bash guard,
+including Unicode whitespace refusals, and checks the parsed action's pin and
+permission wiring. Node is still required to read remint's exported permission
+list; its signing, cache and HTTP tests remain in `app-token/remint.test.mjs`.
+No token is minted and no network call is made by the action-contract tests.
+
 ```sh
 just --justfile path/to/actions/lint/Justfile --working-directory . check
 ```
