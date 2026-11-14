@@ -1,1 +1,1 @@
-FROM ghcr.io/cgwalters-forge/secure-host:v0.6.13@sha256:24b1d90cdfa7b1941cd898801fdeddda90d7a8de9a69f886f43181f6c597cf8e
+FROM ghcr.io/cgwalters-forge/secure-host:v0.6.14@sha256:02e5f14ff420da99004ddc3bea4dd6d4a521051389736416cd737e9f51525a42
