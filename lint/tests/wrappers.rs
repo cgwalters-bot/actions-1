@@ -18,6 +18,104 @@ const REVIEW_CALLER: &str = ".github/workflows/review.yml";
 // Both wrappers' agent job, called by local path.
 const AGENT: &str = ".github/workflows/cgwalters-agent.yml";
 
+// Keep refused legacy inputs declared so callers get an actionable target
+// error, but never forward a provider credential or session listener to the
+// runner-only agent. The executable refusal cases remain in the Node suite.
+#[test]
+fn runner_only_refused_inputs_and_credential_wiring() {
+    let text = read(AGENTIC_JOB);
+    let workflow = YamlLoader::load_from_str(&text).unwrap().remove(0);
+    let call = &workflow["on"]["workflow_call"];
+    for (name, kind, default) in [
+        ("session", "boolean", Yaml::Boolean(false)),
+        ("idle-minutes", "string", Yaml::String(String::new())),
+        (
+            "inference-register",
+            "string",
+            Yaml::String("github-oidc".into()),
+        ),
+        ("inference-provider", "string", Yaml::String(String::new())),
+    ] {
+        let input = &call["inputs"][name];
+        assert_eq!(input["type"].as_str(), Some(kind), "{name}");
+        assert_eq!(input["default"], default, "{name}");
+        assert!(!input["description"].as_str().unwrap().is_empty(), "{name}");
+    }
+    assert_eq!(
+        call["secrets"]["INFERENCE_API_KEY"]["required"],
+        Yaml::Boolean(false)
+    );
+    // Exactly one reference, reduced to a boolean before entering the script.
+    assert_eq!(captures(&text, "secrets.INFERENCE_API_KEY"), [" != '' }}"]);
+    let target = &workflow["jobs"]["target"];
+    let envs: Vec<_> = target["steps"]
+        .as_vec()
+        .unwrap()
+        .iter()
+        .filter_map(|step| step["env"]["INFERENCE_API_KEY_SET"].as_str())
+        .collect();
+    assert_eq!(envs, ["${{ secrets.INFERENCE_API_KEY != '' }}"]);
+    assert_eq!(
+        workflow["jobs"]["policy"]["with"]["inference-register"].as_str(),
+        Some("github-oidc")
+    );
+    let policy = job(&text, "policy");
+    for forbidden in [
+        line(6, "session:"),
+        "idle-minutes".into(),
+        "inference-provider".into(),
+    ] {
+        assert!(!policy.contains(&forbidden), "policy: {forbidden}");
+    }
+    assert!(workflow["jobs"]["policy"]["with"]["session"].is_badvalue());
+    assert!(workflow["jobs"]["agent"]["with"]["session"].is_badvalue());
+    for forbidden in [
+        "TAILNET_DOMAIN",
+        "session-host",
+        "session-endpoint",
+        "inference-api-key",
+    ] {
+        assert!(!text.contains(forbidden), "{forbidden}");
+    }
+    let agent = read(AGENT);
+    for forbidden in [
+        "inputs.session",
+        "statedir:",
+        "inference-api-key",
+        "mcp-token",
+        "agent-user",
+        "INFERENCE_API_KEY",
+    ] {
+        assert!(!agent.contains(forbidden), "agent: {forbidden}");
+    }
+}
+
+#[test]
+fn inference_defaults_remain_coupled_in_the_target_script() {
+    let text = read(AGENTIC_JOB);
+    let workflow = YamlLoader::load_from_str(&text).unwrap().remove(0);
+    let steps = workflow["jobs"]["target"]["steps"].as_vec().unwrap();
+    let step = steps
+        .iter()
+        .find(|step| !step["env"]["INFERENCE_URL"].is_badvalue())
+        .unwrap();
+    // Independent fallbacks here could send our audience to another URL;
+    // the target script must choose the URL/audience pair together instead.
+    for (name, expected) in [
+        (
+            "INFERENCE_URL",
+            "${{ inputs.inference-url || vars.INFERENCE_URL }}",
+        ),
+        (
+            "INFERENCE_AUDIENCE",
+            "${{ inputs.inference-audience || vars.INFERENCE_AUDIENCE }}",
+        ),
+        ("INFERENCE_REGISTER", "${{ inputs.inference-register }}"),
+    ] {
+        assert_eq!(step["env"][name].as_str(), Some(expected), "{name}");
+    }
+}
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
