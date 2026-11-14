@@ -55,6 +55,14 @@ commas; `ubuntu-latest` stays on it whatever the input says.
 
 ## Locally
 
+`just test-lint` includes the Rust register-preflight harness in
+`tests/register_preflight.rs`. It needs Python 3.11+ (`tomllib`) to execute
+both wrappers' actual Python steps against temporary configuration files,
+checking credential ordering, child-agent refusal, malformed/missing input,
+the 1-MiB boundary and unchanged file contents. It acquires no credentials
+and makes no network calls. The target job's JavaScript and its Node tests
+remain separate until the production helper delivery is available.
+
 ```sh
 just --justfile path/to/actions/lint/Justfile --working-directory . check
 ```
