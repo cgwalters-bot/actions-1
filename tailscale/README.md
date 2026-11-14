@@ -113,6 +113,14 @@ standing mint credentials to work around this limitation.
 
 ## Checking a tailnet's setup
 
+`just test-lint` runs the mint protocol tests in Rust, invoking the shipped
+`mint.mjs` through a small Node bridge with synthetic Fetch responses. They
+cover the OIDC exchange, single-use ephemeral key request, debug refusal,
+malformed credentials and failures at each HTTP stage without real credentials
+or network access. Node remains required until the production helper is ported;
+these tests do not prove a live federation or tailnet join. For only this suite,
+run `cargo test --locked --manifest-path lint/Cargo.toml --test tailscale_mint`.
+
 With `check: 'true'` the action, after joining, exchanges a fresh OIDC
 token to print the scopes Tailscale grants it, and sends the proxy a
 `POST /v1/runs` without a token, which has to answer HTTP 401. No token
