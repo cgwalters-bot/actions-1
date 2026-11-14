@@ -1227,8 +1227,6 @@ const FAKE_SUDO: &str = r#"#!/bin/sh
 // does so before the first checkout, which needs git.
 #[test]
 fn only_rhel_10_installs_git_node_and_gh_and_links_agentic_job_into_sudos_path() {
-    use std::os::unix::fs::PermissionsExt;
-
     let agent = job(&read(AGENT), "agent");
     let step = agent
         .split("      - name: Install RHEL prerequisites\n")
@@ -1249,13 +1247,6 @@ fn only_rhel_10_installs_git_node_and_gh_and_links_agentic_job_into_sudos_path()
         .map(|line| line.strip_prefix("          ").unwrap_or(line))
         .collect::<Vec<_>>()
         .join("\n");
-    let home = std::env::var_os("HOME").expect("HOME");
-    let directory = TempDir::new(Path::new(&home), "agent-prerequisites");
-    let log = directory.0.join("calls");
-    let os_release = directory.0.join("os-release");
-    let sudo = directory.0.join("sudo");
-    fs::write(&sudo, FAKE_SUDO).unwrap();
-    fs::set_permissions(&sudo, fs::Permissions::from_mode(0o700)).unwrap();
     let rhel: &[&[&str]] = &[
         &["dnf", "install", "-y", "git", "nodejs", "podman"],
         &[
@@ -1272,6 +1263,62 @@ fn only_rhel_10_installs_git_node_and_gh_and_links_agentic_job_into_sudos_path()
             "/usr/bin/agentic-job",
         ],
     ];
+    check_rhel_prerequisites(&script, rhel);
+}
+
+#[test]
+fn only_rhel_10_installs_iptables_and_links_tailscale_into_sudos_path() {
+    let action = YamlLoader::load_from_str(&read("tailscale/action.yml"))
+        .unwrap()
+        .remove(0);
+    let steps = action["runs"]["steps"].as_vec().unwrap();
+    let index = |name| {
+        steps
+            .iter()
+            .position(|step| step["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("missing step {name}"))
+    };
+    let prerequisites = index("Install RHEL prerequisites");
+    assert!(prerequisites < index("Connect to the tailnet"));
+    let step = &steps[prerequisites];
+    assert_eq!(step["env"]["OS_RELEASE"].as_str(), Some("/etc/os-release"));
+    assert_eq!(step["shell"].as_str(), Some("bash"));
+    assert!(
+        step["if"].is_badvalue(),
+        "prerequisites must run on every OS"
+    );
+    check_rhel_prerequisites(
+        step["run"].as_str().expect("prerequisites run script"),
+        &[
+            &["dnf", "install", "-y", "iptables"],
+            &[
+                "ln",
+                "-sfn",
+                "/usr/local/bin/tailscale",
+                "/usr/bin/tailscale",
+            ],
+            &[
+                "ln",
+                "-sfn",
+                "/usr/local/bin/tailscaled",
+                "/usr/bin/tailscaled",
+            ],
+        ],
+    );
+}
+
+// Run the actual shell from each caller, not a Rust model of its OS check.
+// The sudo double records ordered argv without installing or linking anything.
+fn check_rhel_prerequisites(script: &str, rhel: &[&[&str]]) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = std::env::var_os("HOME").expect("HOME");
+    let directory = TempDir::new(Path::new(&home), "rhel-prerequisites");
+    let log = directory.0.join("calls");
+    let os_release = directory.0.join("os-release");
+    let sudo = directory.0.join("sudo");
+    fs::write(&sudo, FAKE_SUDO).unwrap();
+    fs::set_permissions(&sudo, fs::Permissions::from_mode(0o700)).unwrap();
     let path = format!(
         "{}:{}",
         directory.0.display(),
@@ -1285,12 +1332,16 @@ fn only_rhel_10_installs_git_node_and_gh_and_links_agentic_job_into_sudos_path()
             rhel,
         ),
         (Some("ID=rhel\nVERSION_ID=10\n"), rhel),
+        (Some("ID=rhel\nVERSION_ID=10.1\n"), rhel),
+        (Some("NAME=Ubuntu\nID=ubuntu\nVERSION_ID=24.04\n"), &[]),
         (
             Some("NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID=\"26.04\"\n"),
             &[],
         ),
         (Some("ID=\"rhel\"\nVERSION_ID=\"9.6\"\n"), &[]),
         (Some("ID=\"rhel\"\nVERSION_ID=\"100\"\n"), &[]),
+        (Some("ID=rhel\n"), &[]),
+        (Some("VERSION_ID=10\n"), &[]),
         (
             Some("ID=\"centos\"\nID_LIKE=\"rhel fedora\"\nVERSION_ID=\"10\"\n"),
             &[],
@@ -1307,7 +1358,7 @@ fn only_rhel_10_installs_git_node_and_gh_and_links_agentic_job_into_sudos_path()
         fs::write(&log, "").unwrap();
         let result = Command::new("bash")
             .args(["--noprofile", "--norc", "-e", "-o", "pipefail", "-c"])
-            .arg(&script)
+            .arg(script)
             .env("PATH", &path)
             .env("CALL_LOG", &log)
             .env("OS_RELEASE", &os_release)
