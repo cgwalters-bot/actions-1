@@ -446,22 +446,6 @@ test('review admission keeps association, immutable bot id AND base bounds, and 
   await assert.rejects(review({}, { pr: outsider, comments: Array(100).fill(comments[0]) }), /history exceeds/);
 });
 
-test('review policy has fixed base-owned bounds/task and head; the agent receives no credential or privileged head checkout', () => {
-  const policy = job('policy');
-  for (const text of ["review-head: ${{ inputs.kind == 'review' && inputs.head || '' }}", 'review-task: workflow/review.md',
-    "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow", "inputs.kind == 'review' && needs.target.outputs.review-config",
-    "budget: ${{ inputs.kind == 'review' && '500'", "timeout: '75'"]) assert.ok(policy.includes(text), text);
-  assert.ok(job('agent').includes("\n      github-reads: ${{ inputs.kind != 'review' }}\n"));
-  assert.ok(job('agent').includes('\n    uses: ./.github/workflows/cgwalters-agent.yml\n'));
-  const agent = read('./cgwalters-agent.yml');
-  assert.equal([...agent.matchAll(/uses: actions\/checkout@/g)].length, 2);
-  assert.match(agent, /ref: \$\{\{ fromJSON\(inputs.policy\).ref \}\}/);
-  assert.doesNotMatch(agent, /ref:.*(?:head|inputs\.(?!policy\)))|git fetch|pulls\//);
-  assert.ok(agent.includes("github-token: ${{ inputs.github-reads && github.token || '' }}"));
-  assert.doesNotMatch(agent, /agent-user/);
-  assert.ok(job('apply').includes("inputs.kind != 'review'"));
-});
-
 test('submission preflight rejects a moved head, closure, draft or changed base', async () => {
   const preflight = job('submit').split('          script: |\n')[1].split('\n      - name:')[0]
     .split('\n').map(line => line.replace(/^ {12}/, '')).join('\n');

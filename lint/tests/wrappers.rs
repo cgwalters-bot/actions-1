@@ -181,6 +181,54 @@ fn job(workflow: &str, name: &str) -> String {
 }
 
 #[test]
+fn dispatched_review_keeps_base_policy_and_credential_free_head_access() {
+    let workflow = read(AGENTIC_JOB);
+    let policy = job(&workflow, "policy");
+    for required in [
+        "review-head: ${{ inputs.kind == 'review' && inputs.head || '' }}",
+        "review-task: workflow/review.md",
+        "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow",
+        "inputs.kind == 'review' && needs.target.outputs.review-config",
+        "budget: ${{ inputs.kind == 'review' && '500'",
+        "timeout: '75'",
+    ] {
+        assert!(policy.contains(required), "policy must retain {required}");
+    }
+    let agent_job = job(&workflow, "agent");
+    for required in [
+        line(6, "github-reads: ${{ inputs.kind != 'review' }}"),
+        line(4, "uses: ./.github/workflows/cgwalters-agent.yml"),
+    ] {
+        assert!(
+            agent_job.contains(&required),
+            "agent must retain {required}"
+        );
+    }
+    let agent = read(AGENT);
+    assert_eq!(agent.matches("uses: actions/checkout@").count(), 2);
+    // Both privileged checkouts come from policy, never a PR head or another
+    // caller input. Check every ref, not merely the presence of one safe ref.
+    assert_eq!(
+        agent
+            .lines()
+            .filter_map(|line| line.trim_start().strip_prefix("ref: "))
+            .collect::<Vec<_>>(),
+        [
+            "${{ fromJSON(inputs.policy).ref }}",
+            "${{ fromJSON(inputs.policy).source-sha }}",
+        ]
+    );
+    for forbidden in ["git fetch", "pulls/", "agent-user"] {
+        assert!(
+            !agent.contains(forbidden),
+            "agent must not contain {forbidden}"
+        );
+    }
+    assert!(agent.contains("github-token: ${{ inputs.github-reads && github.token || '' }}"));
+    assert!(job(&workflow, "apply").contains("inputs.kind != 'review'"));
+}
+
+#[test]
 fn broker_defaults_follow_the_tailnet_configuration() {
     let tailnets: serde_json::Value =
         serde_json::from_str(&read("tailscale/tailnets.json")).unwrap();
