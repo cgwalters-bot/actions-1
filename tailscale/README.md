@@ -113,6 +113,13 @@ standing mint credentials to work around this limitation.
 
 ## Checking a tailnet's setup
 
+`just test-lint` also runs `lint/tests/tailscale_check.rs`, which replaces the
+JavaScript check test suite. Its bounded Node bridge exercises the shipped
+`check.mjs` offline: audience replacement, scope-only logging, an unauthenticated
+proxy POST with redirects refused, and early failure on bad responses. Run it
+alone with `cargo test --locked --manifest-path lint/Cargo.toml --test tailscale_check`.
+It checks request signals, not elapsed timeout behavior or live connectivity.
+
 `just test-lint` runs the mint protocol tests in Rust, invoking the shipped
 `mint.mjs` through a small Node bridge with synthetic Fetch responses. They
 cover the OIDC exchange, single-use ephemeral key request, debug refusal,
