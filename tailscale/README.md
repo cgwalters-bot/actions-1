@@ -103,6 +103,14 @@ masked value, and nothing prints it; with step debug logging on the
 runner would log it as it is set, so `mint` then refuses. `mint` with
 `authkey` is refused too.
 
+Keys are valid for one hour **from minting**, not from the later job's start.
+A queue or runner-capacity wait uses that lifetime. Re-running just the later
+job can reuse the earlier job's output: it does not mint a new key, and a
+successful earlier join has already spent it. For the agent wrappers,
+[re-run all jobs](../README.md#retry-recovery) after clearing the queue so the
+trusted register job issues a new key. Do not give the untrusted job OIDC or
+standing mint credentials to work around this limitation.
+
 ## Checking a tailnet's setup
 
 With `check: 'true'` the action, after joining, exchanges a fresh OIDC

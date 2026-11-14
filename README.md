@@ -81,8 +81,9 @@ a single-use ephemeral key for the agent job's join
 registers the run at the broker with the policy job's binary. Both values
 reach the agent job only as secrets of its call, which masks them in its
 log; the agent job is called by local path, so at the wrapper's commit.
-Re-running only a failed agent job fails at the join, since the first
-attempt spent the key: re-run all jobs. The agent job then runs upstream's agent.yml sequence: prepare,
+Re-running only a failed agent job can reuse a spent key: use **Re-run all
+jobs**, not **Re-run failed jobs** (see [retry recovery](#retry-recovery)).
+The agent job then runs upstream's agent.yml sequence: prepare,
 agentic-job's runner-user admission, the join, the reachability check,
 `agentic-job config --host` (with no `setup.script`), the pinned
 `secure-host` forwarder, the setup script as the runner's user, and `run`
@@ -120,13 +121,39 @@ malformed or over-1-MiB configuration fails closed, as does any top-level
 no opt-in, automatic child removal or fallback experiment: remove the child
 configuration explicitly or wait for supported ACP.
 
-This is only the early ACP refusal slice of #219. Session work is separate
+The early ACP refusal slice of #219 landed in #227. Session work is separate
 in #225; this pin still refuses session listeners, and this change enables
 neither sessions nor a second user. #220 proposes an actionable pre-join
 refusal for spent/expired keys with the re-run-all-jobs mitigation, not fresh
 keys per attempt. Queue expiry is still unfixed: a review queued for over
 an hour can hold an expired key. KVM access and self-pin policy remain
 separate #219 checklist items too.
+
+### Retry recovery
+
+The supported retry contract is to **re-run all jobs**, so policy and the
+trusted register job run again and issue a new single-use tailnet key. Do
+not re-run only the agent job or use **Re-run failed jobs**: GitHub can retain
+the successful register job's outputs from the previous attempt. Even if the
+earlier agent failed before joining and never spent its key, that key still
+expires one hour after minting.
+
+A `/review` also acquires its key before waiting for per-PR agent concurrency.
+If that wait exceeds an hour, let the older review finish, then re-run all
+jobs for the failed review. A fresh authorized `/review` after the older run
+finishes is another way to start with new registration. Runner-capacity waits
+can also exhaust the hour; neither recovery guarantees a join if the new run
+waits that long again. Avoid repeatedly retrying while the queue is blocked.
+
+For #219, retain this recovery contract rather than grant a broker new
+tailnet-key issuance authority. This does not refresh credentials at actual
+agent start or fix long queues. Keep OIDC and standing mint credentials out
+of the agent job; do not make keys reusable or extend their lifetime as a
+workaround. #220's open pre-join diagnostics are separate, not implemented
+here. Fresh-attempt issuance, live delayed-start/rerun acceptance, RHEL KVM
+verification and self-pin lint policy remain outstanding.
+
+### Session limitations
 
 Session listener support requires a compatible agentic-job pin first: the
 current pin rejects `session.listen` in both runner admission and `run`.
