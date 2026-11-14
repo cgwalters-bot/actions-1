@@ -6,9 +6,9 @@ lint:
 test-lint:
     {{ just_executable() }} --justfile lint/Justfile test
 
-# secure-host's egress probe; the Rust lint suite tests read-probe and action steps.
+# Focused offline probe tests (also included in test-lint); Node is still required.
 test-secure-host:
-    node --test secure-host/*.test.mjs
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-{{ cache_directory() }}/forge-lint}" cargo test --locked --manifest-path lint/Cargo.toml --test egress_probe --test read_probe
 
 renovate := "renovate@44.198.3"
 
