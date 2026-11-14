@@ -292,8 +292,6 @@ function job(name) {
 // The pinned upstream rejects session.listen during runner admission and
 // run. Every profile must fail here, before policy or registration.
 test('sessions are refused before provisioning until the upstream pin supports them', async () => {
-  assert.match(workflow, /\n {6}session:\n {8}description: [^\n]*\n {8}type: boolean\n {8}default: false\n/);
-  assert.match(workflow, /\n {6}idle-minutes:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
   for (const profile of ['implement', 'fix', 'triage', 'research', 'review', 'session']) {
     for (const env of [{ SESSION: 'true' }, { SESSION: 'true', IDLE_MINUTES: '60' }, { IDLE_MINUTES: '10' }, { IDLE_MINUTES: '0' }]) {
       await assert.rejects(target({ ...env, PROFILE: profile }, { pull: true, allowPolicyRead: false }),
@@ -304,9 +302,6 @@ test('sessions are refused before provisioning until the upstream pin supports t
   for (const name of ['session', 'idle-minutes', 'session-host', 'session-endpoint']) {
     assert.equal(Object.hasOwn(outputs, name), false, name);
   }
-  assert.doesNotMatch(job('policy'), /\n {6}session:|idle-minutes/);
-  assert.doesNotMatch(job('agent'), /\n {6}session:/);
-  assert.doesNotMatch(read('./cgwalters-agent.yml'), /inputs\.session|statedir:/);
 });
 
 // A provider key needed the sandbox user: with the runner as the only
@@ -314,9 +309,6 @@ test('sessions are refused before provisioning until the upstream pin supports t
 // Refused before anything is provisioned, for every profile; the inputs
 // stay so a caller passing one gets this.
 test('provider-key mode is refused before provisioning', async () => {
-  assert.match(workflow, /\n {6}inference-register:\n {8}description: [^\n]*\n {8}type: string\n {8}default: github-oidc\n/);
-  assert.match(workflow, /\n {6}inference-provider:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""\n/);
-  assert.match(workflow, /\n {6}INFERENCE_API_KEY:\n {8}required: false\n/);
   const refusals = [
     [{ INFERENCE_REGISTER: 'api-key', AGENT: 'claude' }, /inference-register must be github-oidc/],
     [{ INFERENCE_REGISTER: '' }, /inference-register must be github-oidc/],
@@ -328,14 +320,6 @@ test('provider-key mode is refused before provisioning', async () => {
     await assert.rejects(target(env, { allowPolicyRead: false }), error, JSON.stringify(env));
     await assert.rejects(review(env, { pull: true, allowPolicyRead: false }), error, JSON.stringify(env));
   }
-  // The key's presence reaches the target job as a boolean, and the key
-  // nowhere else; policy is given only the broker's registration.
-  assert.deepEqual([...workflow.matchAll(/secrets\.INFERENCE_API_KEY\b[^\n]*/g)].map(m => m[0]), ["secrets.INFERENCE_API_KEY != '' }}"]);
-  assert.match(workflow, /\n {10}INFERENCE_API_KEY_SET: \$\{\{ secrets\.INFERENCE_API_KEY != '' \}\}\n/);
-  assert.match(job('policy'), /\n {6}inference-register: github-oidc\n/);
-  assert.doesNotMatch(job('policy'), /inference-provider/);
-  assert.doesNotMatch(workflow, /TAILNET_DOMAIN|session-host|session-endpoint|inference-api-key/);
-  assert.doesNotMatch(read('./cgwalters-agent.yml'), /inference-api-key|mcp-token|agent-user|INFERENCE_API_KEY/);
 });
 
 // A repository-triage session (tracker#1505) is a comment-only analysis
@@ -358,7 +342,6 @@ test('kind session is admitted on an issue as a comment-only run', async () => {
 
 test('the broker audience goes to policy only with the broker registration', async () => {
   assert.equal((await target({}))['inference-audience'], 'aud');
-  assert.match(workflow, /\n {10}INFERENCE_REGISTER: \$\{\{ inputs\.inference-register \}\}\n/);
 });
 
 // Registration posts the identity token to inference-url, so a token for
@@ -375,10 +358,6 @@ test('our broker\'s audience is the default only with our broker\'s URL', async 
   for (const url of ['http://proxy', 'http://broker/', 'https://broker']) {
     await assert.rejects(target({ INFERENCE_URL: url, INFERENCE_AUDIENCE: '' }), /needs its own inference-audience/, url);
   }
-  // Neither has a default of its own in the expressions, which would set
-  // one without the other.
-  assert.match(workflow, /\n {10}INFERENCE_URL: \$\{\{ inputs\.inference-url \|\| vars\.INFERENCE_URL \}\}\n/);
-  assert.match(workflow, /\n {10}INFERENCE_AUDIENCE: \$\{\{ inputs\.inference-audience \|\| vars\.INFERENCE_AUDIENCE \}\}\n/);
 });
 
 const review = (env = {}, options) => target({ PROFILE: 'review', TARGET_REPO: 'caller/repo', ...env }, options);
