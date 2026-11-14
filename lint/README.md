@@ -77,7 +77,14 @@ harness in `tests/wrappers.rs`, run by `just test-lint` in CI. It executes
 the actual Bash steps with fixture OS releases and a recording sudo double,
 checking exact ordered arguments without installing packages or making
 system links. This replaces `tailscale/prerequisites.test.mjs`; the action's
-runtime JavaScript and its other Node tests remain unchanged.
+runtime JavaScript remains unchanged.
+
+The same suite replaces `tailscale/hardening.test.mjs`, executing the action's
+actual hardening shell with a Python sudo recorder (no root or network needed).
+It checks always-run wiring after the join, exact ordered arguments for both
+join outcomes, absent CLI/socket directories and failure of either chmod.
+This tests shell control flow, not kernel permissions or a live tailnet join;
+the runtime JavaScript tests remain in the Node suite.
 
 ```sh
 just --justfile path/to/actions/lint/Justfile --working-directory . check

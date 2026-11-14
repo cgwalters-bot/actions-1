@@ -1307,6 +1307,104 @@ fn only_rhel_10_installs_iptables_and_links_tailscale_into_sudos_path() {
     );
 }
 
+#[test]
+fn tailscale_hardening_runs_after_successful_and_failed_joins() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let action = YamlLoader::load_from_str(&read("tailscale/action.yml"))
+        .unwrap()
+        .remove(0);
+    let steps = action["runs"]["steps"].as_vec().unwrap();
+    let index = steps
+        .iter()
+        .position(|step| step["name"].as_str() == Some("Make tailscaled's LocalAPI root's only"))
+        .expect("LocalAPI hardening step");
+    assert_eq!(steps[index - 1]["id"].as_str(), Some("join"));
+    let step = &steps[index];
+    assert_eq!(step["if"].as_str(), Some("always()"));
+    assert_eq!(step["shell"].as_str(), Some("bash"));
+    assert_eq!(
+        step["env"]["JOINED"].as_str(),
+        Some("${{ steps.join.outcome == 'success' }}")
+    );
+
+    // Record exact argv as JSON; never invoke sudo or change host permissions.
+    const SUDO: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ['CALL_LOG'], 'a') as log: log.write(json.dumps(args) + '\n')
+if args[0] == 'test': sys.exit(0 if os.environ['CLI_EXISTS' if args[1] == '-f' else 'DIRECTORY_EXISTS'] == 'true' else 1)
+if args[0] == 'chmod' and args[2] == os.environ['FAIL_CHMOD']: sys.exit(1)
+if args[0] == 'stat': print('700 root:root')
+"#;
+    let home = std::env::var_os("HOME").expect("HOME");
+    let directory = TempDir::new(Path::new(&home), "tailscale-hardening");
+    let sudo = directory.0.join("sudo");
+    fs::write(&sudo, SUDO).unwrap();
+    fs::set_permissions(&sudo, fs::Permissions::from_mode(0o700)).unwrap();
+    let log = directory.0.join("calls");
+    let path = std::env::join_paths(
+        std::iter::once(directory.0.clone())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    const CLI: &str = "/usr/local/bin/tailscale";
+    const SOCKET_DIR: &str = "/var/run/tailscale";
+    for joined in [false, true] {
+        for (cli, socket_dir, fail_chmod) in [
+            (true, true, ""),
+            (false, false, ""),
+            (true, false, ""),
+            (false, true, ""),
+            (true, true, CLI),
+            (true, true, SOCKET_DIR),
+        ] {
+            fs::write(&log, "").unwrap();
+            let result = Command::new("bash")
+                .args(["--noprofile", "--norc", "-e", "-o", "pipefail", "-c"])
+                .arg(step["run"].as_str().expect("hardening script"))
+                .env("PATH", &path)
+                .env("CALL_LOG", &log)
+                .env("JOINED", joined.to_string())
+                .env("CLI_EXISTS", cli.to_string())
+                .env("DIRECTORY_EXISTS", socket_dir.to_string())
+                .env("FAIL_CHMOD", fail_chmod)
+                .output()
+                .expect("bash");
+            let scenario =
+                format!("joined={joined}, cli={cli}, directory={socket_dir}, fail={fail_chmod}");
+            assert_eq!(
+                result.status.code(),
+                Some(if fail_chmod.is_empty() { 0 } else { 1 }),
+                "{scenario}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let mut expected = vec![vec!["test", "-f", CLI]];
+            if cli {
+                expected.push(vec!["chmod", "0700", CLI]);
+            }
+            if fail_chmod != CLI {
+                expected.push(vec!["test", "-d", SOCKET_DIR]);
+                if socket_dir {
+                    expected.push(vec!["chmod", "0700", SOCKET_DIR]);
+                    if fail_chmod != SOCKET_DIR {
+                        expected.push(vec!["stat", "-c", "%a %U:%G", SOCKET_DIR]);
+                        if joined {
+                            expected.push(vec![CLI, "status", "--self"]);
+                        }
+                    }
+                }
+            }
+            let calls: Vec<Vec<String>> = fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("sudo argv record"))
+                .collect();
+            assert_eq!(calls, expected, "{scenario}");
+        }
+    }
+}
+
 // Run the actual shell from each caller, not a Rust model of its OS check.
 // The sudo double records ordered argv without installing or linking anything.
 fn check_rhel_prerequisites(script: &str, rhel: &[&[&str]]) {
