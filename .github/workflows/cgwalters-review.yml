@@ -53,7 +53,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@be1191213b722ad9ca085028140e44c4e6f4f43d # build-ac1f8f96c4670a86df68d7d186f78bbc787380a706aea8069cc07175d8d6dc6f
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@4439980da2aef4db79b40890599ea661daab12b0 # v0.6.13
     permissions:
       actions: read
       contents: read
@@ -226,7 +226,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@be1191213b722ad9ca085028140e44c4e6f4f43d # build-ac1f8f96c4670a86df68d7d186f78bbc787380a706aea8069cc07175d8d6dc6f
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@4439980da2aef4db79b40890599ea661daab12b0 # v0.6.13
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -274,7 +274,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@be1191213b722ad9ca085028140e44c4e6f4f43d # build-ac1f8f96c4670a86df68d7d186f78bbc787380a706aea8069cc07175d8d6dc6f
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@4439980da2aef4db79b40890599ea661daab12b0 # v0.6.13
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:

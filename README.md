@@ -56,12 +56,11 @@ Before adopting v0.6.5, callers must migrate every bounds file (`allow`,
 selectors at the top level; exactly one forge section is required.
 Policy calls also require `actions: read` in the caller's permissions.
 
-Both wrappers pin agentic-job by commit: `be11912`, the smallest move from
-`427ce22` carrying the outside-host control probe retry (agentic-job#3227).
-It retains the `own_author` push bound (agentic-job#3164), which tracker's
-fix runs need for pull requests the bot authored. The pin comment is its
-CI build tag, `build-ac1f8f96...`, since zizmor resolves the comment. Move
-the pins to a release containing this commit; v0.6.12 would be a downgrade.
+Both wrappers pin agentic-job release v0.6.13 by commit (`4439980`), with
+the version beside the pin so the release train can find it. It carries the
+outside-host control probe retry (agentic-job#3227) and the `own_author`
+push bound (agentic-job#3164), which tracker's fix runs need for pull
+requests the bot authored.
 This does not update the installed secure-host image or prove the observed
 network-control failures fixed (agentic-job#3225). Image adoption and a
 fresh-host canary remain separate work (agentic-job#2070/#2656).
@@ -277,9 +276,9 @@ enables no caller, settings, credentials, admission or live dispatch.
 ### Secondary pull requests
 
 The wrappers need no secondary-specific input. Policy, check and apply all
-pin agentic-job `be11912`; its
-[workflow contract](https://github.com/cgwalters-forge/agentic-job/blob/be1191213b722ad9ca085028140e44c4e6f4f43d/docs/workflow.md)
-and [safe-output contract](https://github.com/cgwalters-forge/agentic-job/blob/be1191213b722ad9ca085028140e44c4e6f4f43d/docs/safe-outputs.md)
+pin agentic-job v0.6.13 (`4439980`); its
+[workflow contract](https://github.com/cgwalters-forge/agentic-job/blob/4439980da2aef4db79b40890599ea661daab12b0/docs/workflow.md)
+and [safe-output contract](https://github.com/cgwalters-forge/agentic-job/blob/4439980da2aef4db79b40890599ea661daab12b0/docs/safe-outputs.md)
 govern this feature, not the older v0.6.11 release plan.
 
 The concrete threat is an agent redirecting a privileged write to another
@@ -530,20 +529,20 @@ ordinary checked APPROVE is not a checked draft-classifier result.
 
 The binary prerequisite landed in agentic-job#3067 and v0.6.12
 (`eecc8c434e67a7607264ab3f7d90c88b6d02042a`). The wrappers' current
-`be1191213b722ad9ca085028140e44c4e6f4f43d` pin carries it, and the
+`4439980da2aef4db79b40890599ea661daab12b0` pin carries it, and the
 runner-only migration above is complete; neither an older pin nor the
 removed sandbox user is the remaining blocker. The pinned binary's
-[draft-classifier contract](https://github.com/cgwalters-forge/agentic-job/blob/be1191213b722ad9ca085028140e44c4e6f4f43d/docs/review.md#draft-classifier-reviews)
+[draft-classifier contract](https://github.com/cgwalters-forge/agentic-job/blob/4439980da2aef4db79b40890599ea661daab12b0/docs/review.md#draft-classifier-reviews)
 requires `REVIEW_DRAFT_CLASSIFIER=true` in policy dispatch, check's verdict
 step and submit, with `add_comment,noop` and `max-outputs: 1`.
 
 The reusable workflows at that pin do not yet carry that setting or the
 snapshot between stages. Specifically,
-[`policy.yml`](https://github.com/cgwalters-forge/agentic-job/blob/be1191213b722ad9ca085028140e44c4e6f4f43d/.github/workflows/policy.yml)
+[`policy.yml`](https://github.com/cgwalters-forge/agentic-job/blob/4439980da2aef4db79b40890599ea661daab12b0/.github/workflows/policy.yml)
 has no classifier input/environment on `Resolve a dispatched review` and
 does not upload its `$RUNNER_TEMP/dispatch-review.json` with the policy
 artifact.
-[`check.yml`](https://github.com/cgwalters-forge/agentic-job/blob/be1191213b722ad9ca085028140e44c4e6f4f43d/.github/workflows/check.yml)
+[`check.yml`](https://github.com/cgwalters-forge/agentic-job/blob/4439980da2aef4db79b40890599ea661daab12b0/.github/workflows/check.yml)
 has no classifier setting and invokes `review verdict` without
 `--pull-request`. A wrapper environment cannot be passed through a reusable
 workflow call. Setting a repository variable alone therefore enables nothing.

@@ -30,7 +30,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@be1191213b722ad9ca085028140e44c4e6f4f43d # build-ac1f8f96c4670a86df68d7d186f78bbc787380a706aea8069cc07175d8d6dc6f
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@4439980da2aef4db79b40890599ea661daab12b0 # v0.6.13
     with:
       id: wrapper-smoke
       runner: '"ubuntu-26.04"'
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cgwalters-forge/agentic-job
-          ref: be1191213b722ad9ca085028140e44c4e6f4f43d # build-ac1f8f96c4670a86df68d7d186f78bbc787380a706aea8069cc07175d8d6dc6f
+          ref: 4439980da2aef4db79b40890599ea661daab12b0 # v0.6.13
           path: .agentic-job-source
           persist-credentials: false
       - uses: ./.agentic-job-source/prepare
@@ -127,7 +127,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@be1191213b722ad9ca085028140e44c4e6f4f43d # build-ac1f8f96c4670a86df68d7d186f78bbc787380a706aea8069cc07175d8d6dc6f
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@4439980da2aef4db79b40890599ea661daab12b0 # v0.6.13
     with:
       policy: ${{ toJSON(needs.wrapper-policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.wrapper-runner.outputs.safe-outputs-artifact-id }}
