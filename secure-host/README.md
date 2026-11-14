@@ -123,6 +123,14 @@ the detached process's environment and session, and fail-closed startup without
 a stuck timeout launcher. These local tests need Node but no root; they do not prove the host's
 post-hardening `/proc` denial, which remains a hosted workflow check.
 
+The same Rust suite owns egress-probe scenarios, calling the shipped Node
+helper with queued responses rather than a real network. It checks positive
+reads, proxy-specific write refusals, rule-allowed writes (including origin
+errors), replacement rather than merged defaults, request options and response
+cleanup. `just test-secure-host` runs both probe suites alone. Node is still
+required until production helper delivery is ported; these tests do not prove
+live proxy interception or policy enforcement.
+
 ## Caveats of running everything as the runner's user
 
 Out of scope: a step tampering with later steps of the same job, through
