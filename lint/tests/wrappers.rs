@@ -1308,6 +1308,90 @@ fn only_rhel_10_installs_iptables_and_links_tailscale_into_sudos_path() {
 }
 
 #[test]
+fn tailscale_mint_validates_before_credentials_and_uses_the_join_settings() {
+    let action = YamlLoader::load_from_str(&read("tailscale/action.yml"))
+        .unwrap()
+        .remove(0);
+    let steps = action["runs"]["steps"].as_vec().unwrap();
+    let validate = &steps[0];
+    assert_eq!(validate["name"].as_str(), Some("Check the login inputs"));
+    assert_eq!(validate["shell"].as_str(), Some("bash"));
+    assert!(validate["if"].is_badvalue());
+    for (key, input) in [("AUTHKEY", "authkey"), ("MINT", "mint")] {
+        assert_eq!(
+            validate["env"][key].as_str().unwrap(),
+            format!("${{{{ inputs.{input} }}}}")
+        );
+    }
+    for authkey in ["", "fixture-key"] {
+        for mint in ["false", "true", "yes", "", "TRUE", " true", "true\n"] {
+            let expected_error = match mint {
+                "true" if !authkey.is_empty() => {
+                    Some("mint needs the federated login, not authkey")
+                }
+                "true" | "false" => None,
+                _ => Some("mint must be true or false"),
+            };
+            let output = Command::new("bash")
+                .args(["--noprofile", "--norc", "-e", "-o", "pipefail", "-c"])
+                .arg(validate["run"].as_str().unwrap())
+                .env_clear()
+                .env("AUTHKEY", authkey)
+                .env("MINT", mint)
+                .output()
+                .expect("run login validation with bash");
+            assert_eq!(
+                output.status.code(),
+                Some(i32::from(expected_error.is_some())),
+                "authkey={authkey:?}, mint={mint:?}: {output:?}"
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                expected_error.map_or_else(String::new, |e| format!("::error::{e}\n"))
+            );
+            assert!(output.stderr.is_empty());
+        }
+    }
+
+    let index = |name| {
+        steps
+            .iter()
+            .position(|step| step["name"].as_str() == Some(name))
+            .unwrap()
+    };
+    let settings = index("Choose organization settings");
+    let join = index("Connect to the tailnet");
+    let harden = index("Make tailscaled's LocalAPI root's only");
+    let mint = index("Mint a key for a later job");
+    assert!(0 < settings && settings < join && join < harden && harden < mint);
+    assert_eq!(action["inputs"]["mint"]["default"].as_str(), Some("false"));
+    assert_eq!(steps[mint]["if"].as_str(), Some("inputs.mint == 'true'"));
+    assert_eq!(steps[mint]["id"].as_str(), Some("mint"));
+    assert_eq!(
+        action["outputs"]["key"]["value"].as_str(),
+        Some("${{ steps.mint.outputs.key }}")
+    );
+    assert_eq!(
+        steps[join]["with"]["authkey"].as_str(),
+        Some("${{ inputs.authkey }}")
+    );
+    for (key, input) in [
+        ("OAUTH_CLIENT_ID", "oauth-client-id"),
+        ("AUDIENCE", "audience"),
+        ("TAGS", "tags"),
+    ] {
+        assert_eq!(
+            steps[mint]["env"][key].as_str().unwrap(),
+            format!("${{{{ steps.settings.outputs.{input} }}}}")
+        );
+        assert_eq!(
+            steps[join]["with"][input].as_str().unwrap(),
+            format!("${{{{ inputs.authkey == '' && steps.settings.outputs.{input} || '' }}}}")
+        );
+    }
+}
+
+#[test]
 fn tailscale_hardening_runs_after_successful_and_failed_joins() {
     use std::os::unix::fs::PermissionsExt;
 

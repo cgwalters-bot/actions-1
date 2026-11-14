@@ -86,6 +86,13 @@ join outcomes, absent CLI/socket directories and failure of either chmod.
 This tests shell control flow, not kernel permissions or a live tailnet join;
 the runtime JavaScript tests remain in the Node suite.
 
+Mint's action contract also runs in `tests/wrappers.rs`: the actual first
+Bash step rejects conflicting login inputs and non-boolean mint values before
+credentials or installation. YAML assertions check the default-off mint,
+join/hardening/mint ordering, matching federated settings and key output.
+No credentials or network are needed; `tailscale/mint.test.mjs` retains the
+runtime HTTP exchange and key-validation tests until the helper port ships.
+
 ```sh
 just --justfile path/to/actions/lint/Justfile --working-directory . check
 ```

@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { KEY_EXPIRY_SECONDS, mint } from './mint.mjs';
 
@@ -64,35 +62,5 @@ test('mint refuses debug logging, missing tags, failures and malformed keys', as
   ];
   for (const [responses, error] of cases) {
     await assert.rejects(mint(env, async () => responses.shift()), error);
-  }
-});
-
-// The action's first step, run as the runner would, before any install
-// or credential request.
-test('the action refuses mint with authkey and a mint that is not a boolean', () => {
-  const action = readFileSync(new URL('./action.yml', import.meta.url), 'utf8');
-  assert.ok(action.indexOf('Check the login inputs') < action.indexOf('Choose organization settings'));
-  const script = action.split('    - name: Check the login inputs\n')[1]
-    .split('    - name: Choose organization settings\n')[0]
-    .split('      run: |\n')[1]
-    .split('\n').map(line => line.replace(/^        /, '')).join('\n');
-  for (const [authkey, mint, status] of [
-    ['', 'false', 0], ['', 'true', 0], ['tskey-x', 'false', 0],
-    ['tskey-x', 'true', 1], ['', 'yes', 1],
-  ]) {
-    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
-      encoding: 'utf8', env: { ...process.env, AUTHKEY: authkey, MINT: mint },
-    });
-    assert.ifError(result.error);
-    assert.equal(result.status, status, `${authkey}/${mint}: ${result.stdout}`);
-  }
-  // The mint step runs only after a successful join, and with the join's settings.
-  const step = action.split('    - name: Mint a key for a later job\n')[1].split('    - name: ')[0];
-  assert.match(step, /if: inputs\.mint == 'true'\n/);
-  assert.match(step, /TAGS: \$\{\{ steps\.settings\.outputs\.tags \}\}/);
-  assert.ok(action.indexOf('Make tailscaled\'s LocalAPI root\'s only') < action.indexOf('Mint a key for a later job'));
-  // With authkey the federated login is not passed on.
-  for (const input of ['oauth-client-id', 'audience', 'tags']) {
-    assert.match(action, new RegExp(`\\n        ${input}: \\$\\{\\{ inputs\\.authkey == '' && steps\\.settings\\.outputs\\.${input} \\|\\| '' \\}\\}\\n`));
   }
 });
