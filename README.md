@@ -426,7 +426,10 @@ replace its review caller's `uses` as above and exercise a real review and
 a synchronize cancellation. No ACL, OAuth or broker policy is changed here;
 record those deployment changes in the private wiki when made. Removing the
 deployment-specific pieces from agentic-job is a separate follow-up.
-`just test-lint` checks the wrapper's admission and publication boundaries;
+`just test-lint` checks the wrapper's admission and publication boundaries,
+including the dispatched review's base-owned policy, checkout refs and
+credential-free head access in Rust. Tests that execute the target and
+submission JavaScript remain in the Node suite until those steps are ported;
 live tailnet joins and GitHub review writes are not exercised locally.
 
 The review wrapper pins this repository's `admit`, `deployment` and
