@@ -43,11 +43,16 @@ file to Renovate's `ignorePaths`.
 ## Checking it
 
 `just test-renovate` runs Renovate's validator on the preset and on this
-repository's configuration, then [dry-run.mjs](dry-run.mjs): Renovate
+repository's configuration, then the opt-in Rust integration test
+[renovate_dry_run.rs](../lint/tests/renovate_dry_run.rs): Renovate
 offline over a copy of this checkout plus a fixture workflow, which must
 propose the fixture's three stale Ubuntu labels and nothing else, none of
 this repository's action pins, images or crates and none of the fixture's
-other runners. npx downloads Renovate for it, so CI does not run it.
+other runners. npx downloads the pinned Renovate (which still needs Node),
+and Cargo builds the test, so CI does not run this integration. The subprocess
+has a five-minute timeout and uses a temporary checkout removed on success
+or failure; it never writes the source checkout. Plain `just test-lint` runs
+the offline log parsing, configuration and process-bound tests instead.
 
 A consumer proves a real pull request with the app installed: put a job
 with `runs-on: ubuntu-24.04` on the default branch of a sandbox repository

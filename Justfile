@@ -17,7 +17,7 @@ renovate := "renovate@44.198.3"
 # downloads Renovate, so CI does not run this.
 test-renovate:
     npx --yes --package {{ renovate }} -- renovate-config-validator --strict --no-global renovate/runners.json .github/renovate.json
-    npx --yes --package {{ renovate }} -- node renovate/dry-run.mjs
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-{{ cache_directory() }}/forge-lint}" npx --yes --package {{ renovate }} -- cargo test --locked --manifest-path lint/Cargo.toml --test renovate_dry_run -- --ignored --nocapture
 
 # The proxy, not an origin error or timeout, must refuse the write; and
 # with ALLOWED, a path of example.com an `egress-policy` rule allows, let
