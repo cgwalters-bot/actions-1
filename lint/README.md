@@ -55,7 +55,7 @@ commas; `ubuntu-latest` stays on it whatever the input says.
 
 ## Locally
 
-`just test-lint` also runs `tests/wrappers.rs` without Node: its structural
+`just test-lint` also runs `tests/wrappers.rs`: its structural
 contracts include tailnet broker defaults, broker-only review, artifact-only
 research's no-publication wiring and checked-submit provenance. The research
 outputs are checked by YAML key, so swapping two output names cannot pass.
@@ -71,6 +71,13 @@ checking credential ordering, child-agent refusal, malformed/missing input,
 the 1-MiB boundary and unchanged file contents. It acquires no credentials
 and makes no network calls. The target job's JavaScript and its Node tests
 remain separate until the production helper delivery is available.
+
+The wrapper and Tailscale action's RHEL prerequisite tests share a Rust
+harness in `tests/wrappers.rs`, run by `just test-lint` in CI. It executes
+the actual Bash steps with fixture OS releases and a recording sudo double,
+checking exact ordered arguments without installing packages or making
+system links. This replaces `tailscale/prerequisites.test.mjs`; the action's
+runtime JavaScript and its other Node tests remain unchanged.
 
 ```sh
 just --justfile path/to/actions/lint/Justfile --working-directory . check
