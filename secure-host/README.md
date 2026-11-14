@@ -117,6 +117,12 @@ and [PR #171](https://github.com/cgwalters-forge/actions/pull/171).
 secure-host.yml still uses a ZIP-digest handoff, not the file-digest
 consumer above, and does not prove this new example.
 
+`just test-lint` runs the read-probe startup regressions in Rust on Linux,
+against the actual Node helper. It checks readiness before PID publication,
+the detached process's environment and session, and fail-closed startup without
+a stuck timeout launcher. These local tests need Node but no root; they do not prove the host's
+post-hardening `/proc` denial, which remains a hosted workflow check.
+
 ## Caveats of running everything as the runner's user
 
 Out of scope: a step tampering with later steps of the same job, through

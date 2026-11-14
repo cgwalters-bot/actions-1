@@ -107,6 +107,13 @@ permission wiring. Node is still required to read remint's exported permission
 list; its signing, cache and HTTP tests remain in `app-token/remint.test.mjs`.
 No token is minted and no network call is made by the action-contract tests.
 
+The Linux read-probe tests run in `tests/read_probe.rs`, invoking the actual
+Node helper with a small API bridge. Rust checks the detached PID, canary,
+tracking ID, session leadership, delayed readiness and fail-closed startup
+(including timeout without a stuck IPC channel). Node and `/proc` are required;
+no root or network is needed. This replaces `secure-host/read-probe.test.mjs`,
+not the production helper or the hosted hardening acceptance test.
+
 ```sh
 just --justfile path/to/actions/lint/Justfile --working-directory . check
 ```

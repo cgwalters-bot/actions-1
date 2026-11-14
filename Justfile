@@ -6,7 +6,7 @@ lint:
 test-lint:
     {{ just_executable() }} --justfile lint/Justfile test
 
-# secure-host's egress probe; lint/tests/secure_host_action.rs tests the action's steps.
+# secure-host's egress probe; the Rust lint suite tests read-probe and action steps.
 test-secure-host:
     node --test secure-host/*.test.mjs
 
