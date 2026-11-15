@@ -200,6 +200,18 @@ test('artifact-only is default-off and admits only research without an apply env
   }
 });
 
+test('triage-outputs-from-allow is default-off and admits only triage', async () => {
+  assert.match(workflow, /triage-outputs-from-allow:\n {8}description: [^\n]*\n {8}type: boolean\n {8}default: false/);
+  assert.ok(job('target').includes('TRIAGE_OUTPUTS_FROM_ALLOW: ${{ inputs.triage-outputs-from-allow }}'));
+  for (const profile of ['implement', 'research', 'session', 'fix', 'review']) {
+    await assert.rejects(target({ PROFILE: profile, TRIAGE_OUTPUTS_FROM_ALLOW: 'true' }), /requires kind triage/, profile);
+  }
+  const plain = await target({ PROFILE: 'triage' });
+  assert.match(plain.task, /^Profile: triage\. Implement proposes one draft pull request\. Triage, research and session leave the tree clean and return one add_comment\./);
+  const widened = await target({ PROFILE: 'triage', TRIAGE_OUTPUTS_FROM_ALLOW: 'true' });
+  assert.match(widened.task, /^Profile: triage\. Triage leaves the tree clean and returns at most three of the outputs its bounds allow\.\n/);
+});
+
 test('hand-back releases original identity only after complete successful checked research', async () => {
   const handbackScript = job('research-handback').split('          script: |\n')[1]
     .split('\n').map(line => line.replace(/^ {12}/, '')).join('\n');
