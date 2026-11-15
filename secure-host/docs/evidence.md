@@ -50,11 +50,19 @@ and the release train's repin
 ([tracker#1673](https://github.com/cgwalters-forge/tracker/issues/1673)).
 
 That run has no forced-dump control or JavaScript-step probe on this
-image. The `confined` and `confined-cleanup` jobs below add them; until
-they have passed on main, the confined run/JavaScript main/post and
-cleanup results for this image are pending, and only the
-[upstream source-built result](#forced-core-dumps-upstream-only) exists.
-RHEL 10 remains runtime-unverified.
+image. The `confined` and `confined-cleanup` jobs added by
+[#272](https://github.com/cgwalters-forge/actions/pull/272) passed in
+main's push [run 43708182513](https://github.com/cgwalters-forge/actions/actions/runs/43708182513)
+at `1577e41620061898bce95193189f59836c76beb6`, which adds the jobs and
+keeps the pin; the action's `IMAGE` is the same digest:
+
+| Passed Ubuntu 26.04 job | Evidence at that revision |
+| --- | --- |
+| [confined / 132793763908](https://github.com/cgwalters-forge/actions/actions/runs/43708182513/job/132793763908) | v0.6.14 control binary before the action: every route works, `core-dump: true` under systemd-coredump; setup's `core-dumps` stage writes `\|/bin/false` and `core-pattern` passes; the run step and agentic-job `489c69d` `confine-probe` main and post records show every route false, `core_pattern: "\|/bin/false"`, owner write still true |
+| [confined-cleanup / 132794081491](https://github.com/cgwalters-forge/actions/actions/runs/43708182513/job/132794081491) | the confined job's log has `Terminate orphan process: pid (2571) (sleep)` for the process its first step left running |
+
+`worker-core` there is still derived from the sacrificial dump result
+and the host pattern, not a crashed Worker. RHEL 10 remains runtime-unverified.
 
 ### Workflow coverage
 
@@ -148,9 +156,9 @@ too, but does not erase previously stored dumps. The job remains the
 trust unit; all runner-mode credential refusals stay in place.
 
 The pinned v0.6.14 contains the fix, and its `core-pattern` check passes
-in this repository's CI ([adoption checkpoint](#adoption-checkpoint-2026-11-15));
-the `confined` job is to repeat the forced-dump control and refusals on
-it, and is pending until it passes on main.
+in this repository's CI ([adoption checkpoint](#adoption-checkpoint-2026-11-15)),
+where the `confined` job has also passed the forced-dump control and
+refusals on the pinned digest.
 See [runner reads](runner-reads.md#forced-core-dumps) for the mechanism
 and limits.
 

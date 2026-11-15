@@ -90,8 +90,7 @@ This repository's CI sees `core-pattern` pass on the pinned image
 ([evidence](evidence.md#adoption-checkpoint-2026-11-15)). Its `confined`
 job forces a dump of a sacrificial child before and after the action;
 for the Worker it relies on the host setting, never a crashed Worker.
-Its result on this image is pending until it passes on main. RHEL is
-unverified.
+It has passed on this image on main. RHEL is unverified.
 
 ## The Worker's diagnostic sockets
 
