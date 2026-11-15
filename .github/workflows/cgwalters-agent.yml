@@ -168,11 +168,16 @@ jobs:
       # installs its own, older agentic-job in /usr/local/bin, and the
       # agent's commands (`agentic-job handback ...`) must find the policy
       # binary that `run` starts instead: a copy of it, in a directory of
-      # its own, first on the agent's PATH.
+      # its own, first on the agent's PATH. Declare the agent tables for
+      # sandbox prepare, which handles them before the host image runs.
+      # The action overrides write-policy from its input, so forward the
+      # generated configuration's value rather than defaulting it off.
       - name: The host's configuration
+        id: host-config
         run: |
           install -D -m 0755 .agentic-job/agentic-job "$RUNNER_TEMP/agentic-job-bin/agentic-job"
-          agentic-job config --host --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
+          agentic-job config --host --prepared --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
+          python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb")); print("egress=" + ("write-policy" if c.get("egress", {}).get("write-policy", False) else "off"))' "$RUNNER_TEMP/agentic-job-host.toml" >> "$GITHUB_OUTPUT"
       # Every mirror in the runner's apt-mirrors.txt (archive and security
       # alike) is an ubuntu.com name, so Canonical's DNS outage of 2026-11-11
       # failed secure-host's package install on every run
@@ -193,9 +198,12 @@ jobs:
               https://mirrors.edge.kernel.org/ubuntu/ 6 \
               https://mirror.csclub.uwaterloo.ca/ubuntu/ 7 | sudo tee -a "$list" >/dev/null
           fi
-      - uses: ./.agentic-job-source/secure-host # zizmor: ignore[self-repository] Policy-selected pinned source, never head code.
+      - name: Prepare the agents and trusted helper
+        run: sudo /usr/local/bin/agentic-job sandbox prepare --config "$RUNNER_TEMP/agentic-job-host.toml"
+      - uses: cgwalters-forge/actions/secure-host@6e720e90708413982f90c1a396475946f5a31d0c # from main
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
+          egress: ${{ steps.host-config.outputs.egress }}
       # The configuration's `setup.script`, the caller's, for a toolchain:
       # as the runner's user, the agent's, without root, in the agent's
       # home and with its variables.

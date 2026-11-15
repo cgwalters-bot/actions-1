@@ -12,7 +12,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 // the tag of its CI build (`build-DIGEST`), which zizmor's ref-version-mismatch
 // audit resolves. A bump changes this, the six calls, the smoke job's two and
 // the README.
-const PIN: &str = "4439980da2aef4db79b40890599ea661daab12b0 # v0.6.13";
+const PIN: &str = "489c69d53cc23b989131952c9e3ca4d5add4e2b5 # v0.6.14";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
 // Both wrappers' agent job, called by local path.
@@ -917,6 +917,7 @@ fn agent_source(text: &str) {
             "Check inference proxy reachability",
             "The host's configuration",
             "Add last-resort Ubuntu mirrors",
+            "Prepare the agents and trusted helper",
             "./.agentic-job-source/secure-host",
             "The setup script",
             "run",
@@ -1129,7 +1130,7 @@ fn agent_inputs(text: &str) {
         agent,
         &[
             "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-            "agentic-job config --host --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
+            "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
             "config: ${{ runner.temp }}/agentic-job-host.toml",
             "AGENT_USER: runner\n",
             "run: python3 .agentic-job-source/workflow/runner-setup.py admit",
@@ -1185,6 +1186,66 @@ fn runner_smoke_uses_same_policy_binary_and_host_sequence_as_wrappers() {
     smoke_source(&read(SMOKE));
 }
 
+#[test]
+fn wrappers_forward_the_configured_write_policy_to_the_host_action() {
+    for (file, name) in [(AGENT, "agent"), (SMOKE, "wrapper-runner")] {
+        let source = yaml(&read(file));
+        let steps = source["jobs"][name]["steps"].as_vec().unwrap();
+        let config = steps
+            .iter()
+            .find(|step| step["id"].as_str() == Some("host-config"))
+            .unwrap();
+        let script = config["run"].as_str().unwrap();
+        assert!(script.contains("config --host --prepared --from"));
+        let select = script.lines().last().unwrap();
+        let host = steps
+            .iter()
+            .find(|step| {
+                step["uses"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("cgwalters-forge/actions/secure-host@"))
+            })
+            .unwrap();
+        assert_eq!(
+            host["with"]["egress"].as_str(),
+            Some("${{ steps.host-config.outputs.egress }}")
+        );
+        for (text, expected) in [
+            ("[egress]\nwrite-policy = true\n", Some("write-policy")),
+            ("[egress]\nwrite-policy = false\n", Some("off")),
+            ("[egress]\nproxy = true\n", Some("off")),
+            ("# write-policy = true\n", Some("off")),
+            (
+                "[egress]\n\"write-policy\" = true # restricted\n",
+                Some("write-policy"),
+            ),
+            ("[egress\n", None),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            fs::write(temp.path().join("agentic-job-host.toml"), text).unwrap();
+            let output = temp.path().join("outputs");
+            let result = Command::new("bash")
+                .args(["-e", "-o", "pipefail", "-c", select])
+                .env("RUNNER_TEMP", temp.path())
+                .env("GITHUB_OUTPUT", &output)
+                .output()
+                .unwrap();
+            assert_eq!(
+                result.status.success(),
+                expected.is_some(),
+                "{file}: {text}"
+            );
+            assert_eq!(
+                fs::read_to_string(output).unwrap(),
+                expected
+                    .map(|mode| format!("egress={mode}\n"))
+                    .unwrap_or_default(),
+                "{file}: {text}"
+            );
+        }
+    }
+}
+
 fn smoke_source(text: &str) {
     let text = host_source(text, "wrapper-runner");
     includes(&text, &[&format!("policy.yml@{PIN}")]);
@@ -1220,7 +1281,8 @@ fn smoke_source(text: &str) {
         "run: python3 .agentic-job-source/workflow/runner-setup.py admit",
         "run: agentic-job secure-host inference .agentic-job/config.toml",
         "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-        "agentic-job config --host --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
+        "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
+        "run: sudo /usr/local/bin/agentic-job sandbox prepare --config \"$RUNNER_TEMP/agentic-job-host.toml\"",
         "uses: ./.agentic-job-source/secure-host",
         "run: python3 .agentic-job-source/workflow/runner-setup.py setup",
         "agentic-job sandbox check --unless-passed",
