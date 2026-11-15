@@ -133,17 +133,14 @@ before the action, gets no protection from them.
   name lookup, and in a `GET` URL to any host the policy lets a step
   read, which is every host unless its [allowlist](egress.md#opt-in-domain-allowlist)
   is on.
-- The Worker's memory, without `sandbox.unlink-worker-diagnostics`,
-  which the default configuration leaves off: any step can have the
-  Worker dump it through its .NET diagnostic sockets
-  ([runner reads](runner-reads.md#the-workers-diagnostic-sockets)).
-- Protection from forced core dumps in the pinned v0.6.9 image. A step
-  can raise another same-uid process's core limit, signal it and read
-  the stored dump. Upstream #3154 closes this route under
-  `deny-runner-reads` with host-wide discard of all new cores, including
-  deterministic CI's; stored cores are not removed. v0.6.12 predates
-  that fix ([release boundary and limits](runner-reads.md#forced-core-dumps-pinned-image-versus-upstream)).
-  This does not close diagnostic sockets, isolate steps or lift any
-  runner-mode credential refusal: the job remains the trust unit.
+- The Worker's memory, with `sandbox.unlink-worker-diagnostics` turned
+  off: any step can have the Worker dump it through its .NET diagnostic
+  sockets ([runner reads](runner-reads.md#the-workers-diagnostic-sockets)).
+- Core dumps stored before the action. Under `deny-runner-reads` the
+  pinned image closes the forced-core route by discarding all new cores
+  host-wide, deterministic CI's included, but does not remove stored
+  ones ([limits](runner-reads.md#forced-core-dumps)). This does not
+  isolate steps or lift any runner-mode credential refusal: the job
+  remains the trust unit.
 - Availability: a step can consume the machine until the job's timeout.
 - A kernel or VM boundary.

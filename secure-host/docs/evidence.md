@@ -9,115 +9,52 @@ but its runtime is unverified.
 
 ## This repository's CI
 
-### Adoption checkpoint (2026-11-08)
+### Adoption checkpoint (2026-11-15)
 
-Actions main at `eef41d3b216c731fda0960d6c9876a6ab3cd159a` still selects
-**v0.6.9**, digest
-`sha256:008d34bf9598ef83d7859772200f26637814d2cd105028457208ddc87d69788b`.
-The update belongs to existing
-[Dependabot #211](https://github.com/cgwalters-forge/actions/pull/211), head
-`502522ad437a469da99120f89e848219434f16a7`, branch
-`dependabot/docker/secure-host/cgwalters-forge/secure-host-v0.6.12`.
-Continue that branch through normal follow-through/rebase and review
-gates; this checkpoint neither introduces a competing bump nor merges it.
-
-GitHub's releases API still reports
-[v0.6.12](https://github.com/cgwalters-forge/agentic-job/releases/tag/v0.6.12)
-as the latest numbered release, published 2026-11-06, source
-`eecc8c434e67a7607264ab3f7d90c88b6d02042a`. Its published secure-host digest
-in #211 is
-`sha256:d5fd0f3e102c589807df68656d5623f6d6cbc9ecb257bdd3c9af431242d7b73a`.
-At this checkpoint, `gh attestation verify` against that digest succeeded
-with `--repo cgwalters-forge/agentic-job`, certificate identity
+[`Containerfile.pin`](../Containerfile.pin) on main at
+`6e720e90708413982f90c1a396475946f5a31d0c`
+([#271](https://github.com/cgwalters-forge/actions/pull/271)) selects
+**v0.6.14**, digest
+`sha256:02e5f14ff420da99004ddc3bea4dd6d4a521051389736416cd737e9f51525a42`.
+`gh attestation verify` of that digest with the action's signer
+(`--repo cgwalters-forge/agentic-job`, certificate identity
 `https://github.com/cgwalters-forge/agentic-job/.github/workflows/release.yml@refs/heads/main`,
-`--source-ref refs/heads/main` and `--deny-self-hosted-runners`.
-The verified source digest is the release source above; its invocation is
-[release run 42147098496, attempt 1](https://github.com/cgwalters-forge/agentic-job/actions/runs/42147098496/attempts/1).
-Later `build-*` binary releases do not establish a published successor
-secure-host image. No successor image pin is proposed here.
+`--source-ref refs/heads/main`, `--deny-self-hosted-runners`) reports
+source `489c69d53cc23b989131952c9e3ca4d5add4e2b5`, the
+[v0.6.14 release](https://github.com/cgwalters-forge/agentic-job/releases/tag/v0.6.14)
+commit, built by
+[release run 43617086845, attempt 1](https://github.com/cgwalters-forge/agentic-job/actions/runs/43617086845/attempts/1).
+That source contains host-table parsing
+[#3144](https://github.com/cgwalters-forge/agentic-job/pull/3144)
+(`420967bf3e26e64b5180e36899950b5df877fd8e`) and core protection
+[#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154)
+(`773322d503987eac40845ce49d5bc0b9acbd8b30`).
 
-#### Published standalone binary: Ubuntu acceptance
-
-[#211's run 42239832020](https://github.com/cgwalters-forge/actions/actions/runs/42239832020)
-checked out merge revision `4fee1321fdbc729e120bbe731481f27ff9e874ea`
-(head above, base `d38a1379dd1d41f84460806b05ffa90a4a5eea7c`).
-The local `./secure-host` action in build and egress-policy selected the
-**v0.6.12 digest above**, verified its attestation and inspected image ID
-`66d5e188ca2b0a411db2b3f81e932dea9e00eaf6c8db379baa08c376ba17bc89`.
-That ID, not a tag or a different action's pin, ran config and setup.
+In main's [run 43629704804](https://github.com/cgwalters-forge/actions/actions/runs/43629704804)
+at that commit, the local `./secure-host` action verified and pulled the
+digest above in every job that uses it:
 
 | Passed Ubuntu 26.04 job | Evidence at that revision |
 | --- | --- |
-| [build / 127966866848](https://github.com/cgwalters-forge/actions/actions/runs/42239832020/job/127966866848) | `config --host` via `/agentic-job`, setup installing `/usr/local/bin/secure-host` and `/usr/local/bin/agentic-job`, and 35 sandbox checks; GET allowed, POST refused by proxy, npm audit POST allowed; artifact upload |
-| [egress-policy / 127966867002](https://github.com/cgwalters-forge/actions/actions/runs/42239832020/job/127966867002) | same image and 35 checks; replacement policy permits POST `/secure-host-ci` (origin 405), refuses other POST and npm audit; artifact upload |
-| [publish / 127967054430](https://github.com/cgwalters-forge/actions/actions/runs/42239832020/job/127967054430) | build artifact ID `13515411164`, ZIP digest `a391689de33812461eb937d7ce672578f71584544bc18713072ab6cb91dd6e76` verified, download and commit-data validation passed |
+| [build / 132553381321](https://github.com/cgwalters-forge/actions/actions/runs/43629704804/job/132553381321) | setup's `core-dumps` stage writes `\|/bin/false`; 36 sandbox checks, `core-pattern` among them; `worker-diagnostics` setup stage unlinked the Worker's socket; another process's environment refused; GET allowed, POST refused by proxy, npm audit POST allowed; artifact upload; the runner's cleanup logs `Terminate orphan process` for the left process |
+| [egress-policy / 132553381779](https://github.com/cgwalters-forge/actions/actions/runs/43629704804/job/132553381779) | 36 checks with `core-pattern`; replacement policy permits POST `/secure-host-ci` (origin 405), refuses other POST and npm audit; artifact upload |
+| [publish / 132553493689](https://github.com/cgwalters-forge/actions/actions/runs/43629704804/job/132553493689) | build artifact `14126894154`, ZIP digest `4a64a9d6d14785b0abd559678c4774cb3adb0cfd95a7ba69812eb1ff8d8f4cd0` matched; commit-data validation passed |
+| [world-write / 132553381534](https://github.com/cgwalters-forge/actions/actions/runs/43629704804/job/132553381534) | 34 checks with `core-pattern`; the root-owned mode-0666 file refuses the append |
 
-This proves standalone-binary compatibility, not the later host-table or
-core-pattern changes. Compatibility calls remain `/agentic-job config
---host` in the container and `agentic-job sandbox check` on the host.
-Local regression tests cover those calls, digest selection, single-image
-archive loading and setup by inspected ID. They do not attest an archive
-or substitute for hosted acceptance.
+The same run's wrapper jobs passed, but through agentic-job v0.6.13's
+forwarder, which selected the **v0.6.9** digest
+`sha256:008d34bf9598ef83d7859772200f26637814d2cd105028457208ddc87d69788b`:
+they are not v0.6.14 acceptance. Moving that pin belongs to
+[agentic-job#2070](https://github.com/cgwalters-forge/agentic-job/issues/2070)
+and the release train's repin
+([tracker#1673](https://github.com/cgwalters-forge/tracker/issues/1673)).
 
-#### Scripted wrapper: a separate image selection
-
-The green `wrapper-sandbox` job in #211 used action
-`c763a8950778743f51857a37b2a59daf9e96ee23`, selecting digest
-`sha256:df9133ce3d7ca05c9de0c5eb7d1f6c662065288191ac857d6c877ab5833e5b49`,
-not the local action or #211's v0.6.12 image. It is not v0.6.12 acceptance.
-
-The newer scripted dispatch at actions revision
-`eef41d3b216c731fda0960d6c9876a6ab3cd159a`,
-[run 42488914828](https://github.com/cgwalters-forge/actions/actions/runs/42488914828),
-used agentic-job source `427ce2295925654be9c35e91ca5cee91bbc2c9ea`:
-
-- [wrapper-runner / 128756867072](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756867072)
-  passed prepare, runner-user admission, setup, 98 sandbox checks and
-  scripted run. Its forwarder selected actions secure-host
-  `466a490e983ff07e6fb076fa4bd8b4d5f918fcd6`, hence the **v0.6.9 digest**
-  above. The policy binary was 0.6.12, not proof of a 0.6.12 host image.
-- [wrapper-check / check / 128757099791](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128757099791)
-  accepted the scripted handback.
-- [wrapper-scripted-dispatch / 128757171343](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128757171343)
-  passed with agent exit 0, successful check, checked artifact present,
-  no refusal and no patch. No model or production dispatch was exercised.
-
-#### Remaining gates and ownership
-
-1. Follow through #211 rather than another image bump. Its separate
-   `ci` check failed in
-   [run 42239830706](https://github.com/cgwalters-forge/actions/actions/runs/42239830706);
-   online zizmor reported three `ref-version-mismatch` findings for
-   immutable self-pins commented `# main` (admit, deployment, tailscale).
-   A green host job alone does not admit the pin. Coordinate recurring
-   immutable-self-pin lint repair with
-   [actions#229](https://github.com/cgwalters-forge/actions/issues/229),
-   and the v0.6.12 release train
-   [tracker#1369](https://github.com/cgwalters-forge/tracker/issues/1369).
-2. A successor secure-host image must be published and attested from a
-   source containing both host-table parsing
-   [#3144](https://github.com/cgwalters-forge/agentic-job/pull/3144)
-   (`420967bf3e26e64b5180e36899950b5df877fd8e`) and core protection
-   [#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154)
-   (`773322d503987eac40845ce49d5bc0b9acbd8b30`). Neither is in v0.6.12.
-   Resolve the actual published digest and verify provenance before
-   updating tag and full digest together. Do not invent a v0.6.13 pin.
-3. After adoption, record fresh Ubuntu setup/check, egress/artifact and
-   scripted-wrapper jobs with their effective action and image selections.
-   For the containing image only, require `core-pattern` plus confined
-   run/JavaScript main/post controls and `confined-cleanup` orphan-process
-   evidence. The upstream forced-core result below is not this acceptance.
-4. Agentic-job forwarder/site pins belong to
-   [#2070](https://github.com/cgwalters-forge/agentic-job/issues/2070), and
-   prepare/config adoption to
-   [#2656](https://github.com/cgwalters-forge/agentic-job/issues/2656).
-   Leave example-plain-ci's action pin to
-   [actions#226](https://github.com/cgwalters-forge/actions/issues/226)/
-   [#228](https://github.com/cgwalters-forge/actions/pull/228).
-
-RHEL 10 remains separately runtime-unverified. Skipped probes or jobs are
-not acceptance. Required publication and hosted acceptance remain pending;
-[actions#230](https://github.com/cgwalters-forge/actions/issues/230) is not complete.
+That run has no forced-dump control or JavaScript-step probe on this
+image. The `confined` and `confined-cleanup` jobs below add them; until
+they have passed on main, the confined run/JavaScript main/post and
+cleanup results for this image are pending, and only the
+[upstream source-built result](#forced-core-dumps-upstream-only) exists.
+RHEL 10 remains runtime-unverified.
 
 ### Workflow coverage
 
@@ -139,6 +76,8 @@ run with `before`, and the same check after it with `after`:
 | an `egress-policy` file replaces the image's rules | `just secure-host-egress /secure-host-ci` | `egress-policy` |
 | an invalid policy fails setup | `just secure-host-invalid-policy` | `invalid-egress-policy` |
 | a root-owned mode-0666 file refuses an append after the action exits, while one of the runner's own takes it | `just secure-host-world-write` | `world-write` |
+| a `run:` step and a JavaScript action's main and post steps get no root, metadata, earlier process's or parent's environment, memory or ptrace, forced core dump, or the Worker's environment, dump or diagnostic sockets | agentic-job's `secure-host probe control before`, then `confined` | `confined` |
+| the runner's cleanup still ends a process an earlier step left running | its `Terminate orphan process` log line | `confined-cleanup` |
 
 Each also passes `sandbox check` inside the action, but for `options`
 and `invalid-egress-policy`, which turn it off.
@@ -156,57 +95,6 @@ that file-digest check and data validation with a commit ID, without
 secrets or a release environment. That separate work is covered by
 [#169](https://github.com/cgwalters-forge/actions/issues/169) and
 [PR #171](https://github.com/cgwalters-forge/actions/pull/171).
-
-### Acceptance recheck (2026-11-09)
-
-Main is still `eef41d3b216c731fda0960d6c9876a6ab3cd159a`.
-[#231](https://github.com/cgwalters-forge/actions/pull/231) remains open at
-`5b45a813fb72e834033829589f82ce6723447178`; reuse its standalone-image
-compatibility tests and v0.6.12 evidence when landed, rather than recreate
-them. [Dependabot #211](https://github.com/cgwalters-forge/actions/pull/211)
-still owns the image update, at `502522ad437a469da99120f89e848219434f16a7`.
-The new local regression executes the action's attestation script with a
-refusing verifier: no image acquisition, configuration or privileged setup
-runs. A successful-verification control reaches setup; the trusted-archive
-exception still reaches load without verification. This tests fail-closed
-step behavior and signer arguments, not real provenance or host hardening.
-
-The existing main [run 42488914828](https://github.com/cgwalters-forge/actions/actions/runs/42488914828)
-was rechecked through job conclusions and logs, not dispatched again.
-Its local `./secure-host` action selected **v0.6.9**, source
-`57119eeffa17ea41b383cfdaf8370b8abeba8868`, digest
-`sha256:008d34bf9598ef83d7859772200f26637814d2cd105028457208ddc87d69788b`,
-inspected ID `5b7c37feafd24ceb8583ce87e0dde6d1cb65821c0e5cf86d4db8a99c20513021`.
-
-| Passed Ubuntu 26.04 job | Rechecked result |
-| --- | --- |
-| [build / 128756761122](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756761122) | attestation, config, setup, 98 sandbox checks and artifact upload |
-| [egress-policy / 128756761255](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756761255) | same image, 98 checks; POST refused, policy POST allowed (origin 405), npm audit refused by replacement policy; artifact upload |
-| [publish / 128756898212](https://github.com/cgwalters-forge/actions/actions/runs/42488914828/job/128756898212) | artifact `13620478208` downloaded and ZIP digest `a93fe74a24d20aeaa0cd9408441caf9bc21b984c35d27b42a47eed76941a395f` matched; commit-data validation passed |
-
-The same run's passed scripted-wrapper jobs and their **forwarder-selected**
-action/image revisions are already recorded in #231's adoption checkpoint;
-reuse that record when landed. They are not selected by `./secure-host`,
-and neither those jobs nor the local old-image results above establish
-containing-image acceptance.
-
-The publication gate was checked again with GitHub's paginated releases,
-release-workflow runs and `skopeo list-tags --no-creds` against
-`ghcr.io/cgwalters-forge/secure-host`: there is still no numbered release or
-published image beyond v0.6.12. The newer binary release
-`build-2f87b8a21974f1c5552ff1225f9560cb4ad60e5cec1c4fd3446d304433fd05f9`,
-source `4692b7525a07a5e8682bcdef358e9876701454a9`, does not publish an image.
-Thus #231's exact publication, provenance, adoption and hosted-acceptance
-prerequisites for #3144/#3154 remain outstanding. Only a containing
-effective image can substantiate `core-pattern`, confined run/JavaScript
-main/post and `confined-cleanup`; the source-built result below and skipped
-jobs are not deployed proof. RHEL remains separately unverified and
-[#230](https://github.com/cgwalters-forge/actions/issues/230) stays open.
-
-[#229's lint repair](https://github.com/cgwalters-forge/actions/issues/229)
-and [tracker#1369's release train](https://github.com/cgwalters-forge/tracker/issues/1369)
-are still open; #231's ownership boundaries are unchanged. No pins or
-production dispatches are changed by this recheck.
 
 ## Run-time controls through the action on hosted Ubuntu 26.04
 
@@ -253,19 +141,18 @@ by refusals in run/main/post.
 
 `worker-core` is derived from the sacrificial dump result and the host
 pattern, **not** a direct dump of Runner.Worker or a test of its own
-`prlimit`. No Worker or parent is crashed. This is existing upstream
-evidence, not a new hosted reproduction, proof for the pinned image or
-RHEL evidence. The host-wide setting loses every new core dump,
-deterministic CI's too, but does not erase previously stored dumps.
-Diagnostic sockets remain a separate route and the job remains the
+`prlimit`. No Worker or parent is crashed. This is upstream evidence on
+a source-built image, not proof for the pinned image or RHEL evidence.
+The host-wide setting loses every new core dump, deterministic CI's
+too, but does not erase previously stored dumps. The job remains the
 trust unit; all runner-mode credential refusals stay in place.
 
-The effective pin remains v0.6.9, without either discard or its check;
-v0.6.12 also predates the fix. A release containing it and a pin update
-remain [deployment #2070](https://github.com/cgwalters-forge/agentic-job/issues/2070).
-[Prepare/config adoption #2656](https://github.com/cgwalters-forge/agentic-job/issues/2656)
-is separate. See [runner reads](runner-reads.md#forced-core-dumps-pinned-image-versus-upstream)
-for the mechanism and limits.
+The pinned v0.6.14 contains the fix, and its `core-pattern` check passes
+in this repository's CI ([adoption checkpoint](#adoption-checkpoint-2026-11-15));
+the `confined` job is to repeat the forced-dump control and refusals on
+it, and is pending until it passes on main.
+See [runner reads](runner-reads.md#forced-core-dumps) for the mechanism
+and limits.
 
 ## Where each probe has been seen to fail
 
