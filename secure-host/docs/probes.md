@@ -41,8 +41,8 @@ the [forced-core route](runner-reads.md#forced-core-dumps): one read of
 trailing newline is accepted); an unreadable or different value fails.
 This checks the host setting, not a Worker crash. The separate
 `confined` job forces a dump only of a sacrificial child, with a
-pre-setup control and refusals in run/main/post; its result on the
-pinned image is pending
+pre-setup control and refusals in run/main/post; it has passed on the
+pinned image
 ([evidence](evidence.md#adoption-checkpoint-2026-11-15)). Neither is
 proof for RHEL.
 
