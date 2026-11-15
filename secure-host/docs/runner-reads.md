@@ -11,8 +11,8 @@ can read `/proc/PID/environ`, and the tokens in it, of any process an
 earlier step left running. Yama decides only attaches, and `hidepid`
 alone does not separate one user's processes.
 
-`sandbox.deny-runner-reads = true` turns the rule on; it is opt-in in
-the image and on in this action's [`hosted.toml`](../hosted.toml). It
+`sandbox.deny-runner-reads = true` turns the rule on; unset, it follows
+`lock-runner`, and this action's [`hosted.toml`](../hosted.toml) sets it. It
 needs `sandbox.lock-runner`, because with sudo the runner's user could
 clear the rule's map.
 
@@ -57,26 +57,24 @@ or `EACCES`. Signals still reach it.
 - It is not isolation between steps: a step can still tamper with later
   steps, which the [threat model](threat-model.md) accepts.
 
-## Forced core dumps: pinned image versus upstream
+## Forced core dumps
 
-The effective [`Containerfile.pin`](../Containerfile.pin) is v0.6.9 at
-`sha256:008d34bf9598ef83d7859772200f26637814d2cd105028457208ddc87d69788b`.
-It does not discard cores or check the core pattern. Even when the BPF
-rule and Yama refuse `/proc` reads and ptrace, a step can use `prlimit`
-and `SIGSEGV` on another process of the same uid, then read its memory
-through `coredumpctl dump` on a host using systemd-coredump. That leaves
-a forced-core route to a step's parent, agentic-job's `run` and the
-Worker, separate from the diagnostic-socket route below.
+Even when the BPF rule and Yama refuse `/proc` reads and ptrace, a step
+can use `prlimit` and `SIGSEGV` on another process of the same uid, then
+read its memory through `coredumpctl dump` on a host using
+systemd-coredump: a forced-core route to a step's parent, agentic-job's
+`run` and the Worker, separate from the diagnostic-socket route below.
 
-Upstream [#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154),
-at [773322d503987eac40845ce49d5bc0b9acbd8b30](https://github.com/cgwalters-forge/agentic-job/commit/773322d503987eac40845ce49d5bc0b9acbd8b30),
+[#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154),
+at [773322d503987eac40845ce49d5bc0b9acbd8b30](https://github.com/cgwalters-forge/agentic-job/commit/773322d503987eac40845ce49d5bc0b9acbd8b30)
+and in the pinned v0.6.14,
 sets `kernel.core_pattern` to `|/bin/false` when `deny-runner-reads` is
-enabled (`sandbox.deny-runner-reads` in this pin's configuration,
-`host.deny-runner-reads` in the newer source). It is not a new option:
-the rule stays off by default in the image, on in this action's
+enabled (`sandbox.deny-runner-reads` in this action's configuration,
+`host.deny-runner-reads` by its newer name). It is not a new option:
+the rule follows `lock-runner` unless set, is on in this action's
 `hosted.toml`, and requires the runner lock. Only root in the initial
 user namespace can change the host-wide pattern; the lock denies that
-to later steps. The newer check fails `core-pattern` unless that exact
+to later steps. The check fails `core-pattern` unless that exact
 discard setting is readable, accepting a single trailing newline.
 
 Every job on such a host loses **all new core dumps**, deterministic
@@ -88,12 +86,12 @@ The setting neither separates steps nor closes .NET diagnostic sockets.
 All runner-mode credential refusals remain: inference-provider keys,
 MCP credentials, the OIDC request and the other `--runner-home` refusals.
 
-v0.6.12 predates this fix. A release containing it and a pin update here
-are still needed ([deployment #2070](https://github.com/cgwalters-forge/agentic-job/issues/2070));
-[prepare/config adoption #2656](https://github.com/cgwalters-forge/agentic-job/issues/2656)
-is separate work. The [upstream Ubuntu evidence](evidence.md#forced-core-dumps-upstream-only)
-uses a sacrificial dump plus the host setting for the Worker, never a
-crashed Worker; RHEL is unverified.
+This repository's CI sees `core-pattern` pass on the pinned image
+([evidence](evidence.md#adoption-checkpoint-2026-11-15)). Its `confined`
+job forces a dump of a sacrificial child before and after the action;
+for the Worker it relies on the host setting, never a crashed Worker.
+Its result on this image is pending until it passes on main. RHEL is
+unverified.
 
 ## The Worker's diagnostic sockets
 
@@ -104,8 +102,9 @@ own user, which every step is, can connect to them and have the Worker
 dump its memory, every secret of the job in it, or load a library into
 it; Yama sees no ptrace attach in that.
 `sandbox.unlink-worker-diagnostics` unlinks them, so the Worker keeps a
-socket no step can name. It needs `sandbox.lock-runner`, and is off by
-default in the image and in this action's `hosted.toml`;
+socket no step can name. It needs `sandbox.lock-runner` and, since the
+pinned v0.6.14, follows it unless set, so it is on under this action's
+`hosted.toml`, which sets `lock-runner`;
 `sandbox check`'s `worker-diagnostics` probe tests it when it is on.
 
 ## Proof
@@ -117,6 +116,6 @@ with a canary in its environment and reads it; after it, the other must
 fail to, with permission denied or no such file and nothing else, and
 with the process alive by a signal check
 before and after. The job must still end green with the process left
-running. agentic-job's `confined` job also checks, from the job's log,
-that the runner's own cleanup ended that process
+running. The `confined-cleanup` job checks, from the `confined` job's
+log, that the runner's own cleanup ended the process that job left
 ([evidence](evidence.md)).

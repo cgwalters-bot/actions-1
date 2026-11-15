@@ -168,9 +168,9 @@ Any step can compromise the steps after it. The job is the unit of trust.
    cannot opt in yet: provider and tailnet requests are refused. See
    [egress](docs/egress.md).
 8. **The Worker's .NET diagnostic sockets** let any step have
-   `Runner.Worker` dump its memory, every secret of the job in it, unless
-   `sandbox.unlink-worker-diagnostics` is set, which the default hosted
-   configuration does not do ([runner reads](docs/runner-reads.md#the-workers-diagnostic-sockets)).
+   `Runner.Worker` dump its memory, every secret of the job in it, if a
+   caller's configuration sets `sandbox.unlink-worker-diagnostics = false`;
+   it follows `lock-runner` otherwise ([runner reads](docs/runner-reads.md#the-workers-diagnostic-sockets)).
 
 ## The sandbox user (opt-in)
 
@@ -212,30 +212,16 @@ attestation with `gh attestation verify`, against the signer in
 branch, on a GitHub-hosted runner. Every host fix takes an agentic-job
 release, then a pin update here.
 
-The [adoption checkpoint](docs/evidence.md#adoption-checkpoint-2026-11-08)
-records #211's attested v0.6.12 standalone-binary acceptance separately
-from the still-old wrapper image and the unpublished successor needed
-for the host-table and core-pattern changes. The existing Dependabot
-branch owns the image bump; these docs continue to describe v0.6.9
-until it is adopted.
-
-The effective pin is still **v0.6.9**: a step can force another process
-of the runner's user to dump core and read its memory, despite the
-runner-read rule and Yama. Upstream
-[agentic-job#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154)
-closes this route by discarding all new host core dumps under
-`deny-runner-reads`; it adds a `core-pattern` check. This also loses new
-core dumps for deterministic CI, but does not remove stored cores or
-close the Worker's diagnostic sockets. **v0.6.12 predates the fix**;
-deployment needs a release containing it and a pin update here
-([agentic-job#2070](https://github.com/cgwalters-forge/agentic-job/issues/2070)).
-Prepare/config adoption remains
-[agentic-job#2656](https://github.com/cgwalters-forge/agentic-job/issues/2656),
-not part of this documentation change. See
-[runner reads](docs/runner-reads.md#forced-core-dumps-pinned-image-versus-upstream)
-for the implementation and [evidence](docs/evidence.md#forced-core-dumps-upstream-only)
-for the existing Ubuntu job, not a new reproduction or RHEL proof. The
-job remains the trust unit; no credential refusal is lifted.
+The pin is **v0.6.14**, built from agentic-job `489c69d`; the
+[adoption checkpoint](docs/evidence.md#adoption-checkpoint-2026-11-15)
+records its attestation and hosted Ubuntu results. Under
+`deny-runner-reads` it discards all new host core dumps
+([agentic-job#3154](https://github.com/cgwalters-forge/agentic-job/pull/3154)),
+so a step cannot force another process of the runner's user to dump core
+and read its memory, and its check has a `core-pattern` probe. This also
+loses new core dumps for deterministic CI, but does not remove stored
+cores ([runner reads](docs/runner-reads.md#forced-core-dumps)). The job
+remains the trust unit; no credential refusal is lifted.
 
 ## Inputs
 
