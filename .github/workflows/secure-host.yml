@@ -31,7 +31,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@489c69d53cc23b989131952c9e3ca4d5add4e2b5 # v0.6.14
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
     with:
       id: wrapper-smoke
       runner: '"ubuntu-26.04"'
@@ -69,7 +69,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cgwalters-forge/agentic-job
-          ref: 489c69d53cc23b989131952c9e3ca4d5add4e2b5 # v0.6.14
+          ref: 740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
           path: .agentic-job-source
           persist-credentials: false
       - uses: ./.agentic-job-source/prepare
@@ -91,7 +91,7 @@ jobs:
           python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb")); print("egress=" + ("write-policy" if c.get("egress", {}).get("write-policy", False) else "off"))' "$RUNNER_TEMP/agentic-job-host.toml" >> "$GITHUB_OUTPUT"
       - name: Prepare the agents and trusted helper
         run: sudo /usr/local/bin/agentic-job sandbox prepare --config "$RUNNER_TEMP/agentic-job-host.toml"
-      - uses: cgwalters-forge/actions/secure-host@6e720e90708413982f90c1a396475946f5a31d0c # from main
+      - uses: cgwalters-forge/actions/secure-host@f5fb535d93f9451a5de1cbc13e61921bb67782ee # from main
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
           egress: ${{ steps.host-config.outputs.egress }}
@@ -133,7 +133,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@489c69d53cc23b989131952c9e3ca4d5add4e2b5 # v0.6.14
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
     with:
       policy: ${{ toJSON(needs.wrapper-policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.wrapper-runner.outputs.safe-outputs-artifact-id }}
@@ -387,7 +387,7 @@ jobs:
       # Its post step runs after the job's last step and fails the job if
       # a route is open.
       - name: The JavaScript action main and post steps are confined
-        uses: cgwalters-forge/agentic-job/.github/actions/confine-probe@489c69d53cc23b989131952c9e3ca4d5add4e2b5 # v0.6.14
+        uses: cgwalters-forge/agentic-job/.github/actions/confine-probe@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
 
   # The runner's Worker, exempt from the runner-read rule, still ends the
   # process confined left running, and logs so; read as data.
