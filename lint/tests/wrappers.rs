@@ -677,7 +677,7 @@ jobs:
 fn review_wrapper_pins_its_own_actions_by_full_commit() {
     for (file, actions) in [
         (REVIEW, &["admit", "deployment", "tailscale"][..]),
-        (AGENT, &["tailscale"]),
+        (AGENT, &["tailscale", "secure-host"]),
     ] {
         let text = read(file);
         let refs = own_action_refs(&text);
