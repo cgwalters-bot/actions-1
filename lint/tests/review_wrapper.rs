@@ -313,6 +313,64 @@ fn session_dispatch_gets_triage_policy_inputs() {
     assert_eq!(session["notify"], "comment");
 }
 
+// Only triage, and only when the caller opts in, asks policy for `all`:
+// the output types its allow file grants. Every other kind, and triage by
+// default, keeps its fixed list; the target job refuses the input elsewhere.
+#[test]
+fn triage_outputs_from_allow_widens_only_triage() {
+    let workflow = yaml(&read(DISPATCH));
+    let policy = &workflow["jobs"]["policy"]["with"];
+    let expr = |key: &str| {
+        policy[key]
+            .as_str()
+            .unwrap()
+            .trim()
+            .strip_prefix("${{")
+            .unwrap()
+            .strip_suffix("}}")
+            .unwrap()
+            .to_owned()
+    };
+    let fixed = [
+        ("review", "add_comment,noop"),
+        (
+            "implement",
+            "create_pull_request,noop,missing_tool,missing_data",
+        ),
+        (
+            "fix",
+            "push_to_pull_request_branch,noop,missing_tool,missing_data",
+        ),
+        ("triage", "add_comment,noop,missing_tool,missing_data"),
+        ("research", "add_comment,noop,missing_tool,missing_data"),
+        ("session", "add_comment,noop,missing_tool,missing_data"),
+    ];
+    for (kind, want) in fixed {
+        for mode in [None, Some(false), Some(true)] {
+            let mut context = BTreeMap::from([("inputs.kind", Yaml::String(kind.into()))]);
+            if let Some(mode) = mode {
+                context.insert("inputs.triage-outputs-from-allow", Yaml::Boolean(mode));
+            }
+            let want = if kind == "triage" && mode == Some(true) {
+                "all"
+            } else {
+                want
+            };
+            assert_eq!(
+                string(&value(&expr("outputs"), &context)),
+                want,
+                "{kind} {mode:?}"
+            );
+            // The cap stays as it was, whatever the bounds allow.
+            assert_eq!(
+                string(&value(&expr("max-outputs"), &context)),
+                if kind == "review" { "1" } else { "3" },
+                "{kind} {mode:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn research_artifact_only_never_applies_with_or_without_a_pat() {
     let workflow = yaml(&read(DISPATCH));

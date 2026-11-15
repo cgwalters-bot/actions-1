@@ -106,6 +106,13 @@ on:
         description: "Research only: return checked original hand-back identity without applying any proposal; no status comment"
         type: boolean
         default: false
+      # Stops an ordinary triage from closing pull requests or filing issues:
+      # only a caller that routes a run to a bounds file granting those
+      # outputs (such as PR recovery's) gets them (README, "Session limitations").
+      triage-outputs-from-allow:
+        description: "Triage only: the output types are those the allow file's [github.outputs] grants, not add_comment, noop, missing_tool and missing_data"
+        type: boolean
+        default: false
       # Deployment settings, for a caller that must differ; see the header.
       agent:
         description: "opencode, claude or vibe; empty: the variable AGENT, else opencode. fake is unsupported"
@@ -255,6 +262,7 @@ jobs:
           TARGET_ITEM: ${{ inputs.item }}
           PROFILE: ${{ inputs.kind }}
           RESEARCH_ARTIFACT_ONLY: ${{ inputs.research-artifact-only }}
+          TRIAGE_OUTPUTS_FROM_ALLOW: ${{ inputs.triage-outputs-from-allow }}
           EXPECTED_HEAD: ${{ inputs.head }}
           REVIEW_POOL: ${{ inputs.pool }}
           REVIEW_POOLS: ${{ vars.REVIEW_POOLS }}
@@ -308,6 +316,9 @@ jobs:
             const artifactOnly = process.env.RESEARCH_ARTIFACT_ONLY === 'true';
             if (artifactOnly && profile !== 'research') {
               throw new Error('research-artifact-only requires kind research');
+            }
+            if (process.env.TRIAGE_OUTPUTS_FROM_ALLOW === 'true' && profile !== 'triage') {
+              throw new Error('triage-outputs-from-allow requires kind triage');
             }
             const itemRepo = process.env.ITEM_REPO || process.env.TARGET_REPO;
             // Prevent item text from another repository being attributed to
@@ -520,6 +531,8 @@ jobs:
               ? "Fix works in a checkout of the pull request's branch at its pinned head; the change is pushed to that branch as one commit, or as the whole series again when the brief offers a replacement. Use noop, missing_tool or missing_data when needed."
               : skills
               ? 'Use the implement skill. Implement proposes one draft pull request. Use noop, missing_tool or missing_data when needed.'
+              : process.env.TRIAGE_OUTPUTS_FROM_ALLOW === 'true'
+              ? 'Triage leaves the tree clean and returns at most three of the outputs its bounds allow.'
               : 'Implement proposes one draft pull request. Triage, research and session leave the tree clean and return one add_comment. Use noop, missing_tool or missing_data when needed.';
             const text = JSON.stringify({ repository: itemRepo, number: data.number, title: data.title, body: data.body, author: data.user.login, association: data.author_association })
               .replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
@@ -560,7 +573,8 @@ jobs:
       task-artifact: ${{ inputs.kind != 'review' && format('dispatch-{0}-task', inputs.kind) || '' }}
       base: ${{ inputs.kind == 'review' && needs.target.outputs.review-base || 'main' }}
       kind: ${{ (inputs.kind == 'implement' || inputs.kind == 'fix') && 'branch' || 'analysis' }}
-      outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || 'add_comment,noop,missing_tool,missing_data')) }}
+      # The target job refused triage-outputs-from-allow for any other kind.
+      outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || (inputs.kind == 'triage' && inputs.triage-outputs-from-allow && 'all' || 'add_comment,noop,missing_tool,missing_data'))) }}
       max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}
       # A fix has bounds of its own: pushing to a pull request's branch is
       # allowed for the repositories fix.toml names and no other. Since

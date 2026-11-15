@@ -173,6 +173,16 @@ limits. A session needs no other
 caller setting than adding `session` to its `kind` choices, and the
 `session` boolean stays refused with it.
 
+A triage hands back only those four outputs unless its caller sets
+`triage-outputs-from-allow: true` (off by default, and refused for any
+other kind). Then the wrapper asks policy for `all`, so the output types
+are the ones the `allow` file's `[github.outputs]` grants, never a new
+pull request or a push for this `analysis` kind, and still at most 3.
+A caller sets it only together with an `allow` file of its own for the
+route, such as PR recovery's, which must close an obsolete bot pull
+request or file a replacement issue; that file lists `noop`,
+`missing_tool` and `missing_data` too if the run may use them.
+
 The release train may replace only the local `secure-host` forwarder in the
 agent job and the wrapper smoke job with
 `cgwalters-forge/actions/secure-host@<full immutable commit>`: the verified
