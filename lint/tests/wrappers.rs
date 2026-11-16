@@ -1352,7 +1352,7 @@ fn agent_joins_the_tailnet_with_the_register_jobs_key() {
         );
         assert_eq!(
             workflow.matches("- name: Join the tailnet").count(),
-            1,
+            if file == REVIEW { 2 } else { 1 },
             "{file}"
         );
         assert!(

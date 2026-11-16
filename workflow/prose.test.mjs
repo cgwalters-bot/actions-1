@@ -24,6 +24,7 @@ test('off by default; missing model, endpoint, runner, verification or caps visi
     assert.ok(configuration(JSON.stringify(c), 'configured').reason, key);
   }
   assert.ok(configuration(JSON.stringify(config), '').reason);
+  assert.match(configuration(JSON.stringify(config), 'configured', 'required-detector').reason, /no authorized advisory allocation/);
   for (const c of [{ requests: 13 }, { minutes: 6 }, { usd: 1 }, { usd: 0.001 }, { usd: 1e-9 }, { inputPrice: 10 }, { outputPrice: 20 }]) {
     assert.ok(configuration(JSON.stringify({ ...config, ...c }), 'configured').reason);
   }
@@ -69,6 +70,10 @@ test('actual preparation and bounds CLIs consume release-shaped artifacts; missi
     assert.equal(run(['check']).status, 0);
     writeFileSync(join(temp, 'checked/agent_output.json'), JSON.stringify({ items: [], errors: [] }));
     assert.equal(run(['check']).status, 1);
+    rmSync(join(temp, 'workflow/prose.md'));
+    writeFileSync(env.GITHUB_OUTPUT, '');
+    assert.equal(run([]).status, 0);
+    assert.equal(readFileSync(env.GITHUB_OUTPUT, 'utf8'), '');
     rmSync(join(temp, '.agentic-job/policy.json'));
     writeFileSync(env.GITHUB_OUTPUT, '');
     assert.equal(run([]).status, 0);
@@ -145,3 +150,48 @@ test('fresh-run bound check accepts noop and at most three exact schema rewrites
   }
   assert.throws(() => check(a, { advisory: { head: 'b'.repeat(40) } }), /SHA/);
 });
+
+// Optional release-backed test: use the verified v0.6.15 binary matching the
+// workflow/source pin. No inference or forge writes are performed.
+test('pinned policy/collect/check API enforces the independent advisory contract',
+  { skip: !process.env.AGENTIC_JOB_PROSE_BINARY }, () => {
+    const binary = process.env.AGENTIC_JOB_PROSE_BINARY;
+    const temp = mkdtempSync(join(tmpdir(), 'prose-release-'));
+    try {
+      const run = args => spawnSync(binary, args, { cwd: temp, encoding: 'utf8' });
+      assert.match(run(['--version']).stdout, /0\.6\.15/);
+      writeFileSync(join(temp, 'allow.toml'), `hosts = ["github.com"]\nrepos = ["owner/repo"]\nbases = ["main"]\nmax_outputs = 1\nmax_patch_bytes = 1024\nmax_patch_files = 1\n[github.outputs]\nadd_comment = { max = 1 }\nnoop = { max = 1 }\n`);
+      const args = ['policy', '--allow', 'allow.toml', '--repo', 'owner/repo', '--clone-url', 'https://github.com/owner/repo',
+        '--base', 'main', '--kind', 'analysis', '--outputs', 'add_comment,noop', '--max-outputs', '1',
+        '--job-token', '--advisory-item', '7', '--advisory-head', head];
+      const made = run(args);
+      assert.equal(made.status, 0, made.stderr);
+      const generated = JSON.parse(made.stdout);
+      assert.deepEqual(generated.advisory, policy.advisory);
+      writeFileSync(join(temp, 'policy.json'), made.stdout);
+      mkdirSync(join(temp, 'outputs'));
+      const validate = item => {
+        writeFileSync(join(temp, 'outputs/outputs.jsonl'), `${JSON.stringify(item)}\n`);
+        const collected = run(['collect', '--policy', 'policy.json', '--outputs', 'outputs', '--collected', 'collected.json']);
+        if (collected.status !== 0) return collected;
+        return run(['check', '--policy', 'policy.json', '--outputs', 'outputs', '--collected', 'collected.json',
+          '--report', 'report.json', '--comment-repo', 'owner/repo', '--comment-target', '7']);
+      };
+      for (const item of [accepted().items[0], { type: 'noop', message: 'No precise rewrite.' }]) {
+        const checked = validate(item);
+        assert.equal(checked.status, 0, checked.stderr + checked.stdout);
+        check(JSON.parse(readFileSync(join(temp, 'report.json'), 'utf8')), generated);
+      }
+      for (const item of [{ ...accepted().items[0], repo: 'other/repo' },
+        { ...accepted().items[0], reviewed_head: head },
+        { type: 'create_pull_request', title: 'Wrong authority', body: 'No' },
+        { ...accepted().items[0], body: 'x'.repeat(46001) }]) {
+        assert.notEqual(validate(item).status, 0);
+      }
+      const invalid = [...args];
+      invalid[invalid.indexOf('analysis')] = 'branch';
+      assert.notEqual(run(invalid).status, 0, 'advisory must stay analysis-only');
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });

@@ -457,16 +457,21 @@ its review kind uses separate literal commit-pinned steps.
 ### Advisory prose (default off)
 
 The independent `prose-*` chain in the review wrapper uses agentic-job
-**v0.6.12**, commit `eecc8c434e67a7607264ab3f7d90c88b6d02042a`, for policy,
+**v0.6.15**, commit `740ff7ff4dcef59dcb0619eb14d0e357c3193f62`, for policy,
 prepare/run, check and apply. Its policy binary, source actions and publishing
 workflows must stay at that one commit. The main verdict composition retains
 its independently matched pins and runner-user setup described above; the
 advisory does not change its release or network configuration.
-The new advisory agent already uses the runner-only contract: registration is
-in another job, its run token is passed as a reusable-workflow secret, host
-configuration omits the setup script, and setup runs unprivileged before run
-with an explicit `runner-home`. It has no OIDC, provider key, MCP credential,
-write token or persistent network-join credential.
+The advisory calls the same `cgwalters-agent.yml` runner-only path as the main
+review, not another agent workflow or a second implementation. Its independent
+register job validates policy provenance/configuration, joins and mints a
+single-use ephemeral key; both that key and the capped run token reach the agent
+as secrets. The shared runner checks attempt/expiry, spends the key, configures
+`host.env.PATH`, hardens the host and runs setup unprivileged before bounded
+prose preparation and run with `runner-home`. It has no OIDC, provider key, MCP
+credential, write token or persistent network-join credential. No trusted-base
+workflow exemption is added or workflow check weakened. The redundant
+`cgwalters-prose-agent.yml` is already absent from main and stays absent.
 
 The concrete threats are PR text obtaining publication authority, spending the
 main review allocation, or attaching advice to an unreviewed head. The prose
@@ -481,8 +486,8 @@ the only opt-in. Unset or `{"enabled":false}` visibly skips in the prose-config
 job summary. No cheap deployment has been selected or verified here. To enable,
 the owner must supply **all** of these fields, not copy a fictional model/pool:
 `enabled` (true), `model` (actual provider/model), `runner` (a JSON-encoded label
-array for an isolated ephemeral runner already connected to the inference
-network), `requests` (1–12), `minutes` (1–5), `usd` (0.01–0.10),
+array for an isolated ephemeral runner using the shared single-use tailnet join),
+`requests` (1–12), `minutes` (1–5), `usd` (0.01–0.10),
 `verified` (true), `evidence` (HTTPS verification record), and `inputPrice`,
 `outputPrice`, `mainInputPrice`, `mainOutputPrice` (positive prices in the same
 units). Both prose prices must be strictly cheaper. The owner must verify the
@@ -494,14 +499,25 @@ reviewer fallback. Broker aggregate caps and run request/time/USD limits remain
 necessary: reported spend may cross its cap on the last reply. No hard billing
 guarantee is implied.
 
-The agent runner must already reach that endpoint, without a credential it can
-reuse to join the network. Only the trusted hosted registration job joins the
-tailnet with OIDC. Admit this wrapper's registration `job_workflow_ref` in the
-broker and tailnet before enabling. If no compatible runner or model exists,
-leave prose off; do not give its agent OIDC or restore `agent-user: sandbox`.
+Only the trusted hosted registration job joins the tailnet with OIDC. Admit
+this wrapper's registration `job_workflow_ref` in the broker and tailnet before
+enabling. If no compatible runner or model exists, leave prose off; do not give
+its agent OIDC or restore `agent-user: sandbox`.
+
+The pinned checker has no per-call detector cap or skip input. If the trusted
+`AGENTIC_JOB_DETECT_MODEL` variable is set, this optional **entire prose chain
+skips visibly**, because that extra inference has no separately authorized
+advisory allocation. The main review's required detector remains unchanged.
+With it unset, upstream explicitly skips optional detection but still collects,
+validates policy/output bounds and verifies artifacts before apply. Do not clear
+a required detector just to enable prose; deploying both needs upstream bounded
+detector composition first.
 
 The base-owned `workflow/prose.md` and `workflow/prose.mjs` are required beside
-the existing review bounds. Input preparation reads at most 100 changed-file
+the existing review bounds when enabled. Configuration checks disabled settings
+before loading the helper; disabled legacy callers need neither prose file.
+Missing enabled configuration/helper visibly skips. Input
+preparation, after hardening, reads at most 100 changed-file
 records and 100 commit records (2 MiB per API response, 30 seconds per call),
 and supplies at most 20,000 Unicode characters: body up to 4,000, then commit
 messages and changed Markdown hunks with remaining space. Hunk headers, paths,
@@ -549,8 +565,12 @@ checklist, stale preparation heads, noop, structured output bounds, immutable
 pins and isolation of the main dependency graph. They do not prove model
 quality, live availability/pricing, broker admission, ephemeral-runner isolation
 or live GitHub publication. Run `node --test workflow/prose.test.mjs` and
-`just test-lint`; an optional binary-backed fixture run is documented with the
-tests. No live inference or write smoke test is part of local verification.
+`just test-lint`. Set `AGENTIC_JOB_PROSE_BINARY` to the SHA-256-verified v0.6.15
+release binary when running the Node suite to include the real policy/collect/
+check API fixture. The matching source's `cargo test --locked -p safe-outputs
+advisory` covers publisher stale-head rechecks and bounded publication with fake
+forge responses. No live inference or write smoke test is part of local
+verification.
 
 ### Ordinary dispatched reviews (dormant)
 

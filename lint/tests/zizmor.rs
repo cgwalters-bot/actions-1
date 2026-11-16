@@ -76,7 +76,8 @@ fn online_self_pins_survive_main_advancing() {
             }
         }
     }
-    assert_eq!(pins.len(), 7, "exercise every immutable wrapper self-pin");
+    // Include the independent advisory register join and the pinned host action.
+    assert_eq!(pins.len(), 9, "exercise every immutable wrapper self-pin");
     let checkout = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with: {persist-credentials: false}\n";
     let audit = |steps: &str| {
         let mut child = Command::new(std::env::var("ZIZMOR").unwrap_or("zizmor".into()))
