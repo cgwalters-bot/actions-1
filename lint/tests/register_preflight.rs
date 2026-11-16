@@ -10,10 +10,14 @@ const PREFLIGHT: &str = "Refuse unsupported child agents before credentials";
 fn register_preflight_precedes_credentials_and_preserves_configuration() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut scripts = Vec::new();
-    for file in ["cgwalters-agentic-job.yml", "cgwalters-review.yml"] {
+    for (file, job, policy) in [
+        ("cgwalters-agentic-job.yml", "register", "policy"),
+        ("cgwalters-review.yml", "register", "policy"),
+        ("cgwalters-review.yml", "prose-register", "prose-policy"),
+    ] {
         let text = fs::read_to_string(root.join(".github/workflows").join(file)).unwrap();
         let documents = YamlLoader::load_from_str(&text).unwrap();
-        let steps = documents[0]["jobs"]["register"]["steps"]
+        let steps = documents[0]["jobs"][job]["steps"]
             .as_vec()
             .expect("register steps");
         let named = |name: &str| {
@@ -56,7 +60,7 @@ fn register_preflight_precedes_credentials_and_preserves_configuration() {
 
         // Keep the original textual guard too: secrets must not enter an earlier
         // step through env, with, or an expression outside the run script.
-        let register = text.split("\n  register:\n").nth(1).unwrap();
+        let register = text.split(&format!("\n  {job}:\n")).nth(1).unwrap();
         let before = register
             .split(&format!("- name: {PREFLIGHT}"))
             .next()
@@ -78,11 +82,12 @@ fn register_preflight_precedes_credentials_and_preserves_configuration() {
             source.contains(r#""$BINARY" =~ ^[1-9][0-9]*$ && "$POLICY" =~ ^[1-9][0-9]*$"#),
             "{file}"
         );
+        let artifact_ids = format!(
+            "${{{{ needs.{policy}.outputs.binary-artifact-id }}}},${{{{ needs.{policy}.outputs.policy-artifact-id }}}}"
+        );
         assert_eq!(
             steps[download]["with"]["artifact-ids"].as_str(),
-            Some(
-                "${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}"
-            ),
+            Some(artifact_ids.as_str()),
             "{file}"
         );
         let step = &steps[preflight];
@@ -156,8 +161,10 @@ fn register_preflight_precedes_credentials_and_preserves_configuration() {
             }
         }
     }
-    assert_eq!(
-        scripts[0], scripts[1],
-        "both wrappers must enforce the same preflight"
-    );
+    for script in &scripts[1..] {
+        assert_eq!(
+            &scripts[0], script,
+            "all register jobs must enforce the same preflight"
+        );
+    }
 }

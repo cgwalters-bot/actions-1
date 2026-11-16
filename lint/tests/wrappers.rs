@@ -337,8 +337,10 @@ fn broker_defaults_follow_the_tailnet_configuration() {
         .skip(1)
         .map(|suffix| suffix.split_once('\'').unwrap().0)
         .collect();
-    // The review's policy call and its advisory prose pass's.
-    assert_eq!(fallbacks, [broker, broker]);
+    // Only the main review has a deployment default. The opt-in advisory
+    // requires an explicitly configured endpoint, never a placeholder.
+    assert_eq!(fallbacks, [broker]);
+    assert!(job(&review, "prose-policy").contains("inference-url: ${{ vars.INFERENCE_URL }}"));
     let dispatch = read(AGENTIC_JOB);
     assert_eq!(captures(&dispatch, "\n          BROKER_URL: "), [broker]);
 }

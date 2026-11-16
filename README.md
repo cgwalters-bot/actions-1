@@ -311,7 +311,8 @@ Tracker's activation child owns its bounds changes and the live
 primary-plus-secondary publication test; this audit enables no caller.
 
 Both wrappers explicitly forward `SAFE_OUTPUTS_PAT` to apply, never to the
-agent or check. Secondary publication requires that PAT, with access to fork
+agent or check. Dispatch also forwards it to policy for non-review,
+non-artifact-only runs. Secondary publication requires that PAT, with access to fork
 the secondary repository, disable Actions on its fork, push there and open a
 PR; the job token is insufficient. The bot must not own the secondary target.
 
@@ -396,7 +397,9 @@ Dependabot). Use a JSON array of numbers; Actions also coerces string IDs.
 Only admitted agent jobs enter per-PR concurrency; new automatic events
 cancel the old agent, comments do not. The head is data inside the sandbox,
 never executed by a privileged step. Each review is bounded to 150 requests,
-500 AIC and 75 agent minutes.
+500 AIC and 75 agent minutes. An enabled prose pass adds up to 30 requests,
+100 AIC and 20 agent minutes per automatic event (180 requests, 600 AIC
+and 95 agent minutes combined, not necessarily elapsed sequentially).
 
 The agent keeps the read-only job token; it has no organization Projects
 credential. To avoid false missing-board blockers, `workflow/review.md`
@@ -463,13 +466,16 @@ verdict, posting suggestions for a head that has moved, and spending the main
 review's model and budget on prose.
 
 It is off until a caller sets the repository variable `AGENT_PROSE_MODEL` to a
-cheaper model the inference proxy serves. Nothing falls back to the main
+cheaper model the inference proxy serves and explicitly sets `INFERENCE_URL`
+to that proxy's address. Nothing falls back to the main
 reviewer's `AGENT_MODEL` or [deployment](deployment/deployment.json) default,
-which names no cheaper pool; without the variable the `prose-*` jobs show as
+which names no cheaper pool; without both variables the `prose-*` jobs show as
 skipped. The pass runs only for the automatic `pull_request_target` events
 the main review admits, not for `/review` comments, with a smaller request,
 spend and time limit than the main review. The agent, its configuration and
 the inference addresses come from the same variables as the main review's.
+It also shares `AGENT_RUNNER` capacity: without enough runner slots, the
+advisory can delay the main review even though there is no dependency edge.
 
 Its `prose-policy`, `prose-register`, `prose-agent`, `prose-check` and
 `prose-apply` jobs are a pipeline of their own at the main review's
@@ -483,12 +489,21 @@ the writer reads the pull request again before posting and refuses a moved
 head (a read-to-POST race remains). They never call `review submit` or
 `review status`.
 
+The pinned apply helper fails its job on stale-head refusal. The main review
+result remains independent, but the overall workflow can still turn red;
+making that refusal a non-failing skip needs a helper contract change, not
+removal of the head check. Do not enable the pass until this is resolved and
+the authorized smoke test below passes.
+
 The trusted task, [workflow/prose.md](workflow/prose.md), is read from the
 base checkout. It follows tracker's prose checklist 0.1.0 (at
 [`5c4a8d61a94323703b71998c8b21eb7ecb2b386a`](https://github.com/cgwalters-forge/tracker/tree/5c4a8d61a94323703b71998c8b21eb7ecb2b386a/docs/review-checklist)),
 treats the reviewed text as untrusted data, and asks for at most three
 suggestions over at most 20,000 characters, or a noop when there is no prose
 or nothing to suggest. Those two limits are the prompt's, not checked bounds.
+Before enabling the pass, callers must keep `workflow/prose.md` on their base
+branch alongside the three `workflow/review*` files and update their wrapper
+pin. A merged wrapper does not install the task in caller repositories.
 
 Local wrapper tests check the jobs' configuration and admission, not a live
 run. Before a caller enables the variable, an authorized public pull request

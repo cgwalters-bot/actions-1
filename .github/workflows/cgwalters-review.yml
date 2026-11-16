@@ -321,13 +321,15 @@ jobs:
   # verdict-free pipeline with its own policy, credentials and artifacts.
   # Off unless the caller sets AGENT_PROSE_MODEL to a cheaper model the
   # inference proxy serves; it never falls back to the main reviewer's
-  # model, so without one its jobs show as skipped. Automatic events only,
+  # model. The caller must also configure INFERENCE_URL; without both its
+  # jobs show as skipped. Automatic events only,
   # admitted as for the main review. No main job needs a prose job: a prose
   # failure, noop or missing artifact cannot reach submit or status.
   prose-policy:
     needs: admit
     if: >-
       github.event.repository.visibility == 'public' && vars.AGENT_PROSE_MODEL != '' &&
+      vars.INFERENCE_URL != '' &&
       github.event_name == 'pull_request_target' && !github.event.pull_request.draft &&
       (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
         (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
@@ -356,7 +358,7 @@ jobs:
       model: ${{ vars.AGENT_PROSE_MODEL }}
       agent-config-repo: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_REPO || '' }}
       agent-config-path: ${{ (vars.AGENT == '' || vars.AGENT == 'opencode' || vars.AGENT == 'vibe') && vars.AGENT_CONFIG_PATH || '' }}
-      inference-url: ${{ vars.INFERENCE_URL || 'http://<inference-address>' }}
+      inference-url: ${{ vars.INFERENCE_URL }}
       inference-audience: ${{ vars.INFERENCE_AUDIENCE || 'praxis-credential-broker' }}
       max-requests: '30'
       budget: '100'

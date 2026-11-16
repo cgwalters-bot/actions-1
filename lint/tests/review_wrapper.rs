@@ -647,6 +647,7 @@ struct Event<'a> {
     command: Option<&'a str>,
     visibility: Option<&'a str>,
     prose_model: &'a str,
+    inference_url: &'a str,
 }
 
 impl Default for Event<'_> {
@@ -660,6 +661,7 @@ impl Default for Event<'_> {
             command: None,
             visibility: Some("public"),
             prose_model: "",
+            inference_url: "",
         }
     }
 }
@@ -714,6 +716,10 @@ fn admitted_by(event: Event<'_>, job: &str) -> bool {
         (
             "vars.AGENT_PROSE_MODEL",
             Yaml::String(event.prose_model.into()),
+        ),
+        (
+            "vars.INFERENCE_URL",
+            Yaml::String(event.inference_url.into()),
         ),
     ]);
     evaluate(source["jobs"][job]["if"].as_str().unwrap(), &context)
@@ -1447,7 +1453,15 @@ fn smoke_source(text: &str) {
             "[[ \"$EXIT\" == 0 && \"$CHECK\" == success && \"$CHECKED\" =~ ^[1-9][0-9]*$ && -z \"$REFUSAL\" && \"$PATCH\" != true ]]",
         ],
     );
-    excludes(&text, &["apply.yml", "SAFE_OUTPUTS_PAT", "pull-requests: write", "issues: write"]);
+    excludes(
+        &text,
+        &[
+            "apply.yml",
+            "SAFE_OUTPUTS_PAT",
+            "pull-requests: write",
+            "issues: write",
+        ],
+    );
 }
 
 #[test]
@@ -1617,6 +1631,7 @@ fn advisory_prose_pass_is_opt_in_verdict_free_and_separate() {
     for part in [
         "github.event.repository.visibility == 'public'",
         "vars.AGENT_PROSE_MODEL != ''",
+        "vars.INFERENCE_URL != ''",
         "github.event_name == 'pull_request_target'",
         "!github.event.pull_request.draft",
         "github.event.pull_request.author_association",
@@ -1627,6 +1642,10 @@ fn advisory_prose_pass_is_opt_in_verdict_free_and_separate() {
     assert_eq!(
         with["model"].as_str(),
         Some("${{ vars.AGENT_PROSE_MODEL }}")
+    );
+    assert_eq!(
+        with["inference-url"].as_str(),
+        Some("${{ vars.INFERENCE_URL }}")
     );
     for (key, value) in [
         ("event", true),
@@ -1662,6 +1681,30 @@ fn advisory_prose_pass_is_opt_in_verdict_free_and_separate() {
     for key in ["max-requests", "budget", "timeout"] {
         let limit = |with: &Yaml| with[key].as_str().unwrap().parse::<u32>().unwrap();
         assert!(limit(with) < limit(main), "{key}");
+    }
+    let apply = &jobs["prose-apply"];
+    let permissions = apply["permissions"].as_hash().unwrap();
+    assert_eq!(permissions.len(), 4);
+    for (key, value) in [
+        ("contents", "read"),
+        ("issues", "read"),
+        ("pull-requests", "write"),
+        ("actions", "read"),
+    ] {
+        assert_eq!(apply["permissions"][key].as_str(), Some(value), "{key}");
+    }
+    assert_eq!(apply["secrets"].as_hash().unwrap().len(), 1);
+    assert_eq!(
+        apply["secrets"]["SAFE_OUTPUTS_PAT"].as_str(),
+        Some("${{ secrets.SAFE_OUTPUTS_PAT }}")
+    );
+    for name in [
+        "prose-policy",
+        "prose-register",
+        "prose-agent",
+        "prose-check",
+    ] {
+        assert!(!job(&source, name).contains("SAFE_OUTPUTS_PAT"), "{name}");
     }
     for (name, definition) in jobs.as_hash().unwrap() {
         let name = name.as_str().unwrap();
@@ -1753,8 +1796,33 @@ fn advisory_prose_pass_admits_only_configured_automatic_reviews() {
         assert_eq!(admits(event), main[i], "main {i}");
     }
     for (i, event) in events().into_iter().enumerate() {
+        assert!(
+            !admitted_by(
+                Event {
+                    prose_model: "praxis/cheap",
+                    ..event
+                },
+                PROSE_POLICY
+            ),
+            "missing endpoint {i}"
+        );
+    }
+    for (i, event) in events().into_iter().enumerate() {
+        assert!(
+            !admitted_by(
+                Event {
+                    inference_url: "https://inference.example.test",
+                    ..event
+                },
+                PROSE_POLICY
+            ),
+            "missing model {i}"
+        );
+    }
+    for (i, event) in events().into_iter().enumerate() {
         let configured = Event {
             prose_model: "praxis/cheap",
+            inference_url: "https://inference.example.test",
             ..event
         };
         assert_eq!(admitted_by(configured, PROSE_POLICY), prose[i], "{i}");
