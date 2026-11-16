@@ -285,6 +285,59 @@ the deployment gate. For rollback to comment/result-url delivery, keep write
 caps at zero for a day to avoid undercounting the ledger's writes. This change
 enables no caller, settings, credentials, admission or live dispatch.
 
+### External execution: blocked on producer interfaces
+
+External execution is not exposed by this wrapper. The concrete threats are
+testing a different base than the dispatch admitted and giving agent/test
+processes authority to end or otherwise manage their inference run. The
+[external-runner contract](https://github.com/cgwalters-forge/agentic-job/blob/af4af5ffd205e835890c1a9f395d9f695738ce38/docs/dispatch.md#external-vm-runner-to-midstream-draft)
+requires both boundaries; adding a mode switch alone would not establish them.
+Hosted behavior and pins remain unchanged, and no external caller is enabled.
+
+The pinned agentic-job v0.6.15 (`740ff7ff4dcef59dcb0619eb14d0e357c3193f62`)
+already has `[preflight]`, `sandbox preflight` and bounded test evidence.
+Its [agent workflow](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/.github/workflows/agent.yml)
+executes preflight after lockdown and before setup/target code or model requests;
+this repository's shared agent job does not yet call it. Preflight checks
+effective resources, KVM boot/stop and optional session-libvirt create/destroy,
+including signal cleanup. It does not enforce the tests' concurrent guest cap
+or destroy an abandoned job host. Those remain the external lifecycle owner's
+responsibility, including cleanup after runner loss; workflow cancellation
+syntax is not proof of host destruction.
+
+Two producer interfaces are still needed before implementing this mode:
+
+- **Exact base commit through policy, run and check.** Policy's `base` is a
+  branch, not a separate admitted commit. The pinned
+  [clone implementation](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/crates/agentic-job/src/run/clone.rs)
+  uses `git clone --branch` and pins a head only for PR-branch pushes. Add a
+  reviewed producer interface that retains branch bounds while fetching and
+  verifying the dispatched commit before target code, and binds collection and
+  check to that same commit. A pre-run branch-tip check still races the clone;
+  passing a SHA as the branch or asking the agent to reset is not equivalent.
+  Policy's `external-receipt` is for the trusted consumer after fetch, not a
+  producer base-pin interface: its caller-owned record must never go external.
+- **Inference without lifecycle authority on the agent host.** The pinned
+  [registration implementation](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/crates/agentic-job/src/run/register.rs)
+  exports a run token that `run` takes over. In
+  [inference](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/crates/agentic-job/src/run/inference.rs),
+  `agent_token()` can return that token and `end()` uses it for DELETE.
+  Registration in another job therefore does not remove lifecycle authority
+  from agent/test processes. A reviewed endpoint-only inference/usage interface
+  with trusted external registration, cleanup and expiry is required, not a
+  provider key, token-file fallback, local proxy or second user. See the
+  [existing credentialless inference work](https://github.com/cgwalters-forge/agentic-job/issues/2999).
+  Endpoints must come from deployment environment configuration.
+
+At the inspected upstream main `af4af5ffd205e835890c1a9f395d9f695738ce38`,
+the clone and inference files are identical to the pinned release. Do not guess
+a newer pin or duplicate these mechanisms in the wrapper. Once compatible
+reviewed interfaces exist, the wrapper slice still needs default-off admission,
+exact bracketed dispatch identity, policy/agent/check only with no apply/PAT,
+fixed limits and bounded raw/checked artifacts, and mocked refusal and cleanup
+tests alongside workflow/security lint. Live KVM, inference identity and
+external-host lifecycle acceptance remain separate deployment prerequisites.
+
 ### Secondary pull requests
 
 The wrappers need no secondary-specific input. Policy, check and apply all
