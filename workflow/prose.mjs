@@ -9,14 +9,18 @@ export const limit = 20_000;
 
 // Threat: an accidental opt-in must not spend the main review's model/budget.
 // These are ceilings, not defaults; deployment owners must supply every value.
-export function configuration(raw, endpoint) {
+export function configuration(raw, endpoint, detector = '') {
   const c = JSON.parse(raw || '{}');
   if (c.enabled !== true) return { reason: 'disabled (default)' };
+  // The pinned check workflow has no per-call detector switch or separate cap.
+  // Never run its inference on the main detector's authorization. Skip this
+  // entire optional pass instead; ordinary reviews keep required detection.
+  if (detector) return { reason: 'configured detector has no authorized advisory allocation' };
   if (!endpoint) return { reason: 'missing INFERENCE_URL' };
   if (!/^[\w.:-]+\/[\w.:-]+$/.test(c.model || '')) return { reason: 'missing prose model' };
   const runners = JSON.parse(c.runner || 'null');
   if (!Array.isArray(runners) || !runners.length || runners.length > 10 ||
-      !runners.every(r => typeof r === 'string' && /^[\w.-]{1,64}$/.test(r))) return { reason: 'missing preconnected runner' };
+      !runners.every(r => typeof r === 'string' && /^[\w.-]{1,64}$/.test(r))) return { reason: 'missing isolated ephemeral runner' };
   if (!Number.isInteger(c.requests) || c.requests < 1 || c.requests > 12 ||
       !Number.isInteger(c.minutes) || c.minutes < 1 || c.minutes > 5 ||
       typeof c.usd !== 'number' || c.usd < 0.01 || c.usd > 0.1) return { reason: 'missing or excessive caps' };
@@ -118,7 +122,7 @@ function main() {
   }
   if (process.argv[2] === 'config') {
     let c;
-    try { c = configuration(process.env.REVIEW_PROSE, process.env.INFERENCE_URL); }
+    try { c = configuration(process.env.REVIEW_PROSE, process.env.INFERENCE_URL, process.env.DETECT_MODEL); }
     catch { c = { reason: 'invalid trusted deployment configuration' }; }
     if (c.reason) {
       appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Prose advisory skipped: ${c.reason}.\n`);

@@ -13,7 +13,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 // audit resolves. A bump changes this, the six calls, the smoke job's two and
 // the README.
 const PIN: &str = "740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15";
-const PROSE_PIN: &str = "eecc8c434e67a7607264ab3f7d90c88b6d02042a # v0.6.12";
+const PROSE_PIN: &str = PIN;
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
 // Both wrappers' agent job, called by local path.
@@ -986,6 +986,7 @@ fn agent_source(text: &str) {
             "Prepare the agents and trusted helper",
             "./.agentic-job-source/secure-host",
             "The setup script",
+            "Prepare bounded prose and pinned checklist",
             "run",
         ]
     );
@@ -1422,7 +1423,15 @@ fn smoke_source(text: &str) {
             "[[ \"$EXIT\" == 0 && \"$CHECK\" == success && \"$CHECKED\" =~ ^[1-9][0-9]*$ && -z \"$REFUSAL\" && \"$PATCH\" != true ]]",
         ],
     );
-    excludes(&text, &["apply.yml", "SAFE_OUTPUTS_PAT", "pull-requests: write", "issues: write"]);
+    excludes(
+        &text,
+        &[
+            "apply.yml",
+            "SAFE_OUTPUTS_PAT",
+            "pull-requests: write",
+            "issues: write",
+        ],
+    );
 }
 
 #[test]
@@ -1576,7 +1585,7 @@ fn prose_is_separate_default_off_and_uses_exact_advisory_contract() {
     let source = yaml(&text);
     let jobs = &source["jobs"];
     for main in [
-        "admit", "policy", "refusal", "agent", "check", "submit", "apply", "status",
+        "admit", "policy", "refusal", "register", "agent", "check", "submit", "apply", "status",
     ] {
         excludes(
             job(&text, main),
@@ -1691,22 +1700,19 @@ fn prose_is_separate_default_off_and_uses_exact_advisory_contract() {
 #[test]
 fn prose_runner_only_migration_keeps_oidc_and_writes_out_of_agent_job() {
     let shared = read(AGENT);
-    let text = job(&shared, "prose");
+    let text = job(&shared, "agent");
     excludes(
         &text,
         &[
             "id-token:",
             "agent-user: sandbox",
             "pull-requests: write",
-            "tailscale",
-            "TAILNET_KEY",
             "INFERENCE_API_KEY",
         ],
     );
     includes(
         &text,
         &[
-            "eecc8c434e67a7607264ab3f7d90c88b6d02042a",
             "runner-home:",
             "AGENT_USER: runner",
             "runner-setup.py admit",
@@ -1715,19 +1721,29 @@ fn prose_runner_only_migration_keeps_oidc_and_writes_out_of_agent_job() {
             // The agent's `agentic-job handback` must find the policy
             // binary, not the older one secure-host's image installs.
             "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-            "agentic-job config --host --from .agentic-job/config.toml --string \"sandbox.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
+            "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
         ],
     );
     let source = yaml(&shared);
-    assert_eq!(source["jobs"]["agent"]["if"].as_str(), Some("${{ !inputs.prose }}"));
-    assert_eq!(source["jobs"]["prose"]["if"].as_str(), Some("${{ inputs.prose }}"));
-    assert_eq!(source["on"]["workflow_call"]["inputs"]["prose"]["default"], Yaml::Boolean(false));
-    assert_eq!(source["jobs"]["prose"]["permissions"], yaml("contents: read\nissues: read\npull-requests: read\nactions: read"));
-    let steps = source["jobs"]["prose"]["steps"].as_vec().unwrap();
-    for output in ["exit", "safe-outputs-artifact-id", "safe-outputs-artifact-digest"] {
+    assert!(source["jobs"]["agent"]["if"].is_badvalue());
+    assert!(source["jobs"]["prose"].is_badvalue());
+    assert_eq!(
+        source["on"]["workflow_call"]["inputs"]["prose"]["default"],
+        Yaml::Boolean(false)
+    );
+    assert_eq!(
+        source["jobs"]["agent"]["permissions"],
+        yaml("contents: read\nissues: read\npull-requests: read\nactions: read")
+    );
+    let steps = source["jobs"]["agent"]["steps"].as_vec().unwrap();
+    for output in [
+        "exit",
+        "safe-outputs-artifact-id",
+        "safe-outputs-artifact-digest",
+    ] {
         assert_eq!(
             source["on"]["workflow_call"]["outputs"][output]["value"].as_str(),
-            Some(format!("${{{{ inputs.prose && jobs.prose.outputs.{output} || jobs.agent.outputs.{output} }}}}").as_str())
+            Some(format!("${{{{ jobs.agent.outputs.{output} }}}}").as_str())
         );
     }
     let index = |part: &str| {
@@ -1737,20 +1753,39 @@ fn prose_runner_only_migration_keeps_oidc_and_writes_out_of_agent_job() {
             .unwrap()
     };
     assert!(index("prepare") < index("runner-setup.py admit"));
-    assert!(index("runner-setup.py admit") < index("node workflow/prose.mjs"));
-    assert!(index("node workflow/prose.mjs") < index("config --host"));
-    assert!(index("config --host") < index("./.agentic-job-source/secure-host"));
-    assert!(index("./.agentic-job-source/secure-host") < index("runner-setup.py setup"));
-    for step in &steps[index("config --host")..] {
-        assert_eq!(step["if"].as_str(), Some("steps.prose.outputs.ready == 'true'"));
-    }
+    assert!(index("runner-setup.py admit") < index("config --host"));
+    assert!(index("config --host") < index("cgwalters-forge/actions/secure-host"));
+    assert!(index("cgwalters-forge/actions/secure-host") < index("runner-setup.py setup"));
+    assert!(index("runner-setup.py setup") < index("node workflow/prose.mjs"));
+    assert_eq!(
+        steps[index("node workflow/prose.mjs")]["if"].as_str(),
+        Some("inputs.prose")
+    );
+    assert_eq!(
+        steps.last().unwrap()["if"].as_str(),
+        Some("${{ !inputs.prose || steps.prose.outputs.ready == 'true' }}")
+    );
     assert_eq!(steps.last().unwrap()["id"].as_str(), Some("run"));
     let review = read(REVIEW);
-    includes(job(&review, "prose-agent"), &["uses: ./.github/workflows/cgwalters-agent.yml", "prose: true", "github-reads: true", "tailnet-key-attempt: ''", "tailnet-key-minted-at: ''"]);
-    excludes(job(&review, "prose-agent"), &["TAILNET_KEY"]);
+    includes(
+        job(&review, "prose-agent"),
+        &[
+            "uses: ./.github/workflows/cgwalters-agent.yml",
+            "prose: true",
+            "github-reads: true",
+            "TAILNET_KEY: ${{ needs.prose-register.outputs.tailnet-key }}",
+            "tailnet-key-attempt: ${{ needs.prose-register.outputs.tailnet-key-attempt }}",
+            "tailnet-key-minted-at: ${{ needs.prose-register.outputs.tailnet-key-minted-at }}",
+        ],
+    );
     includes(
         job(&review, "prose-register"),
-        &["id-token: write", "register --config"],
+        &[
+            "id-token: write",
+            "register --config",
+            "mint: 'true'",
+            "Refuse unsupported child agents before credentials",
+        ],
     );
     excludes(
         job(&review, "prose-agent"),
@@ -1770,5 +1805,113 @@ fn prose_offline_fixtures_run_in_existing_wrapper_suite() {
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn disabled_legacy_callers_need_no_prose_files_and_detection_is_not_bypassed() {
+    let workflow = yaml(&read(REVIEW));
+    let steps = workflow["jobs"]["prose-config"]["steps"].as_vec().unwrap();
+    let script = steps.last().unwrap()["run"].as_str().unwrap();
+    assert_eq!(steps.last().unwrap()["shell"].as_str(), Some("node {0}"));
+    // Execute the real inline config gate in an empty legacy caller checkout.
+    // No helper, task, or inference endpoint exists there.
+    for (raw, detector, reason) in [
+        ("", "", "disabled"),
+        (r#"{"enabled":false}"#, "", "disabled"),
+        ("malformed", "", "invalid"),
+        (r#"{"enabled":true}"#, "", "missing trusted prose files"),
+        (
+            r#"{"enabled":true}"#,
+            "required-detector",
+            "no authorized advisory allocation",
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let summary = temp.path().join("summary");
+        let output = temp.path().join("output");
+        let result = Command::new("node")
+            .args(["-e", script])
+            .current_dir(temp.path())
+            .env("REVIEW_PROSE", raw)
+            .env("DETECT_MODEL", detector)
+            .env("GITHUB_STEP_SUMMARY", &summary)
+            .env("GITHUB_OUTPUT", &output)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+        assert!(fs::read_to_string(summary).unwrap().contains(reason));
+        assert!(!output.exists(), "must not enable a skipped chain");
+    }
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir(temp.path().join("workflow")).unwrap();
+    fs::write(
+        temp.path().join("workflow/prose.mjs"),
+        read("workflow/prose.mjs"),
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("workflow/prose.md"),
+        read("workflow/prose.md"),
+    )
+    .unwrap();
+    let output = temp.path().join("output");
+    let result = Command::new("node")
+        .args(["-e", script])
+        .current_dir(temp.path())
+        .env("REVIEW_PROSE", r#"{"enabled":true,"model":"provider/cheap","runner":"[\"ubuntu-26.04\"]","requests":5,"minutes":2,"usd":0.05,"verified":true,"evidence":"https://example.com/verification","inputPrice":1,"outputPrice":2,"mainInputPrice":10,"mainOutputPrice":20}"#)
+        .env("DETECT_MODEL", "")
+        .env("INFERENCE_URL", "https://example.com/inference")
+        .env("GITHUB_STEP_SUMMARY", temp.path().join("summary"))
+        .env("GITHUB_OUTPUT", &output)
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    assert!(
+        fs::read_to_string(output)
+            .unwrap()
+            .contains("enabled=true\n")
+    );
+    // No override reaches upstream check: its normal required validation stays.
+    let with = workflow["jobs"]["prose-check"]["with"].as_hash().unwrap();
+    assert_eq!(with.len(), 3);
+    assert_eq!(
+        steps.last().unwrap()["env"]["DETECT_MODEL"].as_str(),
+        Some("${{ vars.AGENTIC_JOB_DETECT_MODEL }}")
+    );
+}
+
+#[test]
+fn prose_register_preflight_is_the_tested_main_preflight_before_credentials() {
+    let workflow = yaml(&read(REVIEW));
+    let steps = workflow["jobs"]["prose-register"]["steps"]
+        .as_vec()
+        .unwrap();
+    let main = workflow["jobs"]["register"]["steps"].as_vec().unwrap();
+    let preflight = |step: &&Yaml| {
+        step["name"].as_str() == Some("Refuse unsupported child agents before credentials")
+    };
+    let position = steps.iter().position(|step| preflight(&step)).unwrap();
+    assert_eq!(
+        steps[position]["run"],
+        main.iter().find(preflight).unwrap()["run"]
+    );
+    assert!(
+        steps[..position]
+            .iter()
+            .all(|step| step["id"].as_str() != Some("tailnet")
+                && step["id"].as_str() != Some("register"))
+    );
+    assert!(
+        steps[0]["run"]
+            .as_str()
+            .unwrap()
+            .contains(PIN.split_once(' ').unwrap().0)
+    );
+    assert_eq!(
+        steps[1]["with"]["artifact-ids"].as_str(),
+        Some(
+            "${{ needs.prose-policy.outputs.binary-artifact-id }},${{ needs.prose-policy.outputs.policy-artifact-id }}"
+        )
     );
 }
