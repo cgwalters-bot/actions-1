@@ -2,6 +2,16 @@
 
 > This text is LLM generated.
 
+[forge.json](forge.json) is the default for every repository in
+cgwalters-forge: forge-infra's daily self-hosted Renovate finds each
+repository its app can see and onboards it with a `.github/renovate.json`
+that extends `github>cgwalters-forge/actions//renovate/forge`. The preset is
+bootc-dev's shared configuration (bootc-dev/infra's
+`renovate-shared-config.json`: action pins, images, crates and the rest,
+grouped into one pull request per repository) less its `:gitSignOff`, since
+a bot adds no Signed-off-by. Midstream forks are left alone. Once a
+repository is onboarded its Dependabot file can go.
+
 [runners.json](runners.json) is a Renovate preset that moves GitHub-hosted
 Ubuntu runner labels in `runs-on` to the newest one, and does nothing else.
 Dependabot keeps the action pins and images in our repositories, so the
