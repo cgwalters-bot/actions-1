@@ -91,6 +91,7 @@ fn excludes(text: &str, forbidden: &[&str]) {
 enum Expr {
     Literal(Yaml),
     Path(String),
+    Property(Box<Expr>, String),
     Not(Box<Expr>),
     Binary(&'static str, Box<Expr>, Box<Expr>),
     Call(String, Vec<Expr>),
@@ -169,7 +170,17 @@ impl<'a> Parser<'a> {
                     assert!(self.take(","));
                 }
             }
-            Expr::Call(name, args)
+            let mut expr = Expr::Call(name, args);
+            while self.take(".") {
+                let end = self
+                    .0
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
+                    .unwrap_or(self.0.len());
+                assert!(end > 0, "missing property name: {}", self.0);
+                expr = Expr::Property(Box::new(expr), self.0[..end].to_owned());
+                self.0 = &self.0[end..];
+            }
+            expr
         } else {
             match name.as_str() {
                 "true" => Expr::Literal(Yaml::Boolean(true)),
@@ -209,6 +220,7 @@ impl Expr {
         match self {
             Self::Literal(v) => v.clone(),
             Self::Path(path) => context.get(path.as_str()).cloned().unwrap_or(Yaml::Null),
+            Self::Property(expr, key) => expr.eval(context)[key.as_str()].clone(),
             Self::Not(expr) => Yaml::Boolean(!truthy(&expr.eval(context))),
             Self::Binary(op, left, right) => {
                 let left = left.eval(context);
@@ -236,6 +248,9 @@ impl Expr {
                         .unwrap_or(Yaml::Boolean(false)),
                     ("always", []) => Yaml::Boolean(true),
                     ("fromJSON", [value]) => yaml(&string(value)),
+                    ("format", [Yaml::String(template), value]) => {
+                        Yaml::String(template.replace("{0}", &string(value)))
+                    }
                     ("startsWith", [value, prefix]) => Yaml::Boolean(
                         string(value)
                             .to_ascii_lowercase()
@@ -279,6 +294,10 @@ fn session_dispatch_gets_triage_policy_inputs() {
     let resolve = |kind: &str| -> BTreeMap<String, String> {
         let context = BTreeMap::from([
             ("inputs.kind", Yaml::String(kind.to_owned())),
+            (
+                "needs.target.outputs.item-kind",
+                Yaml::String("issue".into()),
+            ),
             // The scripted agent, so fake-profile resolves too.
             (
                 "needs.target.outputs.agent",
@@ -321,17 +340,6 @@ fn session_dispatch_gets_triage_policy_inputs() {
 fn triage_outputs_from_allow_widens_only_triage() {
     let workflow = yaml(&read(DISPATCH));
     let policy = &workflow["jobs"]["policy"]["with"];
-    let expr = |key: &str| {
-        policy[key]
-            .as_str()
-            .unwrap()
-            .trim()
-            .strip_prefix("${{")
-            .unwrap()
-            .strip_suffix("}}")
-            .unwrap()
-            .to_owned()
-    };
     let fixed = [
         ("review", "add_comment,noop"),
         (
@@ -348,7 +356,13 @@ fn triage_outputs_from_allow_widens_only_triage() {
     ];
     for (kind, want) in fixed {
         for mode in [None, Some(false), Some(true)] {
-            let mut context = BTreeMap::from([("inputs.kind", Yaml::String(kind.into()))]);
+            let mut context = BTreeMap::from([
+                ("inputs.kind", Yaml::String(kind.into())),
+                (
+                    "needs.target.outputs.item-kind",
+                    Yaml::String("issue".into()),
+                ),
+            ]);
             if let Some(mode) = mode {
                 context.insert("inputs.triage-outputs-from-allow", Yaml::Boolean(mode));
             }
@@ -358,16 +372,348 @@ fn triage_outputs_from_allow_widens_only_triage() {
                 want
             };
             assert_eq!(
-                string(&value(&expr("outputs"), &context)),
+                string(&workflow_value(&policy["outputs"], &context)),
                 want,
                 "{kind} {mode:?}"
             );
             // The cap stays as it was, whatever the bounds allow.
             assert_eq!(
-                string(&value(&expr("max-outputs"), &context)),
+                string(&workflow_value(&policy["max-outputs"], &context)),
                 if kind == "review" { "1" } else { "3" },
                 "{kind} {mode:?}"
             );
+            assert_eq!(
+                truthy(&workflow_value(&policy["apply-partial"], &context)),
+                ["implement", "research", "triage", "session"].contains(&kind),
+                "{kind} {mode:?}"
+            );
+        }
+    }
+    for item_kind in ["pull-request", ""] {
+        let context = BTreeMap::from([
+            ("inputs.kind", Yaml::String("triage".into())),
+            ("inputs.triage-outputs-from-allow", Yaml::Boolean(true)),
+            (
+                "needs.target.outputs.item-kind",
+                Yaml::String(item_kind.into()),
+            ),
+        ]);
+        assert_eq!(
+            string(&workflow_value(&policy["outputs"], &context)),
+            "add_comment,noop,missing_tool,missing_data"
+        );
+        assert!(!truthy(&workflow_value(&policy["apply-partial"], &context)));
+    }
+}
+
+fn workflow_value(source: &Yaml, context: &BTreeMap<&str, Yaml>) -> Yaml {
+    value(
+        source
+            .as_str()
+            .unwrap()
+            .trim()
+            .strip_prefix("${{")
+            .unwrap()
+            .strip_suffix("}}")
+            .unwrap(),
+        context,
+    )
+}
+
+// Run against the release binary and apply.yml at PIN. Only evaluate the
+// jobs' gates: never run a handler or use a forge credential in this test.
+#[test]
+#[ignore = "requires the pinned agentic-job binary on PATH and AGENTIC_JOB_APPLY pointing to its apply.yml"]
+fn pr_triage_checker_and_apply_retry_stay_advisory() {
+    use serde_json::{Value, json};
+
+    let jobs = &yaml(&read(DISPATCH))["jobs"];
+    let apply = yaml(&fs::read_to_string(std::env::var_os("AGENTIC_JOB_APPLY").unwrap()).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let cli = |args: &[&str]| {
+        Command::new("agentic-job")
+            .args(args)
+            .current_dir(dir.path())
+            .env_remove("GH_TOKEN")
+            .env_remove("GITHUB_TOKEN")
+            .output()
+            .unwrap()
+    };
+    assert_eq!(
+        String::from_utf8_lossy(&cli(&["--version"]).stdout).trim(),
+        "agentic-job 0.6.16"
+    );
+    fs::write(
+        dir.path().join("allow.toml"),
+        r#"
+hosts = ["github.com"]
+repos = ["example/repo"]
+bases = ["main"]
+max_outputs = 3
+max_patch_bytes = 1048576
+max_patch_files = 50
+[github.outputs]
+add_comment = { max = 1 }
+noop = { max = 1 }
+missing_tool = { max = 1 }
+missing_data = { max = 1 }
+close_pull_request = { max = 1 }
+create_issue = { max = 1 }
+"#,
+    )
+    .unwrap();
+    let mut context = BTreeMap::from([
+        ("inputs.kind", Yaml::String("triage".into())),
+        ("inputs.triage-outputs-from-allow", Yaml::Boolean(true)),
+        (
+            "needs.target.outputs.item-kind",
+            Yaml::String("pull-request".into()),
+        ),
+        ("needs.policy.result", Yaml::String("success".into())),
+    ]);
+    let policy = &jobs["policy"]["with"];
+    let compile = |item_kind: &str| {
+        let mut context = context.clone();
+        context.insert(
+            "needs.target.outputs.item-kind",
+            Yaml::String(item_kind.into()),
+        );
+        let compiled = cli(&[
+            "policy",
+            "--allow",
+            "allow.toml",
+            "--repo",
+            "example/repo",
+            "--clone-url",
+            "https://github.com/example/repo",
+            "--base",
+            &string(&workflow_value(&policy["base"], &context)),
+            "--kind",
+            &string(&workflow_value(&policy["kind"], &context)),
+            "--outputs",
+            &string(&workflow_value(&policy["outputs"], &context)),
+            "--max-outputs",
+            &string(&workflow_value(&policy["max-outputs"], &context)),
+        ]);
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        compiled.stdout
+    };
+    let advisory_policy = compile("pull-request");
+    let widened_issue_policy = compile("issue");
+    // The evaluator takes the check context already serialized by toJSON.
+    let check_input = Yaml::String(
+        jobs["apply"]["with"]["check"]
+            .as_str()
+            .unwrap()
+            .replace("toJSON(needs.check)", "needs.check-json"),
+    );
+    context.insert(
+        "inputs.policy",
+        Yaml::String(
+            json!({
+                "external-run-id": "", "proposals-artifact": "", "expect-check-refusal": "",
+                "apply-partial": string(&workflow_value(&policy["apply-partial"], &context)),
+                "notify": string(&workflow_value(&policy["notify"], &context)), "notified": "true"
+            })
+            .to_string(),
+        ),
+    );
+
+    fs::create_dir(dir.path().join("proposals")).unwrap();
+    fs::create_dir(dir.path().join("advisory")).unwrap();
+    let head = "a".repeat(40);
+    let banner = format!("Advisory recommendation for PR head {head}.");
+    // agent-board's pinned disposition parser only considers comments
+    // starting with this fence. Include a matching, actionable disposition.
+    let fence = "```agent-board-pr-triage\n";
+    let grant = format!(
+        "{fence}{}\n```",
+        json!({
+            "head":head, "run":101, "decision":"more-rounds", "reason":"Retry the repair", "question":null
+        })
+    );
+    let comment = |body: &str| json!({"type":"add_comment", "repo":"example/repo", "item_number":7, "body":body});
+    for (proposal, accepted, advisory) in [
+        (
+            json!({"type":"close_pull_request", "repo":"example/repo", "pull_request_number":7, "body":"Obsolete."}),
+            false,
+            false,
+        ),
+        (
+            json!({"type":"create_issue", "repo":"example/repo", "title":"Replacement", "body":"Replan the obsolete pull request."}),
+            false,
+            false,
+        ),
+        (
+            comment(&format!(
+                "{banner}\n\nReview the failed check before deciding whether to retry."
+            )),
+            true,
+            true,
+        ),
+        (
+            comment("Advisory recommendation without a head."),
+            true,
+            false,
+        ),
+        (
+            comment(&format!(
+                "{}\n\nRetry.",
+                banner.replace(&head, &"b".repeat(40))
+            )),
+            true,
+            false,
+        ),
+        (comment(&grant), true, false),
+        (comment(&format!("{banner}\n\n{grant}")), true, false),
+    ] {
+        fs::write(
+            dir.path().join("proposals/outputs.jsonl"),
+            format!("{proposal}\n"),
+        )
+        .unwrap();
+        let check_proposal = |policy: &[u8]| {
+            fs::write(dir.path().join("policy.json"), policy).unwrap();
+            let collected = cli(&[
+                "collect",
+                "--policy",
+                "policy.json",
+                "--outputs",
+                "proposals",
+                "--collected",
+                "collected.json",
+            ]);
+            assert!(matches!(collected.status.code(), Some(0 | 1)));
+            let collected: Value =
+                serde_json::from_slice(&fs::read(dir.path().join("collected.json")).unwrap())
+                    .unwrap();
+            if collected["errors"] != json!([]) {
+                return Err(collected.to_string());
+            }
+            let result = cli(&[
+                "check",
+                "--policy",
+                "policy.json",
+                "--outputs",
+                "proposals",
+                "--collected",
+                "collected.json",
+                "--report",
+                "report.json",
+                "--run-id",
+                "101",
+                "--comment-repo",
+                "example/repo",
+                "--comment-target",
+                "7",
+            ]);
+            if !result.status.success() {
+                assert_eq!(result.status.code(), Some(1), "{result:?}");
+                return Err(String::from_utf8_lossy(&result.stdout).into_owned());
+            }
+            Ok(
+                serde_json::from_slice::<Value>(&fs::read(dir.path().join("report.json")).unwrap())
+                    .unwrap(),
+            )
+        };
+        if !accepted {
+            // A malformed mutation would fail either policy and prove nothing.
+            let report = check_proposal(&widened_issue_policy).unwrap();
+            assert_eq!(report["items"].as_array().unwrap().len(), 1);
+            assert_eq!(report["items"][0]["type"], proposal["type"]);
+        }
+        let report = check_proposal(&advisory_policy);
+        assert_eq!(report.is_ok(), accepted, "{proposal}: {report:?}");
+        let checked = if let Ok(report) = report {
+            // Same accepted items that check.yml puts in agent_output.json before upload.
+            assert_eq!(report["items"].as_array().unwrap().len(), 1);
+            assert_eq!(report["items"][0]["type"], "add_comment");
+            fs::write(
+                dir.path().join("advisory/agent_output.json"),
+                json!({"items": report["items"], "errors": []}).to_string(),
+            )
+            .unwrap();
+            let result = Command::new("node")
+                .args([
+                    "-e",
+                    "new Function('core', process.argv[1])({setOutput: (k, v) => console.log(v)})",
+                    jobs["advisory"]["steps"][1]["with"]["script"]
+                        .as_str()
+                        .unwrap(),
+                ])
+                .env("BANNER", &banner)
+                .env("ARTIFACT_ID", "123")
+                .env("RUNNER_TEMP", dir.path())
+                .output()
+                .unwrap();
+            assert_eq!(result.status.success(), advisory, "{proposal}: {result:?}");
+            if advisory {
+                assert_eq!(result.stdout, b"123\n");
+                assert!(
+                    !report["items"][0]["body"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with(fence)
+                );
+            }
+            json!({"result": "success", "outputs": {"artifact-id": "123"}})
+        } else {
+            json!({"result": "failure", "outputs": {}})
+        };
+        for (key, value) in [
+            ("needs.check.result", checked["result"].as_str().unwrap()),
+            (
+                "needs.check.outputs.artifact-id",
+                checked["outputs"]["artifact-id"].as_str().unwrap_or(""),
+            ),
+            (
+                "needs.advisory.result",
+                if advisory { "success" } else { "failure" },
+            ),
+            (
+                "needs.advisory.outputs.artifact-id",
+                if advisory { "123" } else { "" },
+            ),
+        ] {
+            context.insert(key, Yaml::String(value.into()));
+        }
+        context.insert("needs.check-json", Yaml::String(checked.to_string()));
+        for attempt in [1, 2] {
+            // An apply-only retry gets the same check outcome and immutable upload.
+            context.insert("github.run_attempt", Yaml::Integer(attempt));
+            assert!(truthy(&workflow_value(&jobs["apply"]["if"], &context)));
+            let routed = workflow_value(&check_input, &context);
+            context.insert("inputs.check", routed);
+            for exit in ["0", "124"] {
+                context.insert(
+                    "inputs.agent",
+                    Yaml::String(json!({"outputs": {"exit": exit}}).to_string()),
+                );
+                assert_eq!(
+                    truthy(&workflow_value(&apply["jobs"]["apply"]["if"], &context)),
+                    advisory && exit == "0"
+                );
+                assert!(truthy(&workflow_value(
+                    &apply["jobs"]["conclude"]["if"],
+                    &context
+                )));
+            }
+        }
+        if advisory {
+            // A retry cannot inherit approval for a different upload.
+            for artifact_id in ["", "456"] {
+                context.insert(
+                    "needs.advisory.outputs.artifact-id",
+                    Yaml::String(artifact_id.into()),
+                );
+                let routed: Value =
+                    serde_json::from_str(&string(&workflow_value(&check_input, &context))).unwrap();
+                assert_eq!(routed["result"], "failure");
+            }
         }
     }
 }
@@ -398,6 +744,10 @@ fn research_artifact_only_never_applies_with_or_without_a_pat() {
             for pat in ["", "fixture-pat"] {
                 let mut context = BTreeMap::from([
                     ("inputs.kind", Yaml::String(kind.into())),
+                    (
+                        "needs.target.outputs.item-kind",
+                        Yaml::String("issue".into()),
+                    ),
                     ("needs.policy.result", Yaml::String("success".into())),
                     ("inputs.apply-environment", Yaml::String("apply".into())),
                     ("secrets.SAFE_OUTPUTS_PAT", Yaml::String(pat.into())),

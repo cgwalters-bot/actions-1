@@ -1326,7 +1326,11 @@ fn safe_output_contract_keeps_caller_bounds_counts_and_apply_token() {
             "SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}"
         )));
         assert!(apply.contains(&line(6, "policy: ${{ toJSON(needs.policy.outputs) }}")));
-        assert!(apply.contains(&line(6, "check: ${{ toJSON(needs.check) }}")));
+        if workflow == &dispatch {
+            assert!(apply.contains("&& toJSON(needs.check) ||"));
+        } else {
+            assert!(apply.contains(&line(6, "check: ${{ toJSON(needs.check) }}")));
+        }
         for name in ["register", "agent", "check"] {
             assert!(!job(workflow, name).contains("SAFE_OUTPUTS_PAT"), "{name}");
         }

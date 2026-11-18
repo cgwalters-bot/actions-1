@@ -53,7 +53,7 @@ on:
   workflow_call:
     inputs:
       kind:
-        description: "Fixed profile: implement, triage, research, session, review or fix (review and fix take a pull request number; session is a comment-only analysis run, not the refused session input)"
+        description: "Fixed profile: implement, triage, research, session (comment-only analysis), review or fix"
         type: string
         required: true
       repo:
@@ -61,15 +61,15 @@ on:
         type: string
         required: true
       item:
-        description: Positive issue number in item-repo or the target repository (a pull request's for review and fix)
+        description: "Positive issue number, or pull request number for review, fix and opted-in triage. Review and fix require a pull request"
         type: string
         required: true
       item-repo:
-        description: "Public issue repository, OWNER/NAME, within the caller's bounds; empty uses repo. Not for review or fix"
+        description: "Public issue repository, OWNER/NAME, within the caller's bounds; empty uses repo. Not for review or fix; for PR triage must match repo if set"
         type: string
         default: ""
       head:
-        description: "For review: required exact 40-hex expected PR head, as sent by agent-board"
+        description: "For review and PR triage: required exact 40-hex expected PR head from the caller"
         type: string
         default: ""
       pool:
@@ -106,11 +106,9 @@ on:
         description: "Research only: return checked original hand-back identity without applying any proposal; no status comment"
         type: boolean
         default: false
-      # Stops an ordinary triage from closing pull requests or filing issues:
-      # only a caller that routes a run to a bounds file granting those
-      # outputs (such as PR recovery's) gets them (README, "Session limitations").
+      # Only an opted-in caller can broaden issue triage or dispatch PR triage.
       triage-outputs-from-allow:
-        description: "Triage only: the output types are those the allow file's [github.outputs] grants, not add_comment, noop, missing_tool and missing_data"
+        description: "Triage only: use the allow file's output types for issues, and admit advisory triage of a pull request in repo"
         type: boolean
         default: false
       # Deployment settings, for a caller that must differ; see the header.
@@ -233,6 +231,8 @@ jobs:
       review-base: ${{ steps.target.outputs.review-base }}
       review-config: ${{ steps.target.outputs.review-config }}
       review-allow: ${{ steps.target.outputs.review-allow }}
+      item-kind: ${{ steps.target.outputs.item-kind }}
+      advisory-banner: ${{ steps.target.outputs.advisory-banner }}
     steps:
       # Any public repository can call this file, and its register job
       # gets identity tokens with this file's `job_workflow_ref`, which the
@@ -317,7 +317,8 @@ jobs:
             if (artifactOnly && profile !== 'research') {
               throw new Error('research-artifact-only requires kind research');
             }
-            if (process.env.TRIAGE_OUTPUTS_FROM_ALLOW === 'true' && profile !== 'triage') {
+            const triageOutputsFromAllow = process.env.TRIAGE_OUTPUTS_FROM_ALLOW === 'true';
+            if (triageOutputsFromAllow && profile !== 'triage') {
               throw new Error('triage-outputs-from-allow requires kind triage');
             }
             const itemRepo = process.env.ITEM_REPO || process.env.TARGET_REPO;
@@ -514,10 +515,36 @@ jobs:
             core.setOutput('agent-config-path', configured ? process.env.AGENT_CONFIG_PATH : '');
             const [owner, name] = itemRepo.split('/');
             const { data } = await github.rest.issues.get({ owner, repo: name, issue_number: Number(item) });
-            const onPull = ['review', 'fix'].includes(profile);
-            if (onPull !== Boolean(data.pull_request) || data.number !== Number(item)) {
-              throw new Error(onPull ? `${profile} requires a pull request` : 'This profile requires an issue, not a pull request');
+            if (data.number !== Number(item)) throw new Error('Returned item number does not match the requested item');
+            const prTriage = triageOutputsFromAllow && Boolean(data.pull_request);
+            let advisoryBanner;
+            if (triageOutputsFromAllow && process.env.EXPECTED_HEAD && !prTriage) {
+              throw new Error('Triage with an expected head requires a pull request');
             }
+            if (data.pull_request) {
+              if (profile !== 'fix' && !triageOutputsFromAllow) {
+                throw new Error('This profile requires an issue, not a pull request');
+              }
+              if (prTriage) {
+                if (itemRepo.toLowerCase() !== repo.toLowerCase()) {
+                  throw new Error('PR triage requires the pull request to be in repo, not a foreign item-repo');
+                }
+                const head = process.env.EXPECTED_HEAD;
+                if (!/^[0-9a-f]{40}$/.test(head ?? '')) throw new Error('PR triage requires an exact expected head');
+                const { data: pull } = await github.rest.pulls.get({ owner, repo: name, pull_number: Number(item) });
+                // Policy checks main for triage; never substitute it for a
+                // different live base when admitting a pull request.
+                if (pull.number !== Number(item) || pull.state !== 'open' || pull.head.sha !== head ||
+                    pull.base.ref !== 'main' || pull.base.repo.full_name.toLowerCase() !== repo.toLowerCase()) {
+                  throw new Error('PR triage refused: pull request is not open on the expected head and base');
+                }
+                advisoryBanner = `Advisory recommendation for PR head ${head}.`;
+                core.setOutput('advisory-banner', advisoryBanner);
+              }
+            } else if (profile === 'fix') {
+              throw new Error('fix requires a pull request');
+            }
+            core.setOutput('item-kind', data.pull_request ? 'pull-request' : 'issue');
             // As agentic-job's dispatch: the implement procedure is a skill
             // the run installs, so the task only names it. Fix has no
             // procedure of its own but writes commits too, so it gets the
@@ -531,7 +558,9 @@ jobs:
               ? "Fix works in a checkout of the pull request's branch at its pinned head; the change is pushed to that branch as one commit, or as the whole series again when the brief offers a replacement. Use noop, missing_tool or missing_data when needed."
               : skills
               ? 'Use the implement skill. Implement proposes one draft pull request. Use noop, missing_tool or missing_data when needed.'
-              : process.env.TRIAGE_OUTPUTS_FROM_ALLOW === 'true'
+              : prTriage
+              ? `PR triage is advisory. Leave the tree clean. Read commits and checks at ${process.env.EXPECTED_HEAD}, not at the live PR head. If you cannot establish the evidence at that SHA, return missing_data instead of a recommendation. Start each recommendation comment with this exact line: "${advisoryBanner}" Follow it with human-readable advice, not a machine disposition. Do not close the pull request or file a replacement issue.`
+              : triageOutputsFromAllow
               ? 'Triage leaves the tree clean and returns at most three of the outputs its bounds allow.'
               : 'Implement proposes one draft pull request. Triage, research and session leave the tree clean and return one add_comment. Use noop, missing_tool or missing_data when needed.';
             const text = JSON.stringify({ repository: itemRepo, number: data.number, title: data.title, body: data.body, author: data.user.login, association: data.author_association })
@@ -573,8 +602,11 @@ jobs:
       task-artifact: ${{ inputs.kind != 'review' && format('dispatch-{0}-task', inputs.kind) || '' }}
       base: ${{ inputs.kind == 'review' && needs.target.outputs.review-base || 'main' }}
       kind: ${{ (inputs.kind == 'implement' || inputs.kind == 'fix') && 'branch' || 'analysis' }}
-      # The target job refused triage-outputs-from-allow for any other kind.
-      outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || (inputs.kind == 'triage' && inputs.triage-outputs-from-allow && 'all' || 'add_comment,noop,missing_tool,missing_data'))) }}
+      # Keep PR triage advisory at check, not behind a live-read preflight:
+      # GitHub cannot close only at an expected head/base, and apply's retry
+      # path can also close by number. Do not file a replacement without the
+      # corresponding disposition either. Only a confirmed issue gets all.
+      outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || (inputs.kind == 'triage' && inputs.triage-outputs-from-allow && needs.target.outputs.item-kind == 'issue' && 'all' || 'add_comment,noop,missing_tool,missing_data'))) }}
       max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}
       # A fix has bounds of its own: pushing to a pull request's branch is
       # allowed for the repositories fix.toml names and no other. Since
@@ -613,8 +645,8 @@ jobs:
       budget: ${{ inputs.kind == 'review' && '500' || inputs.budget }}
       timeout: '75'
       # Keep the finished work of a run that stops on its budget, except for
-      # a fix or a review, whose partial result is not worth applying.
-      apply-partial: ${{ !inputs.research-artifact-only && (inputs.kind == 'implement' || inputs.kind == 'research' || inputs.kind == 'triage' || inputs.kind == 'session') }}
+      # fix, a review or PR triage, whose partial result is not worth applying.
+      apply-partial: ${{ !inputs.research-artifact-only && (inputs.kind == 'implement' || inputs.kind == 'research' || (inputs.kind == 'triage' && needs.target.outputs.item-kind == 'issue') || inputs.kind == 'session') }}
       # One status comment, edited as the run goes, on the item in the
       # item repository (repo by default); a review stays silent, as in agentic-job's
       # dispatch.
@@ -861,10 +893,44 @@ jobs:
             core.setOutput('run-attempt', process.env.GITHUB_RUN_ATTEMPT);
             core.setOutput('agent-job', agent.job);
 
+  advisory:
+    needs: [target, check]
+    if: ${{ inputs.kind == 'triage' && needs.target.outputs.item-kind == 'pull-request' && needs.check.outputs.artifact-id != '' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      artifact-id: ${{ steps.advisory.outputs.artifact-id }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.check.outputs.artifact-id }}
+          path: ${{ runner.temp }}/advisory
+          digest-mismatch: error
+      # Check's upload is immutable. Apply (including a retry) takes this
+      # very upload and verifies its provenance and digest independently.
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: advisory
+        env:
+          BANNER: ${{ needs.target.outputs.advisory-banner }}
+          ARTIFACT_ID: ${{ needs.check.outputs.artifact-id }}
+        with:
+          script: |
+            const { readFileSync } = require('node:fs');
+            const { items } = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/advisory/agent_output.json`, 'utf8'));
+            const banner = process.env.BANNER;
+            if (!banner || !items.every(item => item.type !== 'add_comment' || (
+              item.body.startsWith(`${banner}\n`) && !item.body.includes('```agent-board-pr-triage')
+            ))) {
+              throw new Error('PR recovery comments must start with the admitted head advisory banner and must not contain a machine disposition fence');
+            }
+            core.setOutput('artifact-id', process.env.ARTIFACT_ID);
+
   apply:
-    needs: [policy, agent, check]
+    needs: [target, policy, agent, check, advisory]
     # Reviews publish only through checked submit, never through the PAT or
-    # as an unbound comment when stale, cancelled, noop or opted out.
+    # as an unbound comment. The reusable apply concludes even on check refusal.
     if: ${{ always() && inputs.kind != 'review' && !inputs.research-artifact-only && needs.policy.result == 'success' }}
     uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16
     # The caller's token for applying, under the generic name both workflows
@@ -887,4 +953,10 @@ jobs:
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       agent: ${{ toJSON(needs.agent) }}
-      check: ${{ toJSON(needs.check) }}
+      # Pass a refusal, not an unchecked upload, when advisory validation
+      # fails. The pinned apply workflow still finalizes the status comment.
+      check: >-
+        ${{ (inputs.kind != 'triage' || needs.target.outputs.item-kind == 'issue' || needs.check.result != 'success' ||
+            (needs.advisory.result == 'success' && needs.advisory.outputs.artifact-id != '' &&
+             needs.advisory.outputs.artifact-id == needs.check.outputs.artifact-id)) && toJSON(needs.check) ||
+            '{"result":"failure","outputs":{"refusal":"PR recovery comments did not pass advisory validation."}}' }}
