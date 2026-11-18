@@ -175,15 +175,35 @@ limits. A session needs no other
 caller setting than adding `session` to its `kind` choices, and the
 `session` boolean stays refused with it.
 
-A triage hands back only those four outputs unless its caller sets
-`triage-outputs-from-allow: true` (off by default, and refused for any
-other kind). Then the wrapper asks policy for `all`, so the output types
-are the ones the `allow` file's `[github.outputs]` grants, never a new
-pull request or a push for this `analysis` kind, and still at most 3.
-A caller sets it only together with an `allow` file of its own for the
-route, such as PR recovery's, which must close an obsolete bot pull
-request or file a replacement issue; that file lists `noop`,
-`missing_tool` and `missing_data` too if the run may use them.
+Ordinary triage requires an issue and hands back only those four outputs.
+`triage-outputs-from-allow: true` (off by default, and triage only) lets
+issue triage use the output types the `allow` file grants, still with
+`analysis` kind and at most three outputs.
+
+The opt-in also admits advisory triage of an open PR targeting `main` in
+`repo`. Leave `item-repo` empty or set it to `repo`, and pass the PR head
+that triggered recovery as `head`, not just in the task text. Admission
+refuses a missing or stale PR head, and a head-bearing request cannot fall
+back to issue triage. Use an `allow` file that grants the four ordinary
+triage outputs. PR triage does not apply handbacks with a budget or timeout
+exit or close a PR or file a replacement issue. Before apply, a read-only
+job verifies that each checked recommendation starts with
+`Advisory recommendation for PR head <SHA>.` using the admitted SHA, and
+contains no agent-board disposition fence. Retries use the same checked
+artifact. The banner identifies the revision requested; it does not attest
+to the agent's evidence or the current PR state. The agent is asked to read
+commits and checks by SHA and report missing data if it cannot. GitHub's
+close operation cannot require an unchanged head and base, even when apply
+is retried; a human must verify the evidence and the current PR before
+acting on a recommendation.
+
+Before enabling this route, the recovery producer must send the reservation's
+SHA as a dedicated dispatch `head` input, and the dispatch workflow must
+forward it as the wrapper's `head`. The current producer only puts the SHA
+in task prose; do not parse that text or substitute a fresh lookup. The
+producer must request human-readable recommendations instead of machine
+dispositions, and the caller must route them to a human. Updating the
+wrapper pin and forwarding an empty input does not enable recovery.
 
 The release train may replace only the local `secure-host` forwarder in the
 agent job and the wrapper smoke job with
