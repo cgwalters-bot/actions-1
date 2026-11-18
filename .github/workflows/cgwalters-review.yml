@@ -53,7 +53,7 @@ jobs:
           (github.event.pull_request.user.type == 'Bot' && startsWith(vars.REVIEW_BOT_IDS, '[') &&
             contains(fromJSON(vars.REVIEW_BOT_IDS || '[]'), github.event.pull_request.user.id)))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/review')))
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16
     permissions:
       actions: read
       contents: read
@@ -235,7 +235,7 @@ jobs:
       contents: read
       actions: read
       id-token: write
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       safe-outputs-artifact-id: ${{ needs.agent.outputs.safe-outputs-artifact-id }}
@@ -283,7 +283,7 @@ jobs:
   apply:
     needs: [policy, agent, check, submit]
     if: ${{ !cancelled() && needs.policy.result == 'success' && needs.submit.outputs.review-url == '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16
     secrets:
       SAFE_OUTPUTS_PAT: ${{ secrets.SAFE_OUTPUTS_PAT }}
     permissions:
@@ -367,7 +367,7 @@ jobs:
   prose-policy:
     needs: [policy, prose-config]
     if: ${{ needs.policy.outputs.admitted == 'true' && needs.prose-config.outputs.enabled == 'true' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
+    uses: cgwalters-forge/agentic-job/.github/workflows/policy.yml@2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16
     permissions:
       contents: read
       actions: read
@@ -418,7 +418,7 @@ jobs:
           BINARY: ${{ needs.prose-policy.outputs.binary-artifact-id }}
           POLICY: ${{ needs.prose-policy.outputs.policy-artifact-id }}
         run: |
-          [[ "$SOURCE_REPOSITORY" == cgwalters-forge/agentic-job && "$SOURCE_SHA" == 740ff7ff4dcef59dcb0619eb14d0e357c3193f62 ]] || exit 1
+          [[ "$SOURCE_REPOSITORY" == cgwalters-forge/agentic-job && "$SOURCE_SHA" == 2b937aaac81da06d8bff5f317e58df6ad7063e1e ]] || exit 1
           [[ "$BINARY" =~ ^[1-9][0-9]*$ && "$POLICY" =~ ^[1-9][0-9]*$ ]] || exit 1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -488,7 +488,7 @@ jobs:
   prose-check:
     needs: [prose-policy, prose-agent]
     if: ${{ !cancelled() && needs.prose-policy.result == 'success' && needs.prose-agent.outputs.safe-outputs-artifact-id != '' }}
-    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
+    uses: cgwalters-forge/agentic-job/.github/workflows/check.yml@2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16
     permissions:
       contents: read
       actions: read
@@ -534,7 +534,7 @@ jobs:
     concurrency:
       group: prose-publish-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: false
-    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@740ff7ff4dcef59dcb0619eb14d0e357c3193f62 # v0.6.15
+    uses: cgwalters-forge/agentic-job/.github/workflows/apply.yml@2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16
     permissions:
       contents: read
       issues: read
