@@ -288,9 +288,9 @@ enables no caller, settings, credentials, admission or live dispatch.
 ### Secondary pull requests
 
 The wrappers need no secondary-specific input. Policy, check and apply all
-pin agentic-job v0.6.15 (`489c69d`); its
-[workflow contract](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/docs/workflow.md)
-and [safe-output contract](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/docs/safe-outputs.md)
+pin agentic-job v0.6.16 (`489c69d`); its
+[workflow contract](https://github.com/cgwalters-forge/agentic-job/blob/2b937aaac81da06d8bff5f317e58df6ad7063e1e/docs/workflow.md)
+and [safe-output contract](https://github.com/cgwalters-forge/agentic-job/blob/2b937aaac81da06d8bff5f317e58df6ad7063e1e/docs/safe-outputs.md)
 govern this feature, not the older v0.6.11 release plan.
 
 The concrete threat is an agent redirecting a privileged write to another
@@ -457,7 +457,7 @@ its review kind uses separate literal commit-pinned steps.
 ### Advisory prose (default off)
 
 The independent `prose-*` chain in the review wrapper uses agentic-job
-**v0.6.15**, commit `740ff7ff4dcef59dcb0619eb14d0e357c3193f62`, for policy,
+**v0.6.15**, commit `2b937aaac81da06d8bff5f317e58df6ad7063e1e`, for policy,
 prepare/run, check and apply. Its policy binary, source actions and publishing
 workflows must stay at that one commit. The main verdict composition retains
 its independently matched pins and runner-user setup described above; the
@@ -659,20 +659,20 @@ ordinary checked APPROVE is not a checked draft-classifier result.
 
 The binary prerequisite landed in agentic-job#3067 and v0.6.12
 (`eecc8c434e67a7607264ab3f7d90c88b6d02042a`). The wrappers' current
-`740ff7ff4dcef59dcb0619eb14d0e357c3193f62` pin carries it, and the
+`2b937aaac81da06d8bff5f317e58df6ad7063e1e` pin carries it, and the
 runner-only migration above is complete; neither an older pin nor the
 removed sandbox user is the remaining blocker. The pinned binary's
-[draft-classifier contract](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/docs/review.md#draft-classifier-reviews)
+[draft-classifier contract](https://github.com/cgwalters-forge/agentic-job/blob/2b937aaac81da06d8bff5f317e58df6ad7063e1e/docs/review.md#draft-classifier-reviews)
 requires `REVIEW_DRAFT_CLASSIFIER=true` in policy dispatch, check's verdict
 step and submit, with `add_comment,noop` and `max-outputs: 1`.
 
 The reusable workflows at that pin do not yet carry that setting or the
 snapshot between stages. Specifically,
-[`policy.yml`](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/.github/workflows/policy.yml)
+[`policy.yml`](https://github.com/cgwalters-forge/agentic-job/blob/2b937aaac81da06d8bff5f317e58df6ad7063e1e/.github/workflows/policy.yml)
 has no classifier input/environment on `Resolve a dispatched review` and
 does not upload its `$RUNNER_TEMP/dispatch-review.json` with the policy
 artifact.
-[`check.yml`](https://github.com/cgwalters-forge/agentic-job/blob/740ff7ff4dcef59dcb0619eb14d0e357c3193f62/.github/workflows/check.yml)
+[`check.yml`](https://github.com/cgwalters-forge/agentic-job/blob/2b937aaac81da06d8bff5f317e58df6ad7063e1e/.github/workflows/check.yml)
 has no classifier setting and invokes `review verdict` without
 `--pull-request`. A wrapper environment cannot be passed through a reusable
 workflow call. Setting a repository variable alone therefore enables nothing.
