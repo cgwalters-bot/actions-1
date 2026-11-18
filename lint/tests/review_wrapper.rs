@@ -1520,21 +1520,49 @@ fn review_bounds_scope_forge_tables_to_github() {
 #[test]
 fn real_reviews_are_opt_in_and_use_only_checked_artifact_at_admitted_head() {
     let text = read(REVIEW);
+    let source = yaml(&text);
+    let jobs = &source["jobs"];
+    // Advisory policy suppresses the verdict. The ordinary publishers must
+    // take the admitted head and checked verdict from the main pipeline.
+    assert!(jobs["policy"]["with"]["advisory"].is_badvalue());
+    for (name, dependencies, command) in [
+        ("submit", "[policy, agent, check]", "review submit"),
+        (
+            "status",
+            "[policy, agent, check, submit, apply]",
+            "review status",
+        ),
+    ] {
+        let publisher = &jobs[name];
+        assert_eq!(publisher["needs"], yaml(dependencies), "{name}");
+        let step = publisher["steps"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .find(|step| {
+                step["run"]
+                    .as_str()
+                    .is_some_and(|run| run.contains(command))
+            })
+            .expect("review publishing step");
+        for (key, expected) in [
+            ("HEAD_SHA", "${{ needs.policy.outputs.review-head }}"),
+            ("VERDICT", "${{ needs.check.outputs.verdict }}"),
+        ] {
+            assert_eq!(step["env"][key].as_str(), Some(expected), "{name}: {key}");
+        }
+    }
     includes(
         job(&text, "submit"),
         &[
             "vars.AGENT_REAL_REVIEWS == 'true'",
             "needs.check.result == 'success' && needs.check.outputs.artifact-id != ''",
             "artifact-ids: ${{ needs.check.outputs.artifact-id }}",
-            "HEAD_SHA: ${{ needs.policy.outputs.review-head }}",
             "review submit --accepted \"$RUNNER_TEMP/checked/agent_output.json\" --output \"$GITHUB_OUTPUT\"",
             "review-url: ${{ steps.submit.outputs.review-url }}",
         ],
     );
-    let apply = yaml(&text)["jobs"]["apply"]["if"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let apply = jobs["apply"]["if"].as_str().unwrap();
     let cancelled = apply.find("!cancelled()").unwrap();
     assert!(cancelled < apply.find("needs.submit.outputs.review-url == ''").unwrap());
     includes(
