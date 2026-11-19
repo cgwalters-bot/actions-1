@@ -44,9 +44,11 @@ jobs:
       - name: Rust sandbox-share dry run
         run: cargo test --locked --manifest-path action-scripts/Cargo.toml --test cli root_share_dry_run -- --ignored
       # sandbox-share on this runner: content, a file and a directory are
-      # shared root-owned and read-only, and a symlink is refused.
+      # shared root-owned and read-only, and a symlink is refused. The dry
+      # run's shares go first, so the check sees only the composite's.
       - name: Make files to share
         run: |
+          sudo rm -rf /etc/agent-share
           mkdir -p share-test/dir && echo one >share-test/dir/a && echo two >share-test/file
           ln -s /etc/shadow share-test/shadow
       - uses: ./sandbox-share
@@ -67,10 +69,12 @@ jobs:
         with:
           name: shadow
           path: share-test/shadow
+      # The Rust checker, as the job user: the composite's shares, their
+      # ownership and modes, the refused symlink, and no write access.
       - name: Check sandbox-share's result
         env:
           SYMLINK: ${{ steps.share-symlink.outcome }}
-        run: node sandbox-share/check.mjs
+        run: cargo run --locked --quiet --manifest-path action-scripts/Cargo.toml -- sandbox-share-check
       - name: tailscale unit tests
         run: node --test tailscale/*.test.mjs
       - name: app-token unit tests
