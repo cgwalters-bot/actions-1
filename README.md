@@ -453,6 +453,12 @@ pull request's earlier reviews as untrusted data
 ([upstream](https://github.com/cgwalters-forge/agentic-job/blob/2b937aaac81da06d8bff5f317e58df6ad7063e1e/docs/review.md#review-history));
 copy this repository's `workflow/review.md` guidance for both.
 
+Keep approval requirements separate from workflow completion. Do not enroll
+this review as an organization-required workflow: a run can succeed when
+admission skips a head, policy refuses it, or the verdict asks for changes.
+Keep one automatic review caller per repository so that a second launcher
+does not cancel an in-progress review of the same pull request.
+
 For a new repository in this organization, put the review caller and the
 three `workflow/review*` files in its **initial commit**, and set the
 variables above (copy them from an onboarded repository such as tracker)
