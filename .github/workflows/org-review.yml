@@ -1,0 +1,32 @@
+# The review an organization ruleset requires of pull requests (README.md,
+# Review). A ruleset run ignores `types`, running only on opened,
+# synchronize and reopened, so ready_for_review and `/review` still need a
+# repository's own review.yml. The target repository must keep
+# workflow/review.toml, workflow/review-command.toml and workflow/review.md
+# on its base branch: policy fails without them. A ruleset run cannot
+# resolve a local `./` reference, and this repository's branches and tags
+# are not protected, so the call names a full commit of this repository's
+# main (lint/workflows-check.md, The ruleset); the pin moves by pull request
+# here, and the ruleset's pin of this file by an organization owner.
+name: org-review
+on:
+  # The base's reusable workflow runs; nothing here checks out or runs the
+  # head (lint/tests/wrappers.rs enforces that), so this trigger is accepted.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, synchronize, reopened]
+permissions: {}
+jobs:
+  review:
+    # This file also runs here as an ordinary workflow, beside review.yml:
+    # skip that, so this repository's pull requests are not reviewed twice
+    # by agent jobs that cancel each other.
+    if: github.repository != 'cgwalters-forge/actions'
+    uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@ff2c2f7084ab527fb333aca825d86f0374ae2ba5
+    # The same grants as review.yml's job (lint/tests/wrappers.rs).
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+      actions: read
+      id-token: write
+      statuses: write

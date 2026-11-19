@@ -15,6 +15,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 const AGENTIC_JOB: &str = ".github/workflows/cgwalters-agentic-job.yml";
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const REVIEW_CALLER: &str = ".github/workflows/review.yml";
+const ORG_REVIEW: &str = ".github/workflows/org-review.yml";
 // Both wrappers' agent job, called by local path.
 const AGENT: &str = ".github/workflows/cgwalters-agent.yml";
 
@@ -667,6 +668,45 @@ jobs:
       id-token: write
       statuses: write"
     );
+}
+
+// The ruleset-required review: the same one job as review.yml's, with the
+// triggers a ruleset run keeps and, since a ruleset run resolves no local
+// reference and this repository's refs are not protected, this repository's
+// wrapper at a full commit.
+#[test]
+fn org_review_calls_the_wrapper_at_a_commit_with_review_yml_grants_and_no_secret() {
+    let text = read(ORG_REVIEW);
+    let workflow = YamlLoader::load_from_str(&text).unwrap().remove(0);
+    let types: Vec<_> = workflow["on"]["pull_request_target"]["types"]
+        .as_vec()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    assert_eq!(types, ["opened", "synchronize", "reopened"]);
+    assert_eq!(workflow["on"].as_hash().unwrap().len(), 1);
+    assert!(workflow["permissions"].as_hash().unwrap().is_empty());
+    let jobs = workflow["jobs"].as_hash().unwrap();
+    assert_eq!(jobs.len(), 1);
+    let review = &workflow["jobs"]["review"];
+    assert_eq!(
+        review.as_hash().unwrap().keys().collect::<Vec<_>>(),
+        ["if", "uses", "permissions"].map(Yaml::from_str).iter().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        review["if"].as_str(),
+        Some("github.repository != 'cgwalters-forge/actions'")
+    );
+    assert!(!text.contains("secrets"));
+    let pin = review["uses"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@")
+        .unwrap();
+    assert!(is_commit(pin), "{pin}");
+    let grants = |text: &str| grants(text).into_iter().collect::<BTreeMap<_, _>>();
+    assert_eq!(grants(&text), grants(&read(REVIEW_CALLER)));
 }
 
 // Moving main must not change privileged review code behind a caller's

@@ -474,6 +474,48 @@ commit gets them only by reviewing an update to that pin. The dispatch
 wrapper continues to use these actions at `main` for non-review kinds;
 its review kind uses separate literal commit-pinned steps.
 
+### The organization's required review
+
+[org-review](.github/workflows/org-review.yml) is the same caller for an
+organization ruleset to require, so that a repository's pull requests are
+reviewed when opened, pushed to or reopened, whether or not it has a review
+caller of its own. It calls the wrapper at a full commit of this
+repository's `main`, because a ruleset run cannot resolve a local `./`
+reference and this repository's branches and tags are not protected. That
+pin moves by pull request here, and the ruleset's pin of this file moves
+with it. It skips this repository, which has its own `review.yml`. An
+organization owner sets it up as
+[workflows-check's ruleset](lint/workflows-check.md#the-ruleset) is, as a
+branch ruleset that requires workflows to pass before merging, with:
+
+- Enforcement status: **Evaluate**, on one repository first, until its
+  runs look right; then **Active** for more repositories.
+- Workflow: `.github/workflows/org-review.yml` from this repository at a
+  **commit SHA**, never a branch or tag.
+- Bypass list: organization owners only.
+
+Set `AGENT`, `AGENT_MODEL`, `AGENT_RUNNER`, `AGENT_CONFIG`,
+`AGENT_CONFIG_REPO`, `AGENT_CONFIG_PATH`, `INFERENCE_URL`,
+`INFERENCE_AUDIENCE`, `AGENT_REAL_REVIEWS` and `REVIEW_BOT_IDS` as
+organization variables (and the tailnet ones above where needed); a
+repository variable of the same name overrides one.
+
+Its limits:
+
+- A ruleset run ignores `types`, so `ready_for_review` and `/review` still
+  need a repository's own `review.yml`. A pull request opened as a draft
+  passes this check unreviewed, as policy skips drafts.
+- A repository that keeps `review.yml` gets two runs each time a pull
+  request is opened, pushed to or reopened. Their agent jobs share the per-PR concurrency group, which
+  cancels the one in progress, and a cancelled required run blocks the
+  merge until it is re-run.
+- The target repository must keep `workflow/review.toml`,
+  `workflow/review-command.toml` and `workflow/review.md` on its base
+  branch, since policy fails without them.
+- In Evaluate mode, confirm that the broker and the tailnet admit the
+  wrapper's `job_workflow_ref` at a commit rather than at `main`, and that
+  the wrapper's own `./` call of its agent job resolves.
+
 ### Advisory prose (default off)
 
 The independent `prose-*` chain in the review wrapper uses agentic-job
