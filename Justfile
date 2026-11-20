@@ -16,6 +16,19 @@ test-action-scripts:
     cargo clippy --locked --manifest-path action-scripts/Cargo.toml --all-targets -- -D warnings
     cargo fmt --manifest-path action-scripts/Cargo.toml --check
 
+musl := arch() + "-unknown-linux-musl"
+target_dir := env("CARGO_TARGET_DIR", "action-scripts/target")
+
+# The static Linux helper for this machine's architecture, as the release
+# asset with its checksum, under dist/ in the target directory
+# (action-scripts/README.md). The release workflow and CI run it; it needs
+# the musl target and musl-tools. A few minutes.
+package-action-scripts:
+    cargo build --locked --release --manifest-path action-scripts/Cargo.toml --target {{ musl }}
+    install -D -m 0755 "{{ target_dir }}/{{ musl }}/release/action-scripts" "{{ target_dir }}/dist/action-scripts-{{ musl }}"
+    cd "{{ target_dir }}/dist" && sha256sum "action-scripts-{{ musl }}" > "action-scripts-{{ musl }}.sha256"
+    file "{{ target_dir }}/dist/action-scripts-{{ musl }}" | tee /dev/stderr | grep -q static
+
 renovate := "renovate@44.198.3"
 
 # The runner preset and this repository's use of it (renovate/README.md):

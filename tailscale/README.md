@@ -165,14 +165,10 @@ still skips. Other systems get nothing extra.
 `action-scripts/` contains the Rust replacements for settings and the optional
 identity/proxy check. The action still uses the existing scripts until the
 first release binary has been published and its SHA-256 pinned in this
-repository. The Rust setup reads this action's `tailnets.json` at runtime;
-deployment addresses are not compiled into the executable. Its network check
-has a 30-second timeout per request and a 1 MiB limit on identity JSON bodies.
-
-Delivery will use a release binary verified against a checked-in SHA-256,
-not a checksum fetched alongside the download. This prevents replacement of
-a release asset from changing code run by jobs. A host binary avoids a
-container runtime and host bind mounts for the privileged share operation,
-and does not require a Rust toolchain on callers. Publication, Linux
-architecture support, download verification and action cutover remain to be
-completed; no caller inputs or outputs change.
+repository; how the binary is packaged, pinned and installed, and what is
+left before the cutover, is in
+[action-scripts/README.md](../action-scripts/README.md). The Rust setup
+reads this action's `tailnets.json` at runtime; deployment addresses are not
+compiled into the executable. Its network check has a 30-second timeout per
+request and a 1 MiB limit on identity JSON bodies. No caller inputs or
+outputs change.

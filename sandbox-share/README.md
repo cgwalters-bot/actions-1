@@ -33,8 +33,8 @@ would publish the target to every user.
 The Rust replacement and its result checker are in `action-scripts/`, with
 an unprivileged test suite and a disposable-runner sudo dry run in CI. The
 action remains on its current implementation until the first verified
-release binary is available; see the
-[delivery checkpoint](../tailscale/README.md#rust-migration-checkpoint).
+release binary is available; see its
+[delivery](../action-scripts/README.md#delivery).
 The Rust implementation requires Linux 5.6 or later: it opens sources with
 `openat2` without following symlinks, then copies from the opened descriptors.
 A source path swapped after it is opened therefore cannot redirect the root
