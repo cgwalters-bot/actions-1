@@ -77,8 +77,10 @@ add_comment, and never with a noop, you may also return up to ten of them,
 one per finding that has a line in the diff: path, line (with start_line for
 a range), side LEFT only for a removed line, and body with the finding and
 its severity. Set no pull_request_number or repo. They go into the same
-review as the verdict, or into its comment, so keep each finding once: in
-the comment or inline, not both.
+review as the verdict, or into its comment, so keep each finding's detail in one place. The verdict comment
+still lists every blocker on a line of its own, with its file and line and
+its one-sentence claim, even when its detail is inline: the automated fixer
+reads only the verdict.
 Report every finding you can see in this one pass, not only the first.
 Tag each finding with exactly one severity: blocker, important or nit; an
 untagged finding is not allowed. A blocker makes the change wrong for its
