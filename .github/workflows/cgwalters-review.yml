@@ -8,8 +8,9 @@
 # one holds its tailnet key, valid for an hour, while it waits: past that its
 # agent job fails before the join, and so does re-running only a failed agent
 # job, whose key the first attempt spent. Re-run all jobs.
-# Optional review-history, failure-class/cost outputs, paced dispatches and
-# approval carry-forward are not adopted by this event-only composition.
+# Inline findings and, with the variable REVIEW_HISTORY, review history are
+# adopted as there; failure-class/cost outputs, paced dispatches, escalation
+# labels and approval carry-forward are not, in this event-only composition.
 # They name the release's commit, not its tag, for the reason
 # cgwalters-agentic-job.yml's header gives.
 # No dispatcher inputs: identity/configuration comes from repository variables.
@@ -65,8 +66,12 @@ jobs:
       review-task: workflow/review.md
       task: ''
       kind: analysis
-      outputs: add_comment,noop
-      max-outputs: '1'
+      # The verdict comment or a noop, and up to ten inline findings beside
+      # a verdict, which check holds to the triggering pull request: submit
+      # puts them in its review, apply in its comment. The caller's bounds
+      # must list create_pull_request_review_comment and max_outputs >= 11.
+      outputs: add_comment,noop,create_pull_request_review_comment
+      max-outputs: '11'
       notify: none
       allow: ${{ github.event_name == 'issue_comment' && 'workflow/review-command.toml' || 'workflow/review.toml' }}
       config: ${{ vars.AGENT_CONFIG || '.agentic-job-source/.github/agentic-job/hosted.toml' }}
@@ -225,6 +230,11 @@ jobs:
       tailnet-key-attempt: ${{ needs.register.outputs.tailnet-key-attempt }}
       tailnet-key-minted-at: ${{ needs.register.outputs.tailnet-key-minted-at }}
       github-reads: true
+      # With the variable REVIEW_HISTORY, the agent is given this pull
+      # request's earlier reviews by this job, as untrusted data, to settle
+      # their findings before raising new ones (agentic-job's
+      # docs/review.md#review-history).
+      review-history: ${{ vars.REVIEW_HISTORY == 'true' && format('{0}', github.event.pull_request.number || github.event.issue.number) || '' }}
 
   check:
     needs: [policy, agent]

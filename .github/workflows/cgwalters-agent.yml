@@ -40,6 +40,12 @@ on:
         description: Give the agent this job's own read-only GitHub token as GH_TOKEN
         type: boolean
         required: true
+      review-history:
+        description: >-
+          For cgwalters-review.yml: the pull request whose earlier reviews by the review job `run`
+          puts in the agent's home as review-history.json. Empty for none
+        type: string
+        default: ""
       tailnet-key-attempt:
         description: The run attempt whose register job minted TAILNET_KEY
         type: string
@@ -153,6 +159,20 @@ jobs:
         with:
           binary-artifact-id: ${{ fromJSON(inputs.policy).binary-artifact-id }}
           policy-artifact-id: ${{ fromJSON(inputs.policy).policy-artifact-id }}
+      # With `review-history`: the pull request's earlier reviews, from the
+      # forge with this job's read-only token, which the agent gets anyway,
+      # by the policy job's binary before anything of the agent's runs, as
+      # in agent.yml. It is sanitized and named untrusted; a failure leaves
+      # the review without it rather than without a review.
+      - name: The pull request's earlier reviews
+        if: ${{ inputs.review-history != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ inputs.review-history }}
+          HEAD_SHA: ${{ fromJSON(inputs.policy).review-head }}
+        run: |
+          agentic-job review history --output .agentic-job/review-history.json ||
+            { rm -f .agentic-job/review-history.json; echo '::warning::the review runs without its earlier reviews'; }
       # agentic-job's own admission of a runner-user run, before anything
       # privileged of ours: a private caller or target, an api-key or MCP
       # configuration, and a session's listener are refused here.

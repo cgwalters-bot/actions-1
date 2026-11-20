@@ -1327,6 +1327,7 @@ fn agent_source(text: &str) {
             "The policy call's source repository",
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "./.agentic-job-source/prepare",
+            "The pull request's earlier reviews",
             "Admit the runner-user configuration",
             "Check the tailnet key is this attempt's and unexpired",
             "Join the tailnet",
@@ -1854,7 +1855,9 @@ fn review_bounds_scope_forge_tables_to_github() {
         assert!(bounds["trigger"].is_badvalue(), "{file}");
         assert_eq!(
             bounds["github"]["outputs"],
-            yaml(r#"{"add_comment":{"max":1},"noop":{"max":1}}"#),
+            yaml(
+                r#"{"add_comment":{"max":1},"noop":{"max":1},"create_pull_request_review_comment":{"max":10}}"#
+            ),
             "{file}"
         );
         assert!(
@@ -1865,6 +1868,39 @@ fn review_bounds_scope_forge_tables_to_github() {
             "{file}"
         );
     }
+}
+
+// Review history as upstream review.yml passes it: only the main review's
+// agent, only with REVIEW_HISTORY, written by the policy binary before
+// secure-host and anything of the agent's runs.
+#[test]
+fn review_history_is_opt_in_and_written_before_the_agent_runs() {
+    let review = read(REVIEW);
+    includes(
+        job(&review, "agent"),
+        &[
+            "review-history: ${{ vars.REVIEW_HISTORY == 'true' && format('{0}', github.event.pull_request.number || github.event.issue.number) || '' }}",
+        ],
+    );
+    excludes(job(&review, "prose-agent"), &["review-history"]);
+    let agent = read(AGENT);
+    let source = yaml(&agent);
+    let input = &source["on"]["workflow_call"]["inputs"]["review-history"];
+    assert_eq!(input["type"].as_str(), Some("string"));
+    assert_eq!(input["default"].as_str(), Some(""));
+    let order = [
+        "uses: ./.agentic-job-source/prepare",
+        "if: ${{ inputs.review-history != '' }}",
+        "PULL: ${{ inputs.review-history }}",
+        "agentic-job review history --output .agentic-job/review-history.json ||",
+        "uses: cgwalters-forge/actions/secure-host@",
+        "uses: ./.agentic-job-source/run",
+    ];
+    let positions: Vec<_> = order
+        .iter()
+        .map(|part| agent.find(part).unwrap_or_else(|| panic!("missing {part}")))
+        .collect();
+    assert!(positions.is_sorted(), "{order:?}");
 }
 
 #[test]

@@ -323,8 +323,9 @@ Secondary file exemptions must be explicit in that table's
 contract for the patch/base metadata and run-specific branch requirements.
 
 Dispatch forwards the caller's `allow` (or `fix-allow` for fixes) to policy,
-with a total `max-outputs` of **3**, including any secondary request. Both
-review paths allow only **1** output. The caller's `max_outputs` must admit
+with a total `max-outputs` of **3**, including any secondary request. A
+dispatched review allows only **1** output; the event review wrapper allows
+**11** (below). The caller's `max_outputs` must admit
 the requested total; per-type limits still apply. A secondary request adds
 one to the primary `create_pull_request.max` collector allowance, not to the
 wrapper's total ceiling: two PRs leave room for only one other request.
@@ -433,6 +434,19 @@ submission with the job token, at the admitted head. Leaving it unset keeps this
 GitHub Actions' permission to create/approve PRs for this feature. A stale
 head, cancellation or failed check cannot produce a new approval. The
 compatibility `review` status is not a merge gate or human approval.
+
+Beside its verdict the agent may return up to ten inline findings
+(`create_pull_request_review_comment`), which check holds to the pull request:
+a submitted review carries them as its line comments, otherwise apply folds
+them into the verdict comment. The policy call requests them with
+`max-outputs: 11`, so the caller's `workflow/review.toml` and
+`workflow/review-command.toml` must list
+`create_pull_request_review_comment = { max = 10 }` and `max_outputs = 11` or
+more, as [this repository's](workflow/review.toml) do; with older bounds the
+policy job refuses every review. `REVIEW_HISTORY=true` gives the agent the
+pull request's earlier reviews as untrusted data
+([upstream](https://github.com/cgwalters-forge/agentic-job/blob/2b937aaac81da06d8bff5f317e58df6ad7063e1e/docs/review.md#review-history));
+copy this repository's `workflow/review.md` guidance for both.
 
 For a new repository in this organization, put the review caller and the
 three `workflow/review*` files in its **initial commit**, and set the

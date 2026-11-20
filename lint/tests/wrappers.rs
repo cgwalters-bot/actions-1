@@ -867,9 +867,10 @@ fn composed_review_links_its_pinned_helper_to_the_agent_job() {
     assert!(submit.contains(&line(10, "AGENT_JOB: ${{ needs.agent.outputs.job }}")));
 }
 
-// The bounds, comments aside: comment-only outputs for this repository's
-// main, automatic events for any role (the shared workflow's `if:` narrows
-// them to owner, members and collaborators), `/review` only from writers.
+// The bounds, comments aside: the verdict comment and its inline findings
+// for this repository's main, automatic events for any role (the shared
+// workflow's `if:` narrows them to owner, members and collaborators),
+// `/review` only from writers.
 fn bounds(name: &str) -> String {
     read(&format!("workflow/{name}.toml"))
         .split('\n')
@@ -883,12 +884,13 @@ fn common(repos: &str) -> String {
         r#"hosts = ["github.com"]
 repos = {repos}
 bases = ["main"]
-max_outputs = 1
+max_outputs = 11
 max_patch_bytes = 1024
 max_patch_files = 1
 [github.outputs]
 add_comment = {{ max = 1 }}
 noop = {{ max = 1 }}
+create_pull_request_review_comment = {{ max = 10 }}
 [github.trigger]"#
     )
 }
@@ -908,7 +910,7 @@ fn one_repository(repos: &str) -> bool {
 }
 
 #[test]
-fn review_bounds_admit_one_comment_on_this_repository_only() {
+fn review_bounds_admit_one_review_on_this_repository_only() {
     let review = bounds("review");
     let command = bounds("review-command");
     let repos = review
@@ -1314,7 +1316,11 @@ fn safe_output_contract_keeps_caller_bounds_counts_and_apply_token() {
     )));
     let review = read(REVIEW);
     let review_policy = job(&review, "policy");
-    assert!(review_policy.contains(&line(6, "max-outputs: '1'")));
+    assert!(review_policy.contains(&line(
+        6,
+        "outputs: add_comment,noop,create_pull_request_review_comment"
+    )));
+    assert!(review_policy.contains(&line(6, "max-outputs: '11'")));
     assert!(review_policy.contains(&line(
         6,
         "allow: ${{ github.event_name == 'issue_comment' && 'workflow/review-command.toml' || 'workflow/review.toml' }}"
