@@ -1,0 +1,127 @@
+# Publishes action-scripts for the composite actions to pin
+# (action-scripts/README.md): tags main's commit action-scripts-vVERSION
+# and releases the static Linux binary with its SHA-256. Run by hand on
+# main once the crate's version has been raised. Nothing here moves the
+# pin the actions install from; that is a reviewed change to release.yml.
+name: release-action-scripts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, MAJOR.MINOR.PATCH (action-scripts/Cargo.toml's)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One release at a time, so two runs cannot both find the tag free.
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TARGET: x86_64-unknown-linux-musl
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      digest: ${{ steps.payload.outputs.digest }}
+    steps:
+      # Against a mistake: a tag on another branch would be a version
+      # nobody reviewed, offered to every action as an upgrade.
+      - name: The run is on main
+        run: test "$GITHUB_REF" = refs/heads/main
+      # musl-gcc needs root to install, before checkout and hardening.
+      - run: |
+          sudo apt-get -o Acquire::Retries=3 update -q
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends musl-tools
+        timeout-minutes: 5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cgwalters-forge/actions/secure-host@456a5f663b73ac367c331aaf8ed2c888e481a98c # from main
+      # Also keeps the version to a shape safe to use in the steps below.
+      - name: The version is the crate's and its tag is free
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::not MAJOR.MINOR.PATCH: $VERSION"; exit 1; }
+          crate=$(cargo metadata --no-deps --format-version 1 --manifest-path action-scripts/Cargo.toml | jq -r '.packages[0].version')
+          test "$crate" = "$VERSION" || { echo "::error::action-scripts/Cargo.toml is at $crate, not $VERSION"; exit 1; }
+          if gh api --silent "repos/$GITHUB_REPOSITORY/git/ref/tags/action-scripts-v$VERSION" 2> /dev/null; then
+            echo "::error::action-scripts-v$VERSION exists already"; exit 1
+          fi
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just@1.58.0
+      - run: rustup target add "$TARGET"
+      - run: just package-action-scripts
+      # The binary says it is this version, and the installer takes it
+      # from a local server and runs it with nothing on its PATH.
+      - name: The binary is this version and installs
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          test "$("action-scripts/target/dist/action-scripts-$TARGET" --version)" = "action-scripts $VERSION"
+          ACTION_SCRIPTS_ASSET="$PWD/action-scripts/target/dist/action-scripts-$TARGET" cargo test --locked --manifest-path action-scripts/Cargo.toml --test install
+      - name: Prepare the single-file payload
+        id: payload
+        run: |
+          cp "action-scripts/target/dist/action-scripts-$TARGET" artifact
+          sum=$(sha256sum artifact)
+          printf 'digest=%s\n' "${sum%% *}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: action-scripts
+          path: artifact
+          if-no-files-found: error
+
+  # The only job with a write token. It treats the verified payload as
+  # data and does not check out the source or execute the binary.
+  publish:
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+      - shell: bash
+        env:
+          ARTIFACT_SHA256: ${{ needs.build.outputs.digest }}
+        run: |
+          shopt -s dotglob nullglob
+          entries=(*)
+          [[ ${#entries[@]} -eq 1 && ${entries[0]} == artifact && -f artifact && ! -L artifact ]]
+          [[ "$ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  artifact\n' "$ARTIFACT_SHA256" | sha256sum --check --strict -
+      # Creating the tag fails if it exists, where `gh release create`
+      # would take an existing tag and publish this commit's binary under
+      # another commit's tag. Should publishing then fail, the tag is left
+      # for a maintainer to delete.
+      - name: Tag
+        env:
+          TAG: action-scripts-v${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+      - name: Publish
+        env:
+          TAG: action-scripts-v${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset=action-scripts-x86_64-unknown-linux-musl
+          mv -- artifact "$asset"
+          sha256sum "$asset" > "$asset.sha256"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$TAG" --generate-notes \
+            "$asset" "$asset.sha256"
+          # Immutability locks assets at publication, not while still a draft.
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

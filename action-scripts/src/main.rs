@@ -17,8 +17,13 @@ fn main() -> Result<()> {
         [command] if command == "tailscale-check" => tailscale::check(),
         [command] if command == "sandbox-share" => share::run(),
         [command] if command == "sandbox-share-check" => share::check(),
+        // The release workflow checks this against the tag it publishes.
+        [command] if command == "--version" => {
+            println!("action-scripts {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         _ => bail!(
-            "usage: action-scripts tailscale-setup SETTINGS.json | tailscale-check | sandbox-share | sandbox-share-check"
+            "usage: action-scripts tailscale-setup SETTINGS.json | tailscale-check | sandbox-share | sandbox-share-check | --version"
         ),
     }
 }

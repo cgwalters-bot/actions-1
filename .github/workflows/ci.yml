@@ -41,6 +41,17 @@ jobs:
       - name: Rust action helper tests
         if: ${{ !cancelled() }}
         run: just test-action-scripts
+      # The release's packaging, then its installer taking the packaged
+      # static binary from a local server (action-scripts/README.md): no
+      # release is published or fetched here.
+      - name: Package the Rust action helper
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update -q
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends musl-tools
+          rustup target add x86_64-unknown-linux-musl
+          just package-action-scripts
+      - name: Install the packaged helper with install.sh
+        run: ACTION_SCRIPTS_ASSET="$PWD/action-scripts/target/dist/action-scripts-x86_64-unknown-linux-musl" cargo test --locked --manifest-path action-scripts/Cargo.toml --test install
       - name: Rust sandbox-share dry run
         run: cargo test --locked --manifest-path action-scripts/Cargo.toml --test cli root_share_dry_run -- --ignored
       # sandbox-share on this runner: content, a file and a directory are
@@ -69,12 +80,12 @@ jobs:
         with:
           name: shadow
           path: share-test/shadow
-      # The Rust checker, as the job user: the composite's shares, their
-      # ownership and modes, the refused symlink, and no write access.
+      # The packaged Rust checker, as the job user: the composite's shares,
+      # their ownership and modes, the refused symlink, and no write access.
       - name: Check sandbox-share's result
         env:
           SYMLINK: ${{ steps.share-symlink.outcome }}
-        run: cargo run --locked --quiet --manifest-path action-scripts/Cargo.toml -- sandbox-share-check
+        run: action-scripts/target/dist/action-scripts-x86_64-unknown-linux-musl sandbox-share-check
       - name: tailscale unit tests
         run: node --test tailscale/*.test.mjs
       - name: app-token unit tests
