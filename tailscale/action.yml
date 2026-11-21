@@ -53,6 +53,10 @@ inputs:
     description: Inference proxy URL; empty uses the organization's lookaside setting.
     required: false
     default: ""
+  resolve-proxy:
+    description: Set to 'true' to resolve the proxy IPv4 address from tailnet peer status.
+    required: false
+    default: "false"
   check:
     description: Report granted scopes and verify the proxy returns unauthenticated HTTP 401.
     required: false
@@ -61,6 +65,9 @@ outputs:
   proxy:
     description: Inference proxy URL for the calling workflow.
     value: ${{ steps.settings.outputs.proxy }}
+  proxy-address:
+    description: With resolve-proxy, the job-local IPv4 address of the proxy literal or matched .ts.net peer.
+    value: ${{ steps.resolve-proxy.outputs.proxy-address }}
   key:
     description: >-
       With `mint`, the key for a later job's `authkey`. Pass it on only as
@@ -151,6 +158,14 @@ runs:
         echo "/var/run/tailscale: $(sudo stat -c '%a %U:%G' /var/run/tailscale)"
         # root still gets through (by path: RHEL's sudo has no /usr/local/bin in its PATH).
         if test "$JOINED" = true; then sudo /usr/local/bin/tailscale status --self >/dev/null; fi
+    - name: Resolve the proxy address
+      id: resolve-proxy
+      if: success() && steps.join.outcome == 'success' && inputs.resolve-proxy == 'true'
+      shell: bash
+      env:
+        PROXY: ${{ steps.settings.outputs.proxy }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: node "$ACTION_PATH/setup.mjs" resolve-proxy
     # After the join, so that a key is minted only for a login that works.
     - name: Mint a key for a later job
       id: mint

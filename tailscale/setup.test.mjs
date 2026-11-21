@@ -117,3 +117,77 @@ test('the setup subprocess appends outputs and rejects injection before writing'
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('the composite exposes resolution after LocalAPI lockdown', () => {
+  const action = readFileSync(new URL('./action.yml', import.meta.url), 'utf8');
+  assert.match(action, /\n  resolve-proxy:\n[^\n]+\n    required: false\n    default: "false"/);
+  assert.match(action, /\n  proxy-address:\n[^\n]+\n    value: \$\{\{ steps\.resolve-proxy\.outputs\.proxy-address \}\}/);
+  const steps = action.split(/\n    - name: /);
+  const lockdown = steps.findIndex(step => step.startsWith("Make tailscaled's LocalAPI root's only"));
+  const resolver = steps.findIndex(step => step.includes('id: resolve-proxy'));
+  assert.ok(lockdown !== -1 && resolver > lockdown);
+  assert.match(steps[lockdown], /if: always\(\)/);
+  assert.match(steps[resolver], /if: success\(\) && steps\.join\.outcome == 'success' && inputs\.resolve-proxy == 'true'/);
+  assert.match(steps[resolver], /PROXY: \$\{\{ steps\.settings\.outputs\.proxy \}\}/);
+  assert.match(steps[resolver], /run: node "\$ACTION_PATH\/setup\.mjs" resolve-proxy/);
+});
+
+test('the setup subprocess resolves the proxy without logging peer status', t => {
+  const dir = mkdtempSync(join(homedir(), 'resolve-proxy-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const output = join(dir, 'output');
+  const calls = join(dir, 'calls');
+  writeFileSync(join(dir, 'sudo'), `#!/bin/sh
+printf '%s\n' "$*" >> "$CALLS"
+printf '%s\n' 'private status diagnostics' >&2
+printf '%s\n' "$PEER_STATUS"
+exit "$SUDO_EXIT"
+`, { mode: 0o700 });
+
+  const broker = 'broker.tailnet.ts.net';
+  const peer = (DNSName, TailscaleIPs) => ({ DNSName, TailscaleIPs });
+  const exact = peer(`${broker}.`, ['fd7a:115c:a1e0::1', '100.64.0.2', '100.64.0.3']);
+  const lookalike = peer(`other.${broker}.`, ['100.64.0.1']);
+  for (const scenario of [
+    { proxy: '', skip: true },
+    { proxy: 'http://192.0.2.1:18080', skip: true, address: '192.0.2.1' },
+    { proxy: 'https://[2001:db8::1]', skip: true },
+    { proxy: `https://${broker}.example`, skip: true },
+    { proxy: `https://${broker}..`, skip: true, error: /Invalid .ts.net/ },
+    { proxy: 'https://bad_name.ts.net', skip: true, error: /Invalid .ts.net/ },
+    { proxy: 'not-a-url', skip: true, error: /Invalid inference proxy URL/ },
+    { status: { Peer: { lookalike, exact } }, address: '100.64.0.2' },
+    { proxy: `https://${broker}.:8443/path`, status: { Peer: { exact: { ...exact, DNSName: broker } } }, address: '100.64.0.2' },
+    { status: { Self: exact, Peer: { lookalike } }, error: /No Tailscale peer matches/ },
+    { status: { Peer: { exact, duplicate: { DNSName: broker } } }, error: /Ambiguous/ },
+    { status: { Peer: [] }, error: /no Peer object/ },
+    { status: { Peer: { exact: { DNSName: broker } } }, error: /no TailscaleIPs array/ },
+    { status: { Peer: { exact: peer(broker, ['100.64.0.2', 'not-an-ip']) } }, error: /invalid TailscaleIP/ },
+    { status: { Peer: { exact: peer(broker, ['fd7a:115c:a1e0::1', '::ffff:100.64.0.2']) } }, error: /no IPv4/ },
+    { rawStatus: '{', error: /Could not decode Tailscale status/ },
+    { sudoExit: '1', status: { Peer: { exact } }, error: /Could not read Tailscale status/ },
+  ]) {
+    const prefix = 'existing=value\n';
+    writeFileSync(output, prefix);
+    writeFileSync(calls, '');
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./setup.mjs', import.meta.url)), 'resolve-proxy'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        PROXY: scenario.proxy ?? `https://${broker}`,
+        GITHUB_OUTPUT: output,
+        CALLS: calls,
+        PEER_STATUS: scenario.rawStatus ?? JSON.stringify(scenario.status ?? {}),
+        SUDO_EXIT: scenario.sudoExit ?? '0',
+      },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, scenario.error ? 1 : 0, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.doesNotMatch(result.stderr, /private status diagnostics|100\.64\.0\./);
+    if (scenario.error) assert.match(result.stderr, scenario.error);
+    assert.equal(readFileSync(calls, 'utf8'), scenario.skip ? '' : '-n /usr/local/bin/tailscale status --json\n');
+    assert.equal(readFileSync(output, 'utf8'), prefix + (scenario.address ? `proxy-address=${scenario.address}\n` : ''));
+  }
+});
