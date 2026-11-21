@@ -54,12 +54,21 @@ A nonempty input overrides the organization's setting.
 | `audience` | Audience of the OIDC federated identity (default: from the client ID) |
 | `tags` | Comma-separated tags for the node |
 | `proxy` | Inference proxy URL |
+| `resolve-proxy` | `true` to resolve the job-local `proxy-address` after joining |
 | `hostname` | Node name (default: from the runner name) |
 | `args` | Additional arguments to `tailscale up` |
 | `check` | `true` to also check the login and the proxy, see below |
 
-The `proxy` output is the inference proxy URL, for the caller to pass
-on.
+The `proxy` output is the unchanged inference proxy URL. With
+`resolve-proxy: 'true'`, `steps.tailnet.outputs.proxy-address` supplies a
+job-local IPv4 address without using runner DNS. An IPv4 literal needs no
+lookup. For a `.ts.net` name, the action reads local peer status after
+locking down LocalAPI, matches the full peer DNS name ignoring one trailing
+dot, and takes its first IPv4 address. A missing, ambiguous, or malformed
+match fails the step. When resolution is not requested, or the proxy is
+empty, an IPv6 literal, or a non-tailnet hostname, the output is empty.
+Keep the original URL for HTTPS so that the hostname remains available for
+TLS verification.
 
 ## A job without an identity token
 
@@ -170,5 +179,5 @@ left before the cutover, is in
 [action-scripts/README.md](../action-scripts/README.md). The Rust setup
 reads this action's `tailnets.json` at runtime; deployment addresses are not
 compiled into the executable. Its network check has a 30-second timeout per
-request and a 1 MiB limit on identity JSON bodies. No caller inputs or
-outputs change.
+request and a 1 MiB limit on identity JSON bodies. The Rust migration does
+not change caller inputs or outputs.
