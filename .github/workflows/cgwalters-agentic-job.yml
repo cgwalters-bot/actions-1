@@ -128,12 +128,10 @@ on:
         description: "The most inference requests the run may make, 1 to 1000"
         type: string
         default: "400"
-      # Refused, and kept only so that a caller passing them fails with
-      # this file's message rather than GitHub's: the pinned upstream
-      # does not support a listener as the runner user. Unrelated to
-      # `kind: session`, a repository-triage run that listens for nothing.
+      # Kept so callers get a refusal here rather than from GitHub. Separate
+      # from `kind: session`, the repository-triage profile.
       session:
-        description: "Refused until the pinned agentic-job supports session listeners as the runner user"
+        description: "Refused until listening sessions have a separate credential boundary"
         type: boolean
         default: false
       idle-minutes:
@@ -327,10 +325,8 @@ jobs:
             if (process.env.ITEM_REPO && ['review', 'fix'].includes(profile)) {
               throw new Error('item-repo is not for review or fix');
             }
-            // The pinned upstream refuses session.listen in runner admission
-            // and run. Reject here, before registration mints credentials.
             if (process.env.SESSION === 'true' || process.env.IDLE_MINUTES !== '') {
-              throw new Error('session and idle-minutes are refused: the pinned agentic-job does not support session listeners as the runner user');
+              throw new Error('session and idle-minutes are refused: listening sessions require a separate credential boundary');
             }
             // What needed the sandbox user, refused before anything is
             // provisioned: the runner is the only agent user since

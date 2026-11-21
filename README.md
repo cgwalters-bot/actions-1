@@ -111,7 +111,7 @@ The dispatch wrapper refuses these inputs before anything is provisioned:
 api-key`, `inference-provider` and an `INFERENCE_API_KEY`. The inputs stay
 declared so a caller passing them gets that message. The scripted agent
 `fake` stays unsupported. Upstream's own admission refuses a configuration
-with `[mcp]`, `api-key` or a session listener. ACP's `[child-agent]`
+with `[mcp]` or `api-key`. ACP's `[child-agent]`
 (`acp-experiment`) is also unsupported under the pinned runner-only
 implementation. To avoid joining the tailnet, minting a key and registering
 inference for a run that `run` will refuse, both register jobs first parse
@@ -122,11 +122,9 @@ malformed or over-1-MiB configuration fails closed, as does any top-level
 no opt-in, automatic child removal or fallback experiment: remove the child
 configuration explicitly or wait for supported ACP.
 
-The early ACP refusal slice of #219 landed in #227. Session work is separate
-in #225; this pin still refuses session listeners, and this change enables
-neither sessions nor a second user. #220 added an actionable pre-join
-refusal for spent/expired keys with the re-run-all-jobs mitigation, not fresh
-keys per attempt. Queue expiry is still unfixed: a review queued for over
+The early ACP refusal slice of #219 landed in #227. #220 added an actionable
+pre-join refusal for spent/expired keys with the re-run-all-jobs mitigation,
+not fresh keys per attempt. Queue expiry is still unfixed: a review queued for over
 an hour can hold an expired key, now refused before the join. KVM access
 and self-pin policy remain separate #219 checklist items too.
 
@@ -156,11 +154,13 @@ verification and self-pin lint policy remain outstanding.
 
 ### Session limitations
 
-Session listener support requires a compatible agentic-job pin first: the
-current pin rejects `session.listen` in both runner admission and `run`.
-Keep the wrapper's early refusal until that dependency is updated, so a
-listener request cannot register an inference run or mint a tailnet key
-only to fail in the agent job.
+The dispatch wrapper does not forward `session` or `idle-minutes`, and the
+shared agent job rejects `[session] listen = true` in the policy-prepared
+configuration before joining the tailnet or setting up the listener. The
+pinned action checks repository visibility with the job token after the
+agent runs. Leaving the agent's token input empty would neither isolate that
+same-user step nor support authenticated coordinator reads. Listening needs
+a separate credential boundary and a supported coordinator read path.
 
 `kind: session` is not that listener. It is a repository-triage run
 (tracker#1505): one pass over the target repository, started from an

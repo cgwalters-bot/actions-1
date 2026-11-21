@@ -175,12 +175,22 @@ jobs:
             { rm -f .agentic-job/review-history.json; echo '::warning::the review runs without its earlier reviews'; }
       # agentic-job's own admission of a runner-user run, before anything
       # privileged of ours: a private caller or target, an api-key or MCP
-      # configuration, and a session's listener are refused here.
+      # configuration are refused here.
       - name: Admit the runner-user configuration
         env:
           CALLER_PRIVATE: ${{ toJSON(github.event.repository.private) }}
           AGENT_USER: runner
         run: python3 .agentic-job-source/workflow/runner-setup.py admit
+      # The pinned run action uses the job token after the agent runs. An
+      # empty github-token input does not isolate that same-user step.
+      - name: Refuse listening sessions on the shared runner
+        shell: python3 {0}
+        run: |
+          import sys, tomllib
+          with open('.agentic-job/config.toml', 'rb') as source:
+              config = tomllib.load(source)
+          if config.get('session', {}).get('listen', False) is not False:
+              sys.exit('listening sessions require a separate credential boundary; remove [session] listen from the caller configuration')
       # Re-running only a failed agent job reuses the register job's
       # outputs, a key the first attempt spent, and a review queued behind
       # another can hold its key past expiry: either way the join would
