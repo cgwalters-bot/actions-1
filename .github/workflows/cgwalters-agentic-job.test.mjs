@@ -364,13 +364,11 @@ function job(name) {
   return `\n${workflow.split(`\n  ${name}:\n`)[1].split(/\n {2}[a-z-]+:\n/)[0]}`;
 }
 
-// The pinned upstream rejects session.listen during runner admission and
-// run. Every profile must fail here, before policy or registration.
-test('sessions are refused before provisioning until the upstream pin supports them', async () => {
+test('listening inputs are refused before provisioning for every profile', async () => {
   for (const profile of ['implement', 'fix', 'triage', 'research', 'review', 'session']) {
     for (const env of [{ SESSION: 'true' }, { SESSION: 'true', IDLE_MINUTES: '60' }, { IDLE_MINUTES: '10' }, { IDLE_MINUTES: '0' }]) {
       await assert.rejects(target({ ...env, PROFILE: profile }, { pull: true, allowPolicyRead: false }),
-        /session and idle-minutes are refused: the pinned agentic-job/, `${profile}: ${JSON.stringify(env)}`);
+        /session and idle-minutes are refused: listening sessions require a separate credential boundary/, `${profile}: ${JSON.stringify(env)}`);
     }
   }
   const outputs = await target({});

@@ -1329,6 +1329,7 @@ fn agent_source(text: &str) {
             "./.agentic-job-source/prepare",
             "The pull request's earlier reviews",
             "Admit the runner-user configuration",
+            "Refuse listening sessions on the shared runner",
             "Check the tailnet key is this attempt's and unexpired",
             "Join the tailnet",
             "Check inference proxy reachability",
@@ -1667,6 +1668,44 @@ fn wrappers_forward_the_configured_write_policy_to_the_host_action() {
                     .unwrap_or_default(),
                 "{file}: {text}"
             );
+        }
+    }
+}
+
+#[test]
+fn shared_runner_refuses_listener_in_prepared_policy_config() {
+    let source = yaml(&read(AGENT));
+    let steps = source["jobs"]["agent"]["steps"].as_vec().unwrap();
+    let gate = steps
+        .iter()
+        .find(|step| {
+            step["name"].as_str() == Some("Refuse listening sessions on the shared runner")
+        })
+        .unwrap();
+    assert!(gate["if"].is_badvalue());
+    assert_eq!(gate["shell"].as_str(), Some("python3 {0}"));
+    let script = gate["run"].as_str().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let job = temp.path().join(".agentic-job");
+    fs::create_dir(&job).unwrap();
+    for (text, refused) in [
+        ("[agent]\nname = 'opencode'", false),
+        ("[session]\nwatch-item = true", false),
+        ("[session]\nlisten = false", false),
+        ("[session]\nlisten = true", true),
+        ("session.listen = 'false'", true),
+        ("[session", true),
+    ] {
+        fs::write(job.join("config.toml"), text).unwrap();
+        let output = Command::new("python3")
+            .args(["-c", script])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(!output.status.success(), refused, "{text}: {stderr}");
+        if text.contains("listen") && refused {
+            assert!(stderr.contains("listening sessions require a separate credential boundary"));
         }
     }
 }
