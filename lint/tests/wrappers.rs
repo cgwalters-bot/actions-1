@@ -985,6 +985,26 @@ fn review_task_requires_project_visibility_before_claiming_missing_membership() 
     }
 }
 
+// Nits and speculative findings kept reviews looping (tracker#1830): only a
+// concrete defect blocks, and an approval carries the rest as follow-ups.
+#[test]
+fn review_task_blocks_only_on_concrete_defects() {
+    let task = read("workflow/review.md");
+    let task = task.split_whitespace().collect::<Vec<_>>().join(" ");
+    for contract in [
+        "A blocker is a concrete failure to deliver the change's main purpose",
+        "defect it introduces or makes reachable",
+        "Speculative risks, unrelated pre-existing behavior",
+        "When findings share a cause, report one finding",
+        "names the root fix",
+        "Apply the same blocker definition in every round",
+        "A prior miss does not downgrade the finding",
+        "VERDICT: APPROVE otherwise, also when important findings and nits remain",
+    ] {
+        assert!(task.contains(contract), "{contract}");
+    }
+}
+
 // agentic-job is called at one release: check, apply, prepare and run
 // refuse calls that resolved to different commits, which following main
 // produced for runs spanning an agentic-job merge (tracker#544).
