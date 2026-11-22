@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use std::{collections::BTreeMap, env, fs, io::Write, path::Path, time::Duration};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
-const EXCHANGE: &str = "https://api.tailscale.com/api/v2/oauth/token-exchange";
+pub(crate) const API: &str = "https://api.tailscale.com/api/v2";
 const KEYS: [&str; 4] = ["oauth-client-id", "audience", "tags", "proxy"];
 const MAX_IDENTITY_BYTES: u64 = 1024 * 1024;
 
@@ -70,15 +70,26 @@ pub fn setup(path: &Path) -> Result<()> {
     Ok(())
 }
 
-struct Response {
-    status: u16,
-    json: Value,
+pub(crate) struct Response {
+    pub(crate) status: u16,
+    pub(crate) json: Value,
 }
 
-enum Request<'a> {
-    Oidc { url: Url, token: &'a str },
-    Exchange { client: &'a str, jwt: &'a str },
+pub(crate) enum Request<'a> {
+    Oidc {
+        url: Url,
+        token: &'a str,
+    },
+    Exchange {
+        client: &'a str,
+        jwt: &'a str,
+    },
     Probe(Url),
+    /// Creates an auth key with the access token from the exchange.
+    Key {
+        token: &'a str,
+        body: Value,
+    },
 }
 
 fn identity(response: Response) -> Result<Value> {
@@ -88,6 +99,21 @@ fn identity(response: Response) -> Result<Value> {
         response.status
     );
     Ok(response.json)
+}
+
+/// The runner's OIDC request URL with its audience replaced.
+pub(crate) fn oidc_request_url(oidc_url: &str, audience: &str) -> Result<Url> {
+    let mut url = Url::parse(oidc_url).map_err(|_| anyhow::anyhow!("invalid OIDC request URL"))?;
+    let pairs: Vec<_> = url
+        .query_pairs()
+        .filter(|(k, _)| k != "audience")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    url.set_query(None);
+    url.query_pairs_mut()
+        .extend_pairs(pairs)
+        .append_pair("audience", audience);
+    Ok(url)
 }
 
 fn check_with(
@@ -100,16 +126,7 @@ fn check_with(
     output: &mut impl Write,
 ) -> Result<()> {
     // Do not include endpoint URLs, token values or response bodies in errors.
-    let mut url = Url::parse(oidc_url).map_err(|_| anyhow::anyhow!("invalid OIDC request URL"))?;
-    let pairs: Vec<_> = url
-        .query_pairs()
-        .filter(|(k, _)| k != "audience")
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
-    url.set_query(None);
-    url.query_pairs_mut()
-        .extend_pairs(pairs)
-        .append_pair("audience", audience);
+    let url = oidc_request_url(oidc_url, audience)?;
     let oidc = identity(request(Request::Oidc { url, token })?)?;
     let jwt = oidc
         .get("value")
@@ -138,7 +155,7 @@ fn check_with(
     Ok(())
 }
 
-fn client() -> Result<Client> {
+pub(crate) fn client() -> Result<Client> {
     Client::builder()
         .timeout(TIMEOUT)
         .redirect(Policy::none())
@@ -149,16 +166,24 @@ fn client() -> Result<Client> {
         .context("build HTTP client")
 }
 
-fn send(client: &Client, exchange: &str, request: Request<'_>) -> Result<Response> {
+/// Sends a request, with the Tailscale API under `api`.
+pub(crate) fn send(client: &Client, api: &str, request: Request<'_>) -> Result<Response> {
     let (request, probe) = match request {
         Request::Oidc { url, token } => (client.get(url).bearer_auth(token), false),
         Request::Exchange { client: id, jwt } => (
             client
-                .post(exchange)
+                .post(format!("{api}/oauth/token-exchange"))
                 .form(&[("client_id", id), ("jwt", jwt)]),
             false,
         ),
         Request::Probe(url) => (client.post(url), true),
+        Request::Key { token, body } => (
+            client
+                .post(format!("{api}/tailnet/-/keys"))
+                .bearer_auth(token)
+                .json(&body),
+            false,
+        ),
     };
     let response = request
         .send()
@@ -190,13 +215,13 @@ pub fn check() -> Result<()> {
         &super::required("AUDIENCE")?,
         &super::required("OAUTH_CLIENT_ID")?,
         &super::required("PROXY")?,
-        |request| send(&client, EXCHANGE, request),
+        |request| send(&client, API, request),
         &mut std::io::stdout().lock(),
     )
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use serde_json::json;
 
@@ -318,6 +343,7 @@ mod tests {
                             assert_eq!(jwt, "oidc-value");
                         }
                         Request::Probe(url) => assert_eq!(url.as_str(), "http://192.0.2.1/v1/runs"),
+                        Request::Key { .. } => panic!("the check creates no key"),
                     }
                     let response = Response {
                         status: statuses[calls],
@@ -343,7 +369,9 @@ mod tests {
 
     /// Answers one loopback connection per response, in order, and returns
     /// the raw requests it read.
-    fn serve(responses: Vec<(u16, Vec<u8>)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+    pub(crate) fn serve(
+        responses: Vec<(u16, Vec<u8>)>,
+    ) -> (String, std::thread::JoinHandle<Vec<String>>) {
         use std::io::{BufRead, BufReader, Read};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -407,7 +435,7 @@ mod tests {
                 "aud",
                 "client",
                 &format!("{base}/ignored"),
-                |request| send(&client, &format!("{base}/exchange"), request),
+                |request| send(&client, &base, request),
                 &mut output,
             );
             let requests = server.join().unwrap();
@@ -416,7 +444,7 @@ mod tests {
             assert!(first.starts_with("get /token?existing=1&audience=aud http/1.1\r\n"));
             assert!(first.contains("\r\nauthorization: bearer request-value\r\n"));
             if let Some(exchange) = requests.get(1) {
-                assert!(exchange.starts_with("POST /exchange HTTP/1.1\r\n"));
+                assert!(exchange.starts_with("POST /oauth/token-exchange HTTP/1.1\r\n"));
                 assert!(exchange.ends_with("\r\n\r\nclient_id=client&jwt=jwt-value"));
             }
             if let Some(probe) = requests.get(2) {

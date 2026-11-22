@@ -6,9 +6,9 @@ The Rust replacements for the Node scripts of
 [tailscale](../tailscale/README.md) and
 [sandbox-share](../sandbox-share/README.md): one binary with a subcommand
 for each (`tailscale-setup SETTINGS.json`, `tailscale-check`,
-`sandbox-share`, `sandbox-share-check`). The actions still run their
-scripts; CI builds and tests the binary (`just test-action-scripts`), and
-checks sandbox-share's result with it.
+`tailscale-mint`, `sandbox-share`, `sandbox-share-check`). The actions
+still run their scripts; CI builds and tests the binary
+(`just test-action-scripts`), and checks sandbox-share's result with it.
 
 ## Delivery
 
@@ -64,9 +64,8 @@ static.
 
 Left to do, each a reviewed change here, in this order:
 
-1. Port `tailscale/mint.mjs` to a `tailscale-mint` subcommand with the
-   coverage of `lint/tests/tailscale_mint.rs`, so that one release serves
-   the whole tailscale action.
+1. Port `tailscale/setup.mjs resolve-proxy`, with its opt-in behavior, so
+   that one release serves the whole tailscale action.
 2. Run the release workflow for the crate's version and add `release.yml`
    with the asset's SHA-256.
 3. Switch tailscale's settings, mint and check steps and sandbox-share's

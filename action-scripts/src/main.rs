@@ -1,3 +1,4 @@
+mod mint;
 mod share;
 mod tailscale;
 
@@ -15,6 +16,7 @@ fn main() -> Result<()> {
             tailscale::setup(Path::new(settings))
         }
         [command] if command == "tailscale-check" => tailscale::check(),
+        [command] if command == "tailscale-mint" => mint::run(),
         [command] if command == "sandbox-share" => share::run(),
         [command] if command == "sandbox-share-check" => share::check(),
         // The release workflow checks this against the tag it publishes.
@@ -23,7 +25,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         _ => bail!(
-            "usage: action-scripts tailscale-setup SETTINGS.json | tailscale-check | sandbox-share | sandbox-share-check | --version"
+            "usage: action-scripts tailscale-setup SETTINGS.json | tailscale-check | tailscale-mint | sandbox-share | sandbox-share-check | --version"
         ),
     }
 }
