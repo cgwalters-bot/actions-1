@@ -415,11 +415,20 @@ uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@main
 Keep that caller's six permission grants. Optional `SAFE_OUTPUTS_PAT` is
 forwarded explicitly, only to apply; it never reaches the agent or the real
 review submission. Keep `workflow/review.toml`, `workflow/review-command.toml`
-and `workflow/review.md` on the caller's base branch. Automatic reviews admit
-non-draft owner/member/collaborator PRs, preserving upstream's association
-rule for all authors. Otherwise-unassociated bots wait unless `REVIEW_BOT_IDS`
-lists their numeric IDs **and** the bounds admit their logins (including
-Dependabot). Use a JSON array of numbers; Actions also coerces string IDs.
+and a complete `workflow/review.md` on the caller's base branch. Use
+[this repository's review task](workflow/review.md) as the template. Add
+repository-specific instructions only if they agree with the template and
+the generated merge policy. Updating the wrapper pin doesn't update the
+caller's task: copy policy changes into the caller's file, and don't replace
+it with local additions alone. Runtime sharing needs a policy job that
+budgets the whole rendered task and supplies the same artifact to the agent
+and detector.
+
+Automatic reviews admit non-draft owner/member/collaborator PRs, preserving
+upstream's association rule for all authors. Otherwise-unassociated bots wait
+unless `REVIEW_BOT_IDS` lists their numeric IDs **and** the bounds admit their
+logins (including Dependabot). Use a JSON array of numbers; Actions also
+coerces string IDs.
 `/review` still requires write access through event policy.
 Only admitted agent jobs enter per-PR concurrency; new automatic events
 cancel the old agent, comments do not. The head is data inside the sandbox,
@@ -427,12 +436,11 @@ never executed by a privileged step. Each review is bounded to 150 requests,
 500 AIC and 75 agent minutes.
 
 The agent keeps the read-only job token; it has no organization Projects
-credential. To avoid false missing-board blockers, `workflow/review.md`
+credential. To avoid false missing-board blockers, the shared template
 requires visibility of the exact Project and a complete membership query
 before reporting an item absent. Hidden, denied or ambiguous membership is
-reported as "membership could not be verified", not as missing. Callers that
-keep their own copy of the review task must copy this guidance too; changing
-the reusable workflow alone does not update a caller's task.
+reported as "membership could not be verified", not as missing. Copy this
+guidance into existing callers' tasks even if they keep custom instructions.
 
 `AGENT_REAL_REVIEWS=true` opts into checked APPROVE/REQUEST_CHANGES
 submission with the job token, at the admitted head. Leaving it unset keeps this off. Enable
