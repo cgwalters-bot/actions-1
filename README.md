@@ -49,6 +49,11 @@ be public and within the caller's `repos` bounds, and check enforces those
 bounds so an agent cannot redirect privileged comments to an unapproved
 repository. It is not supported for `review` or `fix`.
 
+An `implement` caller can pass `base: dispatch/implement/agent-run-1` to
+start from a lower PR's branch in the target repository. The caller's `bases`
+bounds must admit that branch; the wrapper does not broaden them. Leave
+`base` empty to use `main`. Other kinds refuse a nonempty `base` input.
+
 Before adopting v0.6.5, callers must migrate every bounds file (`allow`,
 `fix-allow` and both review bounds): move `[outputs]`, `[trigger]`,
 `[memory]` and `[secondary_pull_request]`, when present, under `[github]`
