@@ -116,7 +116,7 @@ async function target(env, { pull = false, caller = { private: false, visibility
   } };
   const context = { eventName, ref, sha: 'b'.repeat(40), payload: { repository: caller }, repo: { owner: 'caller', repo: 'repo' } };
   const environment = {
-    TARGET_REPO: 'example/repo', TARGET_ITEM: '7', PROFILE: 'implement', TASK: 'Do it.',
+    TARGET_REPO: 'example/repo', TARGET_ITEM: '7', PROFILE: 'implement', BASE: '', TASK: 'Do it.',
     SKILLS: 'false', MAX_REQUESTS: '400', AGENT: 'opencode', AGENT_MODEL: 'p/m', AGENT_RUNNER: '"ubuntu-26.04"',
     INFERENCE_URL: 'http://proxy', INFERENCE_AUDIENCE: 'aud', INFERENCE_REGISTER: 'github-oidc', AGENT_CONFIG_REPO: 'o/c',
     BROKER_URL: 'http://broker', BROKER_AUDIENCE: 'broker-aud',
@@ -190,6 +190,22 @@ test('skills are off by default and the task keeps its one-line contract', async
   assert.equal(outputs.skills, 'false');
   assert.doesNotMatch(outputs.task, /skill/);
   assert.match(outputs.task, /^Profile: implement\. Implement proposes one draft pull request\./);
+});
+
+test('only implement can override the policy base with a dispatch branch', async () => {
+  assert.match(workflow, /\n {6}base:\n {8}description: [^\n]*\n {8}type: string\n {8}default: ""/);
+  assert.ok(job('target').includes('BASE: ${{ inputs.base }}'));
+  assert.ok(job('target').includes('base: ${{ steps.target.outputs.base }}'));
+  assert.ok(job('policy').includes('base: ${{ needs.target.outputs.base }}'));
+
+  const BASE = 'dispatch/implement/agent-run-1';
+  assert.equal((await target({ BASE })).base, BASE);
+  assert.equal((await target({})).base, 'main');
+  await assert.rejects(target({ BASE: 'release' }), /base must start with dispatch\//);
+  for (const PROFILE of ['fix', 'triage', 'research', 'session']) {
+    await assert.rejects(target({ PROFILE, BASE }, { pull: PROFILE === 'fix' }), /base requires kind implement/, PROFILE);
+  }
+  await assert.rejects(review({ BASE }, { allowPolicyRead: false }), /base requires kind implement/);
 });
 
 test('artifact-only is default-off and admits only research without an apply environment', async () => {
@@ -456,6 +472,7 @@ test('ordinary review requires explicit pool/head and never falls back to deploy
   assert.equal(outputs['max-requests'], '150');
   assert.equal(outputs.skills, 'false');
   assert.equal(outputs['agent-config-repo'], '');
+  assert.equal(outputs.base, 'main');
   assert.equal(outputs['review-config'], '.agentic-job-source/.github/agentic-job/hosted.toml');
 });
 

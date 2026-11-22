@@ -60,6 +60,10 @@ on:
         description: Public target repository, OWNER/NAME, allowed by the bounds
         type: string
         required: true
+      base:
+        description: "Implement only: optional dispatch/ base branch allowed by the bounds; empty uses main"
+        type: string
+        default: ""
       item:
         description: "Positive issue number, or pull request number for review, fix and opted-in triage. Review and fix require a pull request"
         type: string
@@ -226,7 +230,7 @@ jobs:
       inference-audience: ${{ steps.target.outputs.inference-audience }}
       agent-config-repo: ${{ steps.target.outputs.agent-config-repo }}
       agent-config-path: ${{ steps.target.outputs.agent-config-path }}
-      review-base: ${{ steps.target.outputs.review-base }}
+      base: ${{ steps.target.outputs.base }}
       review-config: ${{ steps.target.outputs.review-config }}
       review-allow: ${{ steps.target.outputs.review-allow }}
       item-kind: ${{ steps.target.outputs.item-kind }}
@@ -259,6 +263,7 @@ jobs:
           ITEM_REPO: ${{ inputs.item-repo }}
           TARGET_ITEM: ${{ inputs.item }}
           PROFILE: ${{ inputs.kind }}
+          BASE: ${{ inputs.base }}
           RESEARCH_ARTIFACT_ONLY: ${{ inputs.research-artifact-only }}
           TRIAGE_OUTPUTS_FROM_ALLOW: ${{ inputs.triage-outputs-from-allow }}
           EXPECTED_HEAD: ${{ inputs.head }}
@@ -311,6 +316,11 @@ jobs:
             if (!['implement', 'triage', 'research', 'session', 'review', 'fix'].includes(profile)) {
               throw new Error('Unknown dispatch profile');
             }
+            // Prevent a stack request from selecting a release branch or
+            // replacing the base derived from a reviewed or fixed PR.
+            const base = process.env.BASE;
+            if (base && profile !== 'implement') throw new Error('base requires kind implement');
+            if (base && !base.startsWith('dispatch/')) throw new Error('base must start with dispatch/');
             const artifactOnly = process.env.RESEARCH_ARTIFACT_ONLY === 'true';
             if (artifactOnly && profile !== 'research') {
               throw new Error('research-artifact-only requires kind research');
@@ -428,7 +438,7 @@ jobs:
                 if (!command.scope || !admitted || !command.has(command.trigger.events, 'issue_comment') || !command.has(command.trigger.commands, '/review')) throw new Error('Review author or command is not admitted');
                 allow = 'workflow/review-command.toml';
               }
-              core.setOutput('review-base', caller.default_branch);
+              core.setOutput('base', caller.default_branch);
               core.setOutput('review-config', config);
               core.setOutput('review-allow', allow);
               core.setOutput('agent', selected.agent);
@@ -444,6 +454,7 @@ jobs:
               core.setOutput('agent-config-path', '');
               return;
             }
+            core.setOutput('base', base || 'main');
             const agent = process.env.AGENT;
             // The scripted agent needs no tailnet or broker, which the
             // register and agent jobs here always join and use.
@@ -596,7 +607,7 @@ jobs:
       repo: ${{ inputs.repo }}
       item-repo: ${{ inputs.item-repo }}
       task-artifact: ${{ inputs.kind != 'review' && format('dispatch-{0}-task', inputs.kind) || '' }}
-      base: ${{ inputs.kind == 'review' && needs.target.outputs.review-base || 'main' }}
+      base: ${{ needs.target.outputs.base }}
       kind: ${{ (inputs.kind == 'implement' || inputs.kind == 'fix') && 'branch' || 'analysis' }}
       # Keep PR triage advisory at check, not behind a live-read preflight:
       # GitHub cannot close only at an expected head/base, and apply's retry
@@ -822,7 +833,7 @@ jobs:
         env:
           PULL: ${{ inputs.item }}
           HEAD_SHA: ${{ needs.policy.outputs.review-head }}
-          BASE: ${{ needs.target.outputs.review-base }}
+          BASE: ${{ needs.target.outputs.base }}
         with:
           script: |
             const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: Number(process.env.PULL) });

@@ -465,6 +465,7 @@ create_issue = { max = 1 }
     let mut context = BTreeMap::from([
         ("inputs.kind", Yaml::String("triage".into())),
         ("inputs.triage-outputs-from-allow", Yaml::Boolean(true)),
+        ("needs.target.outputs.base", Yaml::String("main".into())),
         (
             "needs.target.outputs.item-kind",
             Yaml::String("pull-request".into()),
