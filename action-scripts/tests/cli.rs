@@ -52,6 +52,34 @@ fn setup_appends_only_validated_outputs() {
     }
 }
 
+#[test]
+fn mint_refuses_before_any_request_or_output() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = temp.path().join("output");
+    for (debug, tags, message) in [("1", "tag:test", "debug logging"), ("", " , ", "tags")] {
+        fs::write(&output, "existing=value\n").unwrap();
+        // An unroutable identity endpoint: a request would fail differently.
+        let result = Command::new(BINARY)
+            .arg("tailscale-mint")
+            .env("RUNNER_DEBUG", debug)
+            .env("TAGS", tags)
+            .env("ACTIONS_ID_TOKEN_REQUEST_URL", "http://192.0.2.1/token")
+            .env("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-value")
+            .env("AUDIENCE", "aud")
+            .env("OAUTH_CLIENT_ID", "client")
+            .env("GITHUB_OUTPUT", &output)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{result:?}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(message),
+            "{result:?}"
+        );
+        assert!(result.stdout.is_empty(), "{result:?}");
+        assert_eq!(fs::read_to_string(&output).unwrap(), "existing=value\n");
+    }
+}
+
 // This mutates /etc/agent-share. Run only on a disposable CI runner with
 // passwordless sudo; the ordinary unit tests need no privilege or network.
 #[test]
