@@ -92,6 +92,13 @@ on:
         description: The caller's bounds file for fix, naming the repositories whose pull request branches may be pushed to
         type: string
         default: .github/agentic-job/fix.toml
+      # Policy refuses a requested type the bounds lack, and any comment on
+      # a pull request the bounds admit only through `own_author`, so a fix
+      # asks for one only where the caller knows its bounds grant it.
+      fix-comment:
+        description: "Fix only: also request add_comment, which fix-allow must grant for the pull request's repository (not through own_author alone)"
+        type: boolean
+        default: false
       config:
         description: "The caller's runner configuration file; empty: the variable AGENT_CONFIG, else .github/agentic-job/hosted.toml. .agentic-job-source/.github/agentic-job/hosted.toml is agentic-job's own at the commit policy ran"
         type: string
@@ -235,6 +242,7 @@ jobs:
       review-allow: ${{ steps.target.outputs.review-allow }}
       item-kind: ${{ steps.target.outputs.item-kind }}
       advisory-banner: ${{ steps.target.outputs.advisory-banner }}
+      fix-comment-banner: ${{ steps.target.outputs.fix-comment-banner }}
     steps:
       # Any public repository can call this file, and its register job
       # gets identity tokens with this file's `job_workflow_ref`, which the
@@ -266,6 +274,7 @@ jobs:
           BASE: ${{ inputs.base }}
           RESEARCH_ARTIFACT_ONLY: ${{ inputs.research-artifact-only }}
           TRIAGE_OUTPUTS_FROM_ALLOW: ${{ inputs.triage-outputs-from-allow }}
+          FIX_COMMENT: ${{ inputs.fix-comment }}
           EXPECTED_HEAD: ${{ inputs.head }}
           REVIEW_POOL: ${{ inputs.pool }}
           REVIEW_POOLS: ${{ vars.REVIEW_POOLS }}
@@ -328,6 +337,10 @@ jobs:
             const triageOutputsFromAllow = process.env.TRIAGE_OUTPUTS_FROM_ALLOW === 'true';
             if (triageOutputsFromAllow && profile !== 'triage') {
               throw new Error('triage-outputs-from-allow requires kind triage');
+            }
+            const fixComment = process.env.FIX_COMMENT === 'true';
+            if (fixComment && profile !== 'fix') {
+              throw new Error('fix-comment requires kind fix');
             }
             const itemRepo = process.env.ITEM_REPO || process.env.TARGET_REPO;
             // Prevent item text from another repository being attributed to
@@ -559,10 +572,13 @@ jobs:
             // refuses skills for vibe and fake.
             const skills = process.env.SKILLS === 'true' && ['implement', 'fix'].includes(profile) && ['claude', 'opencode'].includes(agent);
             core.setOutput('skills', String(skills));
+            const fixCommentBanner = fixComment ? 'Fix run report:' : '';
+            if (fixCommentBanner) core.setOutput('fix-comment-banner', fixCommentBanner);
             const instructions = profile === 'review'
               ? 'Review the pinned head supplied by the runner. Return one add_comment with VERDICT: APPROVE, CHANGES or REJECT on its first line and REASON: on its second line (at most 200 characters), or noop. A verdict is not merge authority.'
               : profile === 'fix'
               ? "Fix works in a checkout of the pull request's branch at its pinned head; the change is pushed to that branch as one commit, or as the whole series again when the brief offers a replacement. Use noop, missing_tool or missing_data when needed."
+                + (fixCommentBanner ? ` Start each add_comment body with the exact line "${fixCommentBanner}" followed by a blank line.` : '')
               : skills
               ? 'Use the implement skill. Implement proposes one draft pull request. Use noop, missing_tool or missing_data when needed.'
               : prTriage
@@ -613,7 +629,7 @@ jobs:
       # GitHub cannot close only at an expected head/base, and apply's retry
       # path can also close by number. Do not file a replacement without the
       # corresponding disposition either. Only a confirmed issue gets all.
-      outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && 'push_to_pull_request_branch,noop,missing_tool,missing_data' || (inputs.kind == 'triage' && inputs.triage-outputs-from-allow && needs.target.outputs.item-kind == 'issue' && 'all' || 'add_comment,noop,missing_tool,missing_data'))) }}
+      outputs: ${{ inputs.kind == 'review' && 'add_comment,noop' || (inputs.kind == 'implement' && 'create_pull_request,noop,missing_tool,missing_data' || (inputs.kind == 'fix' && (inputs.fix-comment && 'push_to_pull_request_branch,add_comment,noop,missing_tool,missing_data' || 'push_to_pull_request_branch,noop,missing_tool,missing_data') || (inputs.kind == 'triage' && inputs.triage-outputs-from-allow && needs.target.outputs.item-kind == 'issue' && 'all' || 'add_comment,noop,missing_tool,missing_data'))) }}
       max-outputs: ${{ inputs.kind == 'review' && '1' || '3' }}
       # A fix has bounds of its own: pushing to a pull request's branch is
       # allowed for the repositories fix.toml names and no other. Since
@@ -902,7 +918,9 @@ jobs:
 
   advisory:
     needs: [target, check]
-    if: ${{ inputs.kind == 'triage' && needs.target.outputs.item-kind == 'pull-request' && needs.check.outputs.artifact-id != '' }}
+    if: >-
+      ${{ needs.check.outputs.artifact-id != '' && ((inputs.kind == 'triage' && needs.target.outputs.item-kind == 'pull-request') ||
+          (inputs.kind == 'fix' && inputs.fix-comment)) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
@@ -915,22 +933,28 @@ jobs:
           artifact-ids: ${{ needs.check.outputs.artifact-id }}
           path: ${{ runner.temp }}/advisory
           digest-mismatch: error
-      # Check's upload is immutable. Apply (including a retry) takes this
-      # very upload and verifies its provenance and digest independently.
+      # Require prose before a fix comment can use the publisher's token:
+      # a comment must not begin with a maintainer slash command. Check's
+      # upload is immutable; apply (including a retry) takes this very
+      # upload and verifies its provenance and digest independently.
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         id: advisory
         env:
-          BANNER: ${{ needs.target.outputs.advisory-banner }}
+          PROFILE: ${{ inputs.kind }}
+          BANNER: ${{ inputs.kind == 'fix' && needs.target.outputs.fix-comment-banner || needs.target.outputs.advisory-banner }}
           ARTIFACT_ID: ${{ needs.check.outputs.artifact-id }}
         with:
           script: |
             const { readFileSync } = require('node:fs');
             const { items } = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/advisory/agent_output.json`, 'utf8'));
             const banner = process.env.BANNER;
+            const fix = process.env.PROFILE === 'fix';
             if (!banner || !items.every(item => item.type !== 'add_comment' || (
-              item.body.startsWith(`${banner}\n`) && !item.body.includes('```agent-board-pr-triage')
+              fix ? item.body.startsWith(`${banner}\n\n`) :
+                item.body.startsWith(`${banner}\n`) && !item.body.includes('```agent-board-pr-triage')
             ))) {
-              throw new Error('PR recovery comments must start with the admitted head advisory banner and must not contain a machine disposition fence');
+              throw new Error(fix ? 'Fix comments must start with the fix report banner and a blank line' :
+                'PR recovery comments must start with the admitted head advisory banner and must not contain a machine disposition fence');
             }
             core.setOutput('artifact-id', process.env.ARTIFACT_ID);
 
@@ -960,10 +984,11 @@ jobs:
     with:
       policy: ${{ toJSON(needs.policy.outputs) }}
       agent: ${{ toJSON(needs.agent) }}
-      # Pass a refusal, not an unchecked upload, when advisory validation
+      # Pass a refusal, not an unchecked upload, when comment validation
       # fails. The pinned apply workflow still finalizes the status comment.
       check: >-
-        ${{ (inputs.kind != 'triage' || needs.target.outputs.item-kind == 'issue' || needs.check.result != 'success' ||
+        ${{ (!((inputs.kind == 'triage' && needs.target.outputs.item-kind != 'issue') || (inputs.kind == 'fix' && inputs.fix-comment)) ||
+            needs.check.result != 'success' ||
             (needs.advisory.result == 'success' && needs.advisory.outputs.artifact-id != '' &&
              needs.advisory.outputs.artifact-id == needs.check.outputs.artifact-id)) && toJSON(needs.check) ||
-            '{"result":"failure","outputs":{"refusal":"PR recovery comments did not pass advisory validation."}}' }}
+            '{"result":"failure","outputs":{"refusal":"PR comments did not pass publication validation."}}' }}

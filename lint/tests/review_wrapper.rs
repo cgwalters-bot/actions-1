@@ -406,6 +406,46 @@ fn triage_outputs_from_allow_widens_only_triage() {
     }
 }
 
+// A fix asks for a comment only when the caller opts in: policy refuses
+// the whole run when the bounds lack one, so the default stays push-only.
+#[test]
+fn fix_comment_widens_only_fix() {
+    let workflow = yaml(&read(DISPATCH));
+    let policy = &workflow["jobs"]["policy"]["with"];
+    for (kind, mode, want) in [
+        (
+            "fix",
+            None,
+            "push_to_pull_request_branch,noop,missing_tool,missing_data",
+        ),
+        (
+            "fix",
+            Some(false),
+            "push_to_pull_request_branch,noop,missing_tool,missing_data",
+        ),
+        (
+            "fix",
+            Some(true),
+            "push_to_pull_request_branch,add_comment,noop,missing_tool,missing_data",
+        ),
+        (
+            "implement",
+            Some(true),
+            "create_pull_request,noop,missing_tool,missing_data",
+        ),
+    ] {
+        let mut context = BTreeMap::from([("inputs.kind", Yaml::String(kind.into()))]);
+        if let Some(mode) = mode {
+            context.insert("inputs.fix-comment", Yaml::Boolean(mode));
+        }
+        assert_eq!(
+            string(&workflow_value(&policy["outputs"], &context)),
+            want,
+            "{kind} {mode:?}"
+        );
+    }
+}
+
 fn workflow_value(source: &Yaml, context: &BTreeMap<&str, Yaml>) -> Yaml {
     value(
         source
@@ -418,6 +458,268 @@ fn workflow_value(source: &Yaml, context: &BTreeMap<&str, Yaml>) -> Yaml {
             .unwrap(),
         context,
     )
+}
+
+#[test]
+fn fix_apply_requires_validation_of_the_same_comment_artifact() {
+    let workflow = yaml(&read(DISPATCH));
+    let apply = &workflow["jobs"]["apply"];
+    let routing = Yaml::String(
+        string(&apply["with"]["check"]).replace("toJSON(needs.check)", "needs.check-json"),
+    );
+    let checked = r#"{"result":"success","outputs":{"artifact-id":"123","has-patch":"false"}}"#;
+    for (opt_in, validation, validated_id, applies) in [
+        (false, "skipped", "", true),
+        (true, "success", "123", true),
+        (true, "success", "456", false),
+        (true, "failure", "", false),
+        (true, "skipped", "", false),
+    ] {
+        let context = BTreeMap::from([
+            ("inputs.kind", Yaml::String("fix".into())),
+            ("inputs.fix-comment", Yaml::Boolean(opt_in)),
+            (
+                "needs.target.outputs.item-kind",
+                Yaml::String("pull-request".into()),
+            ),
+            ("needs.check.result", Yaml::String("success".into())),
+            (
+                "needs.check.outputs.artifact-id",
+                Yaml::String("123".into()),
+            ),
+            ("needs.check-json", Yaml::String(checked.into())),
+            ("needs.advisory.result", Yaml::String(validation.into())),
+            (
+                "needs.advisory.outputs.artifact-id",
+                Yaml::String(validated_id.into()),
+            ),
+        ]);
+        assert_eq!(
+            string(&workflow_value(&routing, &context)) == checked,
+            applies,
+            "opt-in {opt_in}, validation {validation}, validated id {validated_id}"
+        );
+    }
+}
+
+// Use the pinned policy/check tools and comment handler, with no forge writes.
+#[test]
+#[ignore = "requires pinned agentic-job on PATH, AGENTIC_JOB_APPLY and GH_AW_ADD_COMMENT pointing to the pinned workflow and handler"]
+fn fix_comment_only_publication() {
+    use serde_json::{Value, json};
+
+    let workflow = yaml(&read(DISPATCH));
+    let jobs = &workflow["jobs"];
+    let dir = tempfile::tempdir().unwrap();
+    let cli = |args: &[&str]| {
+        Command::new("agentic-job")
+            .args(args)
+            .current_dir(dir.path())
+            .env_remove("GH_TOKEN")
+            .env_remove("GITHUB_TOKEN")
+            .output()
+            .unwrap()
+    };
+    assert_eq!(cli(&["--version"]).stdout, b"agentic-job 0.6.16\n");
+    fs::write(
+        dir.path().join("allow.toml"),
+        r#"
+hosts = ["github.com"]
+repos = ["example/listed"]
+bases = ["main"]
+max_outputs = 3
+max_patch_bytes = 1048576
+max_patch_files = 50
+[github.outputs]
+push_to_pull_request_branch = { max = 1, branches = ["fix/**"], own_author = "fix-bot" }
+add_comment = { max = 1 }
+noop = { max = 1 }
+missing_tool = { max = 1 }
+missing_data = { max = 1 }
+"#,
+    )
+    .unwrap();
+    let mut context = BTreeMap::from([("inputs.kind", Yaml::String("fix".into()))]);
+    let compile = |context: &BTreeMap<&str, Yaml>, repo: &str| {
+        cli(&[
+            "policy",
+            "--allow",
+            "allow.toml",
+            "--repo",
+            repo,
+            "--output-repo",
+            repo,
+            "--clone-url",
+            &format!("https://github.com/{repo}"),
+            "--base",
+            "fix/topic",
+            "--pull-request",
+            "7",
+            "--head",
+            &"a".repeat(40),
+            "--pull-author",
+            "fix-bot",
+            "--kind",
+            "branch",
+            "--outputs",
+            &string(&workflow_value(&jobs["policy"]["with"]["outputs"], context)),
+            "--max-outputs",
+            "3",
+        ])
+    };
+    let own = compile(&context, "example/unlisted");
+    assert!(own.status.success(), "{own:?}");
+    let own: Value = serde_json::from_slice(&own.stdout).unwrap();
+    assert_eq!(
+        own["safe_outputs"]["push_to_pull_request_branch"]["author"],
+        "fix-bot"
+    );
+    assert!(own["safe_outputs"]["add_comment"].is_null());
+    context.insert("inputs.fix-comment", Yaml::Boolean(true));
+    let refused = compile(&context, "example/unlisted");
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("own_author's pull request"));
+    let listed = compile(&context, "example/listed");
+    assert!(listed.status.success(), "{listed:?}");
+    fs::write(dir.path().join("policy.json"), listed.stdout).unwrap();
+    for folder in ["proposals", "advisory"] {
+        fs::create_dir(dir.path().join(folder)).unwrap();
+    }
+
+    let upstream_apply =
+        yaml(&fs::read_to_string(std::env::var_os("AGENTIC_JOB_APPLY").unwrap()).unwrap());
+    let routing = Yaml::String(
+        string(&jobs["apply"]["with"]["check"]).replace("toJSON(needs.check)", "needs.check-json"),
+    );
+    let banner = "Fix run report:";
+    for (body, admitted) in [
+        ("/review".into(), false),
+        (
+            format!("{banner}\n\nNo patch: waiting on a prerequisite.\n\n/review"),
+            true,
+        ),
+    ] {
+        let proposal = json!({"type": "add_comment", "body": body});
+        fs::write(
+            dir.path().join("proposals/outputs.jsonl"),
+            format!("{proposal}\n"),
+        )
+        .unwrap();
+        let collected = cli(&[
+            "collect",
+            "--policy",
+            "policy.json",
+            "--outputs",
+            "proposals",
+            "--collected",
+            "collected.json",
+        ]);
+        assert!(collected.status.success(), "{collected:?}");
+        let checked = cli(&[
+            "check",
+            "--policy",
+            "policy.json",
+            "--outputs",
+            "proposals",
+            "--collected",
+            "collected.json",
+            "--report",
+            "report.json",
+            "--run-id",
+            "101",
+            "--comment-repo",
+            "example/listed",
+            "--comment-target",
+            "7",
+        ]);
+        assert!(checked.status.success(), "{checked:?}");
+        let report: Value =
+            serde_json::from_slice(&fs::read(dir.path().join("report.json")).unwrap()).unwrap();
+        assert!(report["patch"].is_null());
+        assert_eq!(report["items"][0]["body"], body);
+        fs::write(
+            dir.path().join("advisory/agent_output.json"),
+            json!({"items": report["items"]}).to_string(),
+        )
+        .unwrap();
+        let validation = Command::new("node")
+            .args([
+                "-e",
+                "new Function('core', process.argv[1])({setOutput: (k, v) => console.log(v)})",
+                &string(&jobs["advisory"]["steps"][1]["with"]["script"]),
+            ])
+            .env("RUNNER_TEMP", dir.path())
+            .env("PROFILE", "fix")
+            .env("BANNER", banner)
+            .env("ARTIFACT_ID", "123")
+            .output()
+            .unwrap();
+        assert_eq!(validation.status.success(), admitted, "{validation:?}");
+        for (key, val) in [
+            ("needs.check.result", "success"),
+            ("needs.check.outputs.artifact-id", "123"),
+            (
+                "needs.check-json",
+                r#"{"result":"success","outputs":{"artifact-id":"123","has-patch":"false"}}"#,
+            ),
+            (
+                "needs.advisory.result",
+                if admitted { "success" } else { "failure" },
+            ),
+            (
+                "needs.advisory.outputs.artifact-id",
+                std::str::from_utf8(&validation.stdout).unwrap().trim(),
+            ),
+            ("inputs.agent", r#"{"outputs":{"exit":"0"}}"#),
+            (
+                "inputs.policy",
+                r#"{"external-run-id":"","proposals-artifact":"","apply-partial":"false","expect-check-refusal":""}"#,
+            ),
+        ] {
+            context.insert(key, Yaml::String(val.into()));
+        }
+        assert!(truthy(&workflow_value(&jobs["advisory"]["if"], &context)));
+        context.insert("inputs.check", workflow_value(&routing, &context));
+        assert_eq!(
+            truthy(&workflow_value(
+                &upstream_apply["jobs"]["apply"]["if"],
+                &context
+            )),
+            admitted
+        );
+        if !admitted {
+            continue;
+        }
+        // Run the pinned handler's real formatting up to the API call.
+        let delivery = Command::new("node")
+            .args(["-e", r#"
+const assert = require('node:assert/strict');
+global.core = { info() {}, warning() {}, debug() {}, error() {} };
+global.context = { repo: { owner: 'example', repo: 'listed' }, payload: {},
+  serverUrl: 'https://github.com', runId: 101, eventName: 'workflow_dispatch' };
+global.github = { rest: { issues: { createComment: async ({owner, repo, issue_number, body}) => {
+  assert.deepEqual([owner, repo, issue_number], ['example', 'listed', 7]);
+  console.log(body);
+  return { data: { id: 10, html_url: 'https://github.com/example/listed/pull/7#issuecomment-10' } };
+} } } };
+(async () => {
+  const handler = await require(process.env.GH_AW_ADD_COMMENT).main({ target: '7', 'target-repo': 'example/listed', mentions: false });
+  assert.equal((await handler(JSON.parse(process.argv[1]))).success, true);
+})().catch(err => { console.error(err); process.exitCode = 1; });
+"#, &report["items"][0].to_string()])
+            .env_remove("GH_AW_COMMANDS")
+            .env("GITHUB_REPOSITORY", "example/caller")
+            .env("GITHUB_REPOSITORY_ID", "1")
+            .env("GITHUB_RUN_ID", "101")
+            .env("GITHUB_RUN_ATTEMPT", "1")
+            .env("GITHUB_JOB", "apply")
+            .env("GH_AW_WORKFLOW_ID", "agentic-job")
+            .env("GH_AW_JOB_CHECK_RUN_ID", "2")
+            .output().unwrap();
+        assert!(delivery.status.success(), "{delivery:?}");
+        let delivered = String::from_utf8(delivery.stdout).unwrap();
+        assert!(delivered.starts_with(&format!("{body}\n\n")), "{delivered}");
+    }
 }
 
 // Run against the release binary and apply.yml at PIN. Only evaluate the

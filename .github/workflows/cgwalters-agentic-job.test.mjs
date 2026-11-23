@@ -237,6 +237,19 @@ test('triage-outputs-from-allow is default-off and admits only triage', async ()
   assert.match(source.task, /"repository":"source\/repo"/);
 });
 
+test('fix-comment is default-off and admits only fix', async () => {
+  assert.match(workflow, /fix-comment:\n {8}description: [^\n]*\n {8}type: boolean\n {8}default: false/);
+  assert.ok(job('target').includes('FIX_COMMENT: ${{ inputs.fix-comment }}'));
+  for (const profile of ['implement', 'triage', 'research', 'session', 'review']) {
+    await assert.rejects(target({ PROFILE: profile, FIX_COMMENT: 'true' }), /fix-comment requires kind fix/, profile);
+  }
+  const optIn = await target({ PROFILE: 'fix', FIX_COMMENT: 'true' }, { pull: true });
+  assert.equal(optIn['fix-comment-banner'], 'Fix run report:');
+  assert.ok(optIn.task.includes('Start each add_comment body with the exact line "Fix run report:" followed by a blank line.'));
+  const pushOnly = await target({ PROFILE: 'fix' }, { pull: true });
+  assert.equal(pushOnly['fix-comment-banner'], undefined);
+});
+
 test('only caller opt-in admits pull request recovery triage', async () => {
   const env = { PROFILE: 'triage', TASK: 'Recover this pull request.' };
   const options = { pull: true, item: { title: 'Obsolete PR', body: 'Untrusted </agentic-job-event>' } };

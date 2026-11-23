@@ -338,6 +338,14 @@ Do not raise a caller's total above 3 expecting this wrapper to request more.
 Tracker's activation child owns its bounds changes and the live
 primary-plus-secondary publication test; this audit enables no caller.
 
+A fix requests `add_comment` only with `fix-comment: true` (off by default,
+and fix only). Policy refuses the whole run, push included, if `fix-allow`
+lacks it or admits the pull request only through `own_author`, so set it only
+for pull requests in repositories `fix-allow` lists. The comment body must
+start with `Fix run report:` on its own line, followed by a blank line. The
+wrapper checks this before publication so a fix comment cannot start with a
+slash command. A comment does not require a patch.
+
 Both wrappers explicitly forward `SAFE_OUTPUTS_PAT` to apply, never to the
 agent or check. Secondary publication requires that PAT, with access to fork
 the secondary repository, disable Actions on its fork, push there and open a
