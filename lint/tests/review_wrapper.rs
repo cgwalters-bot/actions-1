@@ -1634,7 +1634,9 @@ fn agent_source(text: &str) {
             "Admit the runner-user configuration",
             "Refuse listening sessions on the shared runner",
             "Check the tailnet key is this attempt's and unexpired",
+            "The policy's inference endpoint",
             "Join the tailnet",
+            "Bind the run to the joined inference endpoint",
             "Check inference proxy reachability",
             "The host's configuration",
             "Add last-resort Ubuntu mirrors",
@@ -1662,7 +1664,8 @@ fn agent_source(text: &str) {
     let order = [
         "name: Join the tailnet",
         "authkey: ${{ secrets.TAILNET_KEY }}",
-        "run: agentic-job secure-host inference .agentic-job/config.toml",
+        "name: Bind the run to the joined inference endpoint",
+        "run: agentic-job secure-host inference \"$CONFIG\"",
         "--string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:",
         "uses: ./.agentic-job-source/secure-host",
         "run: python3 .agentic-job-source/workflow/runner-setup.py setup",
@@ -1722,7 +1725,8 @@ fn register_job(text: &str) {
         register["outputs"],
         yaml(
             "run-token: ${{ steps.register.outputs.run-token }}\ntailnet-key: ${{ steps.tailnet.outputs.key }}\n\
-             tailnet-key-attempt: ${{ github.run_attempt }}\ntailnet-key-minted-at: ${{ steps.minted.outputs.at }}"
+             tailnet-key-attempt: ${{ github.run_attempt }}\ntailnet-key-minted-at: ${{ steps.minted.outputs.at }}\n\
+             inference-address: ${{ steps.bind.outputs.address }}"
         )
     );
     let steps: Vec<_> = register["steps"]
@@ -1743,8 +1747,10 @@ fn register_job(text: &str) {
             "The policy call's source and uploads",
             "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
             "Refuse unsupported child agents before credentials",
+            "The policy's inference endpoint",
             "The key's mint time",
             "Join the tailnet and mint the agent job's key",
+            "Bind the run to the joined inference endpoint",
             "Register the run at the inference proxy",
         ]
     );
@@ -1755,7 +1761,8 @@ fn register_job(text: &str) {
             "[[ \"$BINARY\" =~ ^[1-9][0-9]*$ && \"$POLICY\" =~ ^[1-9][0-9]*$ ]] ||",
             "mint: 'true'",
             "artifact-ids: ${{ needs.policy.outputs.binary-artifact-id }},${{ needs.policy.outputs.policy-artifact-id }}",
-            "\"$JOB_DIR/agentic-job\" register --config \"$JOB_DIR/config.toml\" --output \"$GITHUB_OUTPUT\"",
+            "CONFIG: ${{ steps.bind.outputs.config }}",
+            "\"$JOB_DIR/agentic-job\" register --config \"$CONFIG\" --output \"$GITHUB_OUTPUT\"",
         ],
     );
 }
@@ -1859,7 +1866,7 @@ fn agent_inputs(text: &str) {
         agent,
         &[
             "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-            "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
+            "agentic-job config --host --prepared --from \"$CONFIG\" --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
             "config: ${{ runner.temp }}/agentic-job-host.toml",
             "AGENT_USER: runner\n",
             "run: python3 .agentic-job-source/workflow/runner-setup.py admit",
@@ -2065,7 +2072,14 @@ fn smoke_source(text: &str) {
         previous = Some(index);
         if step.starts_with("uses: ") || step.starts_with("run: ") || step.contains("$RUNNER_TEMP")
         {
-            assert!(agent.contains(step), "the agent job runs {step}");
+            // The agent job's reachability check and host configuration
+            // read the configuration bound to its join.
+            let step = if step.contains("secure-host inference") || step.contains("config --host") {
+                step.replace(".agentic-job/config.toml", "\"$CONFIG\"")
+            } else {
+                step.to_owned()
+            };
+            assert!(agent.contains(&step), "the agent job runs {step}");
         }
     }
     excludes(
@@ -2477,7 +2491,7 @@ fn prose_runner_only_migration_keeps_oidc_and_writes_out_of_agent_job() {
             // The agent's `agentic-job handback` must find the policy
             // binary, not the older one secure-host's image installs.
             "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-            "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
+            "agentic-job config --host --prepared --from \"$CONFIG\" --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
         ],
     );
     let source = yaml(&shared);

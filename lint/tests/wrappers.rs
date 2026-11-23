@@ -1369,7 +1369,7 @@ fn safe_output_contract_keeps_caller_bounds_counts_and_apply_token() {
 fn agent_joins_the_tailnet_with_the_register_jobs_key() {
     let agent = job(&read(AGENT), "agent");
     assert!(agent.contains(
-        "\n      - name: Join the tailnet\n        uses: cgwalters-forge/actions/tailscale@"
+        "\n      - name: Join the tailnet\n        id: tailnet\n        uses: cgwalters-forge/actions/tailscale@"
     ));
     assert!(agent.contains(&line(10, "authkey: ${{ secrets.TAILNET_KEY }}")));
     for file in [AGENTIC_JOB, REVIEW] {

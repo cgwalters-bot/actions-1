@@ -35,6 +35,32 @@ wrapper's variables still default apart). It refuses runs
 from a private repository, so agentic-job's opt-in for private
 repositories stays off. That opt-in admits only the calling repository.
 
+Each register job and the agent job pass the URL the policy job recorded
+to their tailnet join. An IPv4 address must be the one the join passed
+through, and the configuration is the policy's, unchanged; an `http`
+`.ts.net` name gets the tailnet address the join found (`resolve-proxy`),
+in a job-local copy of the configuration (agentic-job's `config
+--inference-address`), never a lookup in the runner's DNS. The agent
+job's join must resolve the address its register job registered at, or
+it fails before `run`. A caller configuration with its own
+`egress.direct` must list a named broker's resolved address. Any other
+`http` or `https` URL with a plain host, such as an `https` name whose
+certificate must match its host, is passed through as before: the join
+does not resolve it and the configuration is the policy's, unchanged. A
+URL with userinfo, a `\` or a `%` in its authority is refused before the
+join.
+
+Binding an HTTP `.ts.net` name requires `inference.register = "github-oidc"`
+and no `inference.openai-url` or `inference.anthropic-url`. The pinned
+`agentic-job` rewrites only `inference.url`, so the workflow refuses these
+route overrides before joining or minting a tailnet key, even if they name
+the same broker. Remove the overrides to use the broker's default routes.
+If custom routes are required, configure the same trusted broker's tailnet
+IPv4 address in both `inference.url` and the route URLs, preserving the
+ports and paths. If a provider route uses a different port from
+`inference.url`, list both broker endpoints in `egress.direct`. The
+wrapper then uses those URLs unchanged.
+
 A repository gets agent runs with the workflow below, a bounds file at
 `.github/agentic-job/dispatch.toml` (and `fix.toml` for the `fix` kind), a
 runner configuration at `.github/agentic-job/hosted.toml`, and an
@@ -90,7 +116,8 @@ can wait past its key's hour; both fail at a check before the join that
 says so. Use **Re-run all jobs**, not **Re-run failed jobs** (see
 [retry recovery](#retry-recovery)).
 The agent job then runs upstream's agent.yml sequence: prepare,
-agentic-job's runner-user admission, the join, the reachability check,
+agentic-job's runner-user admission, the join and the binding of its
+resolved address to the configuration, the reachability check,
 `agentic-job config --host` (with no `setup.script`), the pinned
 `secure-host` forwarder, the setup script as the runner's user, and `run`
 with `--runner-home`. The pinned image installs its own, older

@@ -54,6 +54,13 @@ on:
         description: When, in seconds since the epoch, the register job minted TAILNET_KEY (at most)
         type: string
         required: true
+      inference-address:
+        description: >-
+          The tailnet address the register job's join resolved and registered the run at, empty
+          for a URL it did not resolve; the agent's join must resolve the same before `run` gets
+          INFERENCE_RUN_TOKEN
+        type: string
+        required: true
     secrets:
       # The register job's `agentic-job register` output: the broker's run
       # token, narrow, capped and expiring. Only `run` gets it.
@@ -209,20 +216,123 @@ jobs:
           if (( $(date +%s) - MINTED_AT >= KEY_EXPIRY_SECONDS )); then
             echo "::error::the tailnet key expired while this job waited to start: re-run all jobs"; exit 1
           fi
+      # The join resolves the URL policy recorded, as in the wrappers'
+      # register jobs, whose two steps around the join these are.
+      - name: The policy's inference endpoint
+        id: endpoint
+        shell: python3 {0}
+        env:
+          CONFIG: .agentic-job/config.toml
+        run: |
+          import ipaddress, os, re, sys, tomllib
+          with open(os.environ['CONFIG'], 'rb') as source:
+              inference = tomllib.load(source).get('inference')
+          url = inference.get('url') if isinstance(inference, dict) else None
+          if not isinstance(url, str) or not re.fullmatch(r'[!-~]+', url):
+              sys.exit(f'the policy inference.url {url!r} is missing or not one line of printable ASCII; refused before the join')
+          # Only an authority that Python, the tailscale action's Node and
+          # agentic-job's Rust all read as the same host: no userinfo, `\`
+          # or `%`. Anything else is refused, not passed through, so that
+          # no spelling of an http tailnet name reaches runner DNS.
+          match = re.fullmatch(r'(https?)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]+)?(?:/[!-~]*)?', url)
+          if not match:
+              sys.exit(f'the policy inference.url {url!r} is not an http or https URL with a plain host; refused before the join')
+          scheme, host = match.groups()
+          # As the join's helper reads a host: in any case, final dots aside.
+          host = host.lower().rstrip('.')
+          try:
+              ipaddress.IPv4Address(host)
+              mode = 'literal'
+          except ValueError:
+              # Any other URL, such as an https name whose certificate
+              # names its host, keeps that name: agentic-job reaches it as
+              # before, and the join does not resolve it.
+              mode = 'named' if scheme == 'http' and host.endswith('.ts.net') else 'direct'
+          if mode == 'named':
+              # Match the pinned --inference-address contract before the
+              # join. It replaces only inference.url, not provider routes.
+              if inference.get('register') != 'github-oidc':
+                  sys.exit('binding an HTTP .ts.net broker requires inference.register = "github-oidc"; refused before the join')
+              overrides = ', '.join(f'inference.{key}' for key in ('openai-url', 'anthropic-url') if key in inference)
+              if overrides:
+                  sys.exit(f'binding an HTTP .ts.net broker cannot rewrite {overrides}; remove route overrides to use the broker defaults, or configure the same broker by tailnet IPv4 in the base and route URLs; refused before the join')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print(f'url={url}\nhost={host}\nmode={mode}', file=output)
       # Our one privileged network step, as root before anything of the
       # agent's is on the machine, with the register job's key, which the
       # join spends: whatever is still valid after secure-host is the
       # agent's. Pinned: main must not change privileged code behind a
       # caller's reviewed wrapper pin. Renovate moves it (renovate.json).
       - name: Join the tailnet
-        uses: cgwalters-forge/actions/tailscale@e084c52a9aa07f1279182cfc738de68b96016278 # from main
+        id: tailnet
+        uses: cgwalters-forge/actions/tailscale@ae714cb7d4514337247482332af8b3bc7f117fe2 # from main
         with:
           authkey: ${{ secrets.TAILNET_KEY }}
           hostname: agentic-job-${{ github.run_id }}-${{ github.run_attempt }}-agent
+          proxy: ${{ steps.endpoint.outputs.url }}
+          resolve-proxy: ${{ steps.endpoint.outputs.mode != 'direct' }}
+      # As prepare's `inference-address` would (prepare runs before the
+      # admission, and so before the join): a name's address goes into a
+      # job-local copy, which the reachability check and the host's
+      # configuration, and so `run`, read; the run's summary records it.
+      # A name that now resolves elsewhere than the register job's join
+      # found is refused before `run` sends the run token anywhere.
+      - name: Bind the run to the joined inference endpoint
+        id: bind
+        shell: python3 {0}
+        env:
+          URL: ${{ steps.endpoint.outputs.url }}
+          HOST: ${{ steps.endpoint.outputs.host }}
+          MODE: ${{ steps.endpoint.outputs.mode }}
+          PROXY: ${{ steps.tailnet.outputs.proxy }}
+          ADDRESS: ${{ steps.tailnet.outputs.proxy-address }}
+          BINARY: .agentic-job/agentic-job
+          CONFIG: .agentic-job/config.toml
+          BOUND: ${{ runner.temp }}/agentic-job-inference.toml
+          META: .agentic-job/meta.json
+          REGISTERED: ${{ inputs.inference-address }}
+        run: |
+          import json, os, subprocess, sys
+          url, host, mode, proxy, address, binary, config, bound, meta = (os.environ[k] for k in ('URL', 'HOST', 'MODE', 'PROXY', 'ADDRESS', 'BINARY', 'CONFIG', 'BOUND', 'META'))
+          # The agent job's: where its register job registered the run,
+          # which the run token is for. The register jobs set none.
+          registered = os.environ.get('REGISTERED')
+          if not url or proxy != url:
+              sys.exit(f'the tailnet join was given {proxy!r}, not the policy inference.url {url!r}')
+          if mode == 'literal':
+              if address != host:
+                  sys.exit(f'the tailnet join resolved {address!r} for the address {host}')
+          elif mode == 'direct':
+              address = ''
+          elif mode != 'named':
+              sys.exit(f'unknown inference endpoint mode {mode!r}')
+          elif not address:
+              sys.exit(f'the tailnet join resolved no address for {host}')
+          if registered is not None and address != registered:
+              sys.exit(f'the tailnet join resolved {address!r} for {host}, not {registered!r}, where the run was registered; the run token goes to no other peer')
+          if mode != 'named':
+              bound = config
+          else:
+              os.chmod(binary, 0o755)
+              composed = subprocess.run([binary, 'config', '--from', config, f'--inference-address={address}'], stdout=subprocess.PIPE)
+              if composed.returncode != 0:
+                  sys.exit(f'agentic-job refused the address {address} for {host}')
+              with open(bound, 'wb') as sink:
+                  sink.write(composed.stdout)
+              if meta:
+                  with open(meta) as source:
+                      record = json.load(source) | {'inference_address': address}
+                  with open(meta, 'w') as sink:
+                      json.dump(record, sink)
+          print(f'inference endpoint {url} at {address or "its own name"}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print(f'config={bound}\naddress={address}', file=output)
       # Fail on a missing proxy route before setup, not in its probes.
       # This TCP check sends no credentials.
       - name: Check inference proxy reachability
-        run: agentic-job secure-host inference .agentic-job/config.toml
+        env:
+          CONFIG: ${{ steps.bind.outputs.config }}
+        run: agentic-job secure-host inference "$CONFIG"
       # The policy job's configuration for the host, by its binary: a
       # host's file has no `setup.script`, which the runner's user runs
       # below, after secure-host (agentic-job#2989). The pinned image
@@ -235,9 +345,11 @@ jobs:
       # generated configuration's value rather than defaulting it off.
       - name: The host's configuration
         id: host-config
+        env:
+          CONFIG: ${{ steps.bind.outputs.config }}
         run: |
           install -D -m 0755 .agentic-job/agentic-job "$RUNNER_TEMP/agentic-job-bin/agentic-job"
-          agentic-job config --host --prepared --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
+          agentic-job config --host --prepared --from "$CONFIG" --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
           python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb")); print("egress=" + ("write-policy" if c.get("egress", {}).get("write-policy", False) else "off"))' "$RUNNER_TEMP/agentic-job-host.toml" >> "$GITHUB_OUTPUT"
       # Every mirror in the runner's apt-mirrors.txt (archive and security
       # alike) is an ubuntu.com name, so Canonical's DNS outage of 2026-11-11
