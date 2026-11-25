@@ -183,14 +183,21 @@ jobs:
         run: python3 .agentic-job-source/workflow/runner-setup.py admit
       # The pinned run action uses the job token after the agent runs. An
       # empty github-token input does not isolate that same-user step.
-      - name: Refuse listening sessions on the shared runner
+      - name: Admit shared-runner setup and session settings
         shell: python3 {0}
+        env:
+          AGENT_HOME: ${{ runner.temp }}/agent-home
         run: |
-          import sys, tomllib
+          import os, sys, tomllib
           with open('.agentic-job/config.toml', 'rb') as source:
               config = tomllib.load(source)
           if config.get('session', {}).get('listen', False) is not False:
               sys.exit('listening sessions require a separate credential boundary; remove [session] listen from the caller configuration')
+          # Both pinned helpers overlay host.env on HOME. Do not let it redirect setup away from the fixed agent bin.
+          home = os.environ['AGENT_HOME']
+          host = config.get('host', config.get('sandbox', {}))
+          if config.get('setup', {}).get('script') and host.get('env', {}).get('HOME', home) != home:
+              sys.exit('setup requires the shared runner home; remove the HOME override from host.env in the caller configuration')
       # Re-running only a failed agent job reuses the register job's
       # outputs, a key the first attempt spent, and a review queued behind
       # another can hold its key past expiry: either way the join would
@@ -229,15 +236,18 @@ jobs:
       # installs its own, older agentic-job in /usr/local/bin, and the
       # agent's commands (`agentic-job handback ...`) must find the policy
       # binary that `run` starts instead: a copy of it, in a directory of
-      # its own, first on the agent's PATH. Declare the agent tables for
-      # sandbox prepare, which handles them before the host image runs.
+      # its own, first on the agent's PATH. Only that PATH gains the fixed
+      # .local/bin under the home shared by setup and run below, after the
+      # helper and system directories so setup tools cannot shadow them.
+      # Declare the agent tables for sandbox prepare, which handles them
+      # before the host image runs.
       # The action overrides write-policy from its input, so forward the
       # generated configuration's value rather than defaulting it off.
       - name: The host's configuration
         id: host-config
         run: |
           install -D -m 0755 .agentic-job/agentic-job "$RUNNER_TEMP/agentic-job-bin/agentic-job"
-          agentic-job config --host --prepared --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
+          agentic-job config --host --prepared --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin:$RUNNER_TEMP/agent-home/.local/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
           python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb")); print("egress=" + ("write-policy" if c.get("egress", {}).get("write-policy", False) else "off"))' "$RUNNER_TEMP/agentic-job-host.toml" >> "$GITHUB_OUTPUT"
       # Every mirror in the runner's apt-mirrors.txt (archive and security
       # alike) is an ubuntu.com name, so Canonical's DNS outage of 2026-11-11

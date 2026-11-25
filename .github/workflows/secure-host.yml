@@ -22,7 +22,7 @@ jobs:
   # --host --prepared, sandbox prepare and the pinned host action, then
   # the setup script and run's own
   # proof that the host is secured, all as the runner's user; then the
-  # pinned scripted agent (agentic-job's `fake`, comment profile) through
+  # pinned scripted agent (agentic-job's `fake`, with a local setup fixture) through
   # run with no GitHub token, and its handback through the pinned check.
   # Deterministic: no model, inference, tailnet credentials or secrets,
   # and no apply, so nothing is published. The wrappers keep refusing
@@ -44,7 +44,9 @@ jobs:
       comment-target: '103'
       notify: none
       agent: fake
-      fake-profile: comment
+      # A built-in fake-profile is incompatible with setup. The setup
+      # script installs both the test tools and the scripted session.
+      setup: workflow/wrapper-smoke-setup.sh
       max-requests: '0'
       budget: '1'
       task: Prove the agent job's host is secured for the runner's user and hand back a checked comment.
@@ -87,7 +89,7 @@ jobs:
         id: host-config
         run: |
           install -D -m 0755 .agentic-job/agentic-job "$RUNNER_TEMP/agentic-job-bin/agentic-job"
-          agentic-job config --host --prepared --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
+          agentic-job config --host --prepared --from .agentic-job/config.toml --string "host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin:$RUNNER_TEMP/agent-home/.local/bin" > "$RUNNER_TEMP/agentic-job-host.toml"
           python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb")); print("egress=" + ("write-policy" if c.get("egress", {}).get("write-policy", False) else "off"))' "$RUNNER_TEMP/agentic-job-host.toml" >> "$GITHUB_OUTPUT"
       - name: Prepare the agents and trusted helper
         run: sudo /usr/local/bin/agentic-job sandbox prepare --config "$RUNNER_TEMP/agentic-job-host.toml"
@@ -102,7 +104,8 @@ jobs:
       # What run/action.yml checks before it starts the agent; then that
       # the runner's user has lost sudo, and that the agentic-job its
       # commands find on the agent's PATH, the installed configuration's,
-      # is the policy binary run starts, not the image's older copy.
+      # is the policy binary run starts, not the image's older copy or
+      # the name collision installed by the setup fixture.
       - name: The runner's user runs the policy binary on a secured host
         run: |
           python3 -c 'import sys, tomllib; c = tomllib.load(open("/etc/agentic-job/config.toml", "rb")); sys.exit(0 if c.get("host", c.get("sandbox", {})).get("lock-runner", True) is True else "run requires a locked host")'
@@ -113,6 +116,8 @@ jobs:
           found=$(env -i PATH="$path" sh -c 'command -v agentic-job')
           echo "policy binary: $(.agentic-job/agentic-job --version); on the agent's PATH: $found, $("$found" --version)"
           cmp "$found" .agentic-job/agentic-job || { echo "::error::the agent's PATH finds $found, not the policy binary"; exit 1; }
+          test "$(env -i PATH="$path" wrapper-setup-probe)" = setup-tool
+          if command -v wrapper-setup-probe; then echo '::error::setup tools leaked onto the job PATH'; exit 1; fi
       # The agent job's run step, with the empty GitHub token a review
       # gets and no run token: the scripted agent reaches no proxy.
       - id: run
