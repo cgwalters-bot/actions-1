@@ -20,6 +20,7 @@ const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
 const AGENT: &str = ".github/workflows/cgwalters-agent.yml";
 const SMOKE: &str = ".github/workflows/secure-host.yml";
 const LOCAL_HOST: &str = "./.agentic-job-source/secure-host";
+const HOST_CONFIG_COMMAND: &str = "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin:$RUNNER_TEMP/agent-home/.local/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n";
 
 // Moving a tag or substituting another action must not change privileged setup.
 // Normalize only the validated host call so all existing assertions cover both forms.
@@ -1632,7 +1633,7 @@ fn agent_source(text: &str) {
             "./.agentic-job-source/prepare",
             "The pull request's earlier reviews",
             "Admit the runner-user configuration",
-            "Refuse listening sessions on the shared runner",
+            "Admit shared-runner setup and session settings",
             "Check the tailnet key is this attempt's and unexpired",
             "Join the tailnet",
             "Check inference proxy reachability",
@@ -1859,7 +1860,6 @@ fn agent_inputs(text: &str) {
         agent,
         &[
             "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-            "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
             "config: ${{ runner.temp }}/agentic-job-host.toml",
             "AGENT_USER: runner\n",
             "run: python3 .agentic-job-source/workflow/runner-setup.py admit",
@@ -1913,6 +1913,32 @@ fn steering_receives_dispatch_item_through_policy_metadata_or_review_event() {
 #[test]
 fn runner_smoke_uses_same_policy_binary_and_host_sequence_as_wrappers() {
     smoke_source(&read(SMOKE));
+}
+
+#[test]
+fn setup_and_run_share_home_and_only_the_agent_path_includes_its_bin() {
+    for (file, name) in [(AGENT, "agent"), (SMOKE, "wrapper-runner")] {
+        let text = read(file);
+        let source = yaml(&text);
+        let runner = &source["jobs"][name];
+        let steps = runner["steps"].as_vec().unwrap();
+        let home = "${{ runner.temp }}/agent-home";
+        let setup = steps
+            .iter()
+            .find(|step| {
+                step["run"].as_str()
+                    == Some("python3 .agentic-job-source/workflow/runner-setup.py setup")
+            })
+            .unwrap();
+        assert_eq!(setup["env"]["AGENT_HOME"].as_str(), Some(home));
+        let run = steps.last().unwrap();
+        assert_eq!(run["with"]["runner-home"].as_str(), Some(home));
+        includes(job(&text, name), &[HOST_CONFIG_COMMAND]);
+        excludes(job(&text, name), &["GITHUB_PATH", "GITHUB_ENV"]);
+        for scope in [&source, runner].into_iter().chain(steps) {
+            assert!(scope["env"]["PATH"].is_badvalue(), "{file}: {scope:?}");
+        }
+    }
 }
 
 #[test]
@@ -1976,17 +2002,21 @@ fn wrappers_forward_the_configured_write_policy_to_the_host_action() {
 }
 
 #[test]
-fn shared_runner_refuses_listener_in_prepared_policy_config() {
+fn shared_runner_refuses_listener_or_setup_home_override_in_prepared_policy_config() {
     let source = yaml(&read(AGENT));
     let steps = source["jobs"]["agent"]["steps"].as_vec().unwrap();
     let gate = steps
         .iter()
         .find(|step| {
-            step["name"].as_str() == Some("Refuse listening sessions on the shared runner")
+            step["name"].as_str() == Some("Admit shared-runner setup and session settings")
         })
         .unwrap();
     assert!(gate["if"].is_badvalue());
     assert_eq!(gate["shell"].as_str(), Some("python3 {0}"));
+    assert_eq!(
+        gate["env"]["AGENT_HOME"].as_str(),
+        Some("${{ runner.temp }}/agent-home")
+    );
     let script = gate["run"].as_str().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let job = temp.path().join(".agentic-job");
@@ -1998,10 +2028,25 @@ fn shared_runner_refuses_listener_in_prepared_policy_config() {
         ("[session]\nlisten = true", true),
         ("session.listen = 'false'", true),
         ("[session", true),
+        ("[host.env]\nHOME = '/other'", false),
+        ("setup.script = 'setup.sh'", false),
+        (
+            "setup.script = 'setup.sh'\n[host.env]\nHOME = '/trusted/agent-home'",
+            false,
+        ),
+        (
+            "setup.script = 'setup.sh'\n[host.env]\nHOME = '/other'",
+            true,
+        ),
+        (
+            "setup.script = 'setup.sh'\n[sandbox.env]\nHOME = '/other'",
+            true,
+        ),
     ] {
         fs::write(job.join("config.toml"), text).unwrap();
         let output = Command::new("python3")
             .args(["-c", script])
+            .env("AGENT_HOME", "/trusted/agent-home")
             .current_dir(temp.path())
             .output()
             .unwrap();
@@ -2010,6 +2055,9 @@ fn shared_runner_refuses_listener_in_prepared_policy_config() {
         if text.contains("listen") && refused {
             assert!(stderr.contains("listening sessions require a separate credential boundary"));
         }
+        if text.contains("HOME") && refused {
+            assert!(stderr.contains("setup requires the shared runner home"));
+        }
     }
 }
 
@@ -2017,14 +2065,15 @@ fn smoke_source(text: &str) {
     let text = host_source(text, "wrapper-runner");
     includes(&text, &[&format!("policy.yml@{PIN}")]);
     let policy = job(&text, "wrapper-policy");
-    // A scripted dispatch: upstream's comment session, no model or broker.
+    // A scripted dispatch: its setup fixture installs the comment session,
+    // which only hands back if the agent can find the setup tool.
     includes(
         policy,
         &[
             "max-requests: '0'",
             "budget: '1'",
             "      agent: fake\n",
-            "      fake-profile: comment\n",
+            "      setup: workflow/wrapper-smoke-setup.sh\n",
             "      outputs: add_comment,noop\n",
             "      max-outputs: '1'\n",
             "      notify: none\n",
@@ -2032,7 +2081,12 @@ fn smoke_source(text: &str) {
     );
     excludes(
         policy,
-        &["inference-", "apply-environment", "setup:", "secrets"],
+        &[
+            "inference-",
+            "apply-environment",
+            "fake-profile:",
+            "secrets",
+        ],
     );
     assert_eq!(
         yaml(&text)["jobs"]["wrapper-policy"]["permissions"]["actions"].as_str(),
@@ -2048,7 +2102,7 @@ fn smoke_source(text: &str) {
         "run: python3 .agentic-job-source/workflow/runner-setup.py admit",
         "run: agentic-job secure-host inference .agentic-job/config.toml",
         "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-        "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
+        HOST_CONFIG_COMMAND,
         "run: sudo /usr/local/bin/agentic-job sandbox prepare --config \"$RUNNER_TEMP/agentic-job-host.toml\"",
         "uses: ./.agentic-job-source/secure-host",
         "run: python3 .agentic-job-source/workflow/runner-setup.py setup",
@@ -2056,6 +2110,8 @@ fn smoke_source(text: &str) {
         "if sudo -n true 2> /dev/null; then",
         "found=$(env -i PATH=\"$path\" sh -c 'command -v agentic-job')",
         "cmp \"$found\" .agentic-job/agentic-job ||",
+        "test \"$(env -i PATH=\"$path\" wrapper-setup-probe)\" = setup-tool",
+        "if command -v wrapper-setup-probe; then",
         "uses: ./.agentic-job-source/run",
         "runner-home: ${{ runner.temp }}/agent-home\n",
         "github-token: ''\n",
@@ -2477,7 +2533,6 @@ fn prose_runner_only_migration_keeps_oidc_and_writes_out_of_agent_job() {
             // The agent's `agentic-job handback` must find the policy
             // binary, not the older one secure-host's image installs.
             "install -D -m 0755 .agentic-job/agentic-job \"$RUNNER_TEMP/agentic-job-bin/agentic-job\"\n",
-            "agentic-job config --host --prepared --from .agentic-job/config.toml --string \"host.env.PATH=$RUNNER_TEMP/agentic-job-bin:/usr/local/bin:/usr/bin:/bin\" > \"$RUNNER_TEMP/agentic-job-host.toml\"\n",
         ],
     );
     let source = yaml(&shared);

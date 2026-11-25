@@ -96,14 +96,29 @@ agentic-job's runner-user admission, the join, the reachability check,
 with `--runner-home`. The pinned image installs its own, older
 `agentic-job` in `/usr/local/bin`, so the host configuration puts a copy
 of the policy binary first on the agent's `PATH`: the agent's
-`agentic-job handback` commands must match the binary `run` starts. The
-`wrapper-runner` CI job in
+`agentic-job handback` commands must match the binary `run` starts.
+
+Trusted caller-owned `[setup] script` runs after hardening with `HOME` and
+the working directory set to `${{ runner.temp }}/agent-home`, the same home
+passed to `run`. Install optional executables in `$HOME/.local/bin`. The
+agent's fixed `PATH` searches the private policy-helper directory first,
+then `/usr/local/bin`, `/usr/bin`, `/bin`, and finally that `.local/bin`.
+When using setup, leave `host.env.HOME` unset so both steps use that home.
+Without a tool installed there, no setup tool is enabled. Do not install
+into the private helper directory or rely on exporting `PATH` from setup:
+the wrapper does not inherit the caller's or target's path entries, and
+preparation and privileged steps keep their existing `PATH`s. The target
+does not select the setup script.
+
+The `wrapper-runner` CI job in
 [secure-host.yml](.github/workflows/secure-host.yml) runs that sequence on
 a fresh runner, with no inference or tailnet, and checks that the host
-passes run's own probe, the runner has lost sudo and the agent's `PATH`
-finds the policy binary. It is also a deterministic scripted dispatch: the
-policy call selects the pinned helper's scripted agent (`fake`, comment
-profile), `run` starts it with an empty GitHub token and no run token, the
+passes run's own probe, the runner has lost sudo and only the agent's
+`PATH` finds the setup tool. It is also a deterministic scripted dispatch:
+the policy call selects the pinned helper's scripted agent (`fake`), which
+only hands back a comment if it finds the setup tool and the policy helper
+and system binaries beat same-named setup tools. `run` starts it with an
+empty GitHub token and no run token, the
 pinned `check.yml` checks its handback, and `wrapper-scripted-dispatch`
 passes only for an agent exit of 0 and one checked comment with no patch.
 Nothing is applied, and the job holds no secret. This is the
