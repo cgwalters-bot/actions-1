@@ -271,7 +271,7 @@ jobs:
           fi
       - name: Prepare the agents and trusted helper
         run: sudo /usr/local/bin/agentic-job sandbox prepare --config "$RUNNER_TEMP/agentic-job-host.toml"
-      - uses: cgwalters-forge/actions/secure-host@456a5f663b73ac367c331aaf8ed2c888e481a98c # from main
+      - uses: cgwalters-forge/actions/secure-host@b5c7747cf89f6b2030090380cc672277366d07a2 # from main
         with:
           config: ${{ runner.temp }}/agentic-job-host.toml
           egress: ${{ steps.host-config.outputs.egress }}

@@ -12,7 +12,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 // the tag of its CI build (`build-DIGEST`), which zizmor's ref-version-mismatch
 // audit resolves. A bump changes this, the six calls, the smoke job's two and
 // the README.
-const PIN: &str = "2b937aaac81da06d8bff5f317e58df6ad7063e1e # v0.6.16";
+const PIN: &str = "00a246d79f3ef01cc3be1f22b7b330801965c50f # v0.6.17";
 const PROSE_PIN: &str = PIN;
 const REVIEW: &str = ".github/workflows/cgwalters-review.yml";
 const DISPATCH: &str = ".github/workflows/cgwalters-agentic-job.yml";
