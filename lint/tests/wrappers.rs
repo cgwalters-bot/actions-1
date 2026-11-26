@@ -985,21 +985,25 @@ fn review_task_requires_project_visibility_before_claiming_missing_membership() 
     }
 }
 
-// Nits and speculative findings kept reviews looping (tracker#1830): only a
-// concrete defect blocks, and an approval carries the rest as follow-ups.
+// Keep the blocker bar aligned with tracker#1954: compare with the base,
+// and carry non-blockers as follow-ups in an approval.
 #[test]
-fn review_task_blocks_only_on_concrete_defects() {
+fn review_task_blocks_regressions_or_no_delivery() {
     let task = read("workflow/review.md");
     let task = task.split_whitespace().collect::<Vec<_>>().join(" ");
     for contract in [
-        "A blocker is a concrete failure to deliver the change's main purpose",
-        "defect it introduces or makes reachable",
-        "Speculative risks, unrelated pre-existing behavior",
+        "A blocker is a concrete defect this diff introduces or makes reachable that makes behavior worse than the base",
+        "No exemption below, whether a pin bump, a default-off option, a race or a pre-existing gap, ever covers a security hole, data loss or a confirmed dependency-integrity failure this diff introduces or makes reachable",
+        "A dependency or pin bump that fixes something and regresses nothing is approved; other findings in the bumped code are follow-ups",
+        "a change that does not do its main stated purpose at all",
+        "Partial delivery is a follow-up, and a mismatch between the PR text and the code is fixed by rewording the text, not by blocking",
+        "pre-existing gaps, races that need an outside change mid-run, hardening, privacy or robustness the base also lacks, an incomplete fix that is no worse than the base, speculative risks, and documentation or test gaps",
         "When findings share a cause, report one finding",
         "names the root fix",
         "Apply the same blocker definition in every round",
         "A prior miss does not downgrade the finding",
         "VERDICT: APPROVE otherwise, also when important findings and nits remain",
+        "In an approving review, list important findings and nits under a \"Follow-ups\" heading",
     ] {
         assert!(task.contains(contract), "{contract}");
     }
@@ -1018,8 +1022,8 @@ fn review_task_keeps_verdict_short_and_opt_in_defects_reachable() {
         "In a separate `Decision diff` section, show only changed decision lines",
         "If none changed, use `Decision diff: no change` as the entire section",
         "Opt-in status bears only on reachability",
-        "check that existing inputs still work without enabling it and wherever the PR enables it for existing callers. Apply the same regression bar to those paths",
-        "For a defect reachable only through a caller's new, explicit opt-in, block only if it defeats the option's main purpose or is data loss, a security hole or a dependency-integrity failure",
+        "edge cases in an off-by-default option this PR adds, which nothing in it enables, are follow-ups",
+        "Check the regression bar on existing paths and wherever the PR enables the new option",
         "A change to an existing option, enabled or not, keeps the regression bar",
     ] {
         assert!(task.contains(contract), "{contract}");
