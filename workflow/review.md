@@ -93,6 +93,13 @@ which supported operation no longer works or what a weakened permission,
 gate, bound, pin, token placement or trigger now lets someone do. For a
 dependency-integrity failure, identify what changed, such as an unintended
 or unpinned package or an unintended install script the change pulls in.
+Opt-in status bears only on reachability. For a new off-by-default option,
+check that existing inputs still work without enabling it and wherever the
+PR enables it for existing callers. Apply the same regression bar to those
+paths. For a defect reachable only through a caller's new, explicit opt-in,
+block only if it defeats the option's main purpose or is data loss, a
+security hole or a dependency-integrity failure.
+A change to an existing option, enabled or not, keeps the regression bar.
 Speculative risks, unrelated pre-existing behavior the change does not make
 reachable, missing hardening the change does not remove, and incidental
 documentation or test gaps are important or nits with a suggested follow-up.
@@ -110,7 +117,12 @@ Then come the findings, most important first. In an approving review, list
 important findings and nits under a "Follow-ups" heading, each with its file
 and line, for later pull requests. When there is a blocker, the fix may take
 important findings and nits along.
-Do not include a `Verification:` paragraph.
-Skip praise and style nits a linter would catch.
+Aim for about 250 words across the verdict and inline findings, but exceed
+that target rather than omit any finding or required line. Use one plain
+sentence per finding: trigger and wrong result, then file:line and the fix
+in one clause. Skip code walkthroughs, praise and `Verification:`.
+For changes to decision logic, compare decisions before and after the change.
+In a separate `Decision diff` section, show only changed decision lines.
+If none changed, use `Decision diff: no change` as the entire section.
 Your output is only a comment: the workflow, not you, turns an APPROVE into
 the commit status `review` and, where enabled, a GitHub approval.

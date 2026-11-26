@@ -1005,6 +1005,27 @@ fn review_task_blocks_only_on_concrete_defects() {
     }
 }
 
+// Long verdicts buried the blockers, and defects only an unused new option
+// could reach were blocked as regressions (tracker#1907). Checks the
+// instructions the reviewer receives, not model compliance.
+#[test]
+fn review_task_keeps_verdict_short_and_opt_in_defects_reachable() {
+    let task = read("workflow/review.md");
+    let task = task.split_whitespace().collect::<Vec<_>>().join(" ");
+    for contract in [
+        "Aim for about 250 words across the verdict and inline findings, but exceed that target rather than omit any finding or required line",
+        "one plain sentence per finding: trigger and wrong result, then file:line and the fix in one clause",
+        "In a separate `Decision diff` section, show only changed decision lines",
+        "If none changed, use `Decision diff: no change` as the entire section",
+        "Opt-in status bears only on reachability",
+        "check that existing inputs still work without enabling it and wherever the PR enables it for existing callers. Apply the same regression bar to those paths",
+        "For a defect reachable only through a caller's new, explicit opt-in, block only if it defeats the option's main purpose or is data loss, a security hole or a dependency-integrity failure",
+        "A change to an existing option, enabled or not, keeps the regression bar",
+    ] {
+        assert!(task.contains(contract), "{contract}");
+    }
+}
+
 // agentic-job is called at one release: check, apply, prepare and run
 // refuse calls that resolved to different commits, which following main
 // produced for runs spanning an agentic-job merge (tracker#544).
