@@ -284,7 +284,6 @@ fn dispatched_review_keeps_base_policy_and_credential_free_head_access() {
     let policy = job(&workflow, "policy");
     for required in [
         "review-head: ${{ inputs.kind == 'review' && inputs.head || '' }}",
-        "review-task: workflow/review.md",
         "allow: ${{ inputs.kind == 'review' && needs.target.outputs.review-allow",
         "inputs.kind == 'review' && needs.target.outputs.review-config",
         "budget: ${{ inputs.kind == 'review' && '500'",
@@ -943,91 +942,38 @@ commands = ["/review"]"#,
     );
 }
 
-// agentic-job's own task at the called tag, not agent-board's: that one says
-// no person approves after the review, but whether one does here is the
-// owner's merge policy (.github/agentic-job/merge.toml, `person` without
-// it), which the run appends to the task.
+// Both code review paths use the same pin from reviewed wrapper code.
 #[test]
-fn review_task_treats_the_head_as_hostile_and_defers_to_the_merge_policy() {
-    let task = read("workflow/review.md");
-    for contract in [
-        "hostile",
-        "Do not modify code",
-        "exact admitted head SHA",
-        "VERDICT: APPROVE",
-        "VERDICT: CHANGES",
-        "stated under \"Merge policy\"",
-        "Your output is only a comment",
+fn code_reviews_share_a_pinned_task() {
+    const SHARED: &str = "cgwalters-forge/tracker@b56f9b0bf873ef671411aed3a0ae94a9178b1a2d";
+    const ADDITIONS: &str = "workflow/review-additions.md";
+    for (wrapper, shared, task) in [
+        (REVIEW, SHARED.to_string(), ADDITIONS.to_string()),
+        (
+            AGENTIC_JOB,
+            format!("${{{{ inputs.kind == 'review' && '{SHARED}' || '' }}}}"),
+            format!("${{{{ inputs.kind == 'review' && '{ADDITIONS}' || 'workflow/review.md' }}}}"),
+        ),
     ] {
-        assert!(task.contains(contract), "{contract}");
+        let workflow = YamlLoader::load_from_str(&read(wrapper)).unwrap().remove(0);
+        let inputs = &workflow["jobs"]["policy"]["with"];
+        assert_eq!(
+            inputs["review-shared-task"].as_str(),
+            Some(shared.as_str()),
+            "{wrapper}"
+        );
+        assert_eq!(
+            inputs["review-task"].as_str(),
+            Some(task.as_str()),
+            "{wrapper}"
+        );
+        if wrapper == REVIEW {
+            let prose = &workflow["jobs"]["prose-policy"]["with"];
+            assert!(prose["review-shared-task"].is_badvalue());
+            assert_eq!(prose["review-task"].as_str(), Some("workflow/prose.md"));
+        }
     }
-    for claim in [
-        "no person approves after you",
-        "the merge gate for every change here",
-    ] {
-        assert!(!task.contains(claim), "{claim}");
-    }
-}
-
-#[test]
-fn review_task_requires_project_visibility_before_claiming_missing_membership() {
-    let task = read("workflow/review.md");
-    let task = task.split_whitespace().collect::<Vec<_>>().join(" ");
-    for contract in [
-        "An empty `gh issue view --json projectItems` result is not proof",
-        "same token can read the exact target Project",
-        "complete membership query",
-        "membership could not be verified",
-        "Do not turn that uncertainty into a missing-membership finding or blocker",
-        "Do not request broader credentials",
-    ] {
-        assert!(task.contains(contract), "{contract}");
-    }
-}
-
-// Keep the blocker bar aligned with tracker#1954: compare with the base,
-// and carry non-blockers as follow-ups in an approval.
-#[test]
-fn review_task_blocks_regressions_or_no_delivery() {
-    let task = read("workflow/review.md");
-    let task = task.split_whitespace().collect::<Vec<_>>().join(" ");
-    for contract in [
-        "A blocker is a concrete defect this diff introduces or makes reachable that makes behavior worse than the base",
-        "No exemption below, whether a pin bump, a default-off option, a race or a pre-existing gap, ever covers a security hole, data loss or a confirmed dependency-integrity failure this diff introduces or makes reachable",
-        "A dependency or pin bump that fixes something and regresses nothing is approved; other findings in the bumped code are follow-ups",
-        "a change that does not do its main stated purpose at all",
-        "Partial delivery is a follow-up, and a mismatch between the PR text and the code is fixed by rewording the text, not by blocking",
-        "pre-existing gaps, races that need an outside change mid-run, hardening, privacy or robustness the base also lacks, an incomplete fix that is no worse than the base, speculative risks, and documentation or test gaps",
-        "When findings share a cause, report one finding",
-        "names the root fix",
-        "Apply the same blocker definition in every round",
-        "A prior miss does not downgrade the finding",
-        "VERDICT: APPROVE otherwise, also when important findings and nits remain",
-        "In an approving review, list important findings and nits under a \"Follow-ups\" heading",
-    ] {
-        assert!(task.contains(contract), "{contract}");
-    }
-}
-
-// Long verdicts buried the blockers, and defects only an unused new option
-// could reach were blocked as regressions (tracker#1907). Checks the
-// instructions the reviewer receives, not model compliance.
-#[test]
-fn review_task_keeps_verdict_short_and_opt_in_defects_reachable() {
-    let task = read("workflow/review.md");
-    let task = task.split_whitespace().collect::<Vec<_>>().join(" ");
-    for contract in [
-        "Aim for about 250 words across the verdict and inline findings, but exceed that target rather than omit any finding or required line",
-        "one plain sentence per finding: trigger and wrong result, then file:line and the fix in one clause",
-        "In a separate `Decision diff` section, show only changed decision lines",
-        "If none changed, use `Decision diff: no change` as the entire section",
-        "Opt-in status bears only on reachability",
-        "edge cases in an off-by-default option this PR adds, which nothing in it enables, are follow-ups",
-        "Check the regression bar on existing paths and wherever the PR enables the new option",
-        "A change to an existing option, enabled or not, keeps the regression bar",
-    ] {
-        assert!(task.contains(contract), "{contract}");
-    }
+    assert!(read(ADDITIONS).contains("## Merge policy"));
 }
 
 // agentic-job is called at one release: check, apply, prepare and run

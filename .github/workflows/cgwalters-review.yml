@@ -63,7 +63,9 @@ jobs:
       repo: ${{ github.repository }}
       event: true
       review: true
-      review-task: workflow/review.md
+      # Tracker's workflow/review.md at this commit plus the caller's additions.
+      review-shared-task: cgwalters-forge/tracker@b56f9b0bf873ef671411aed3a0ae94a9178b1a2d
+      review-task: workflow/review-additions.md
       task: ''
       kind: analysis
       # The verdict comment or a noop, and up to ten inline findings beside
@@ -388,6 +390,7 @@ jobs:
       event: true
       review: true
       advisory: true
+      # Advisory prose has its own task; shared code review does not support advisory mode.
       review-task: workflow/prose.md
       task: ''
       kind: analysis

@@ -429,23 +429,23 @@ way the wrappers run only for an owner that
 
 Call it from the same `pull_request_target` and `issue_comment` events and
 job condition as [this repository's caller](.github/workflows/review.yml),
-replacing the job's `uses` with:
+replacing the job's `uses` with a reviewed full wrapper commit SHA:
 
 ```yaml
-uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@main
+uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@<full-wrapper-commit-sha>
 ```
 
 Keep that caller's six permission grants. Optional `SAFE_OUTPUTS_PAT` is
 forwarded explicitly, only to apply; it never reaches the agent or the real
-review submission. Keep `workflow/review.toml`, `workflow/review-command.toml`
-and a complete `workflow/review.md` on the caller's base branch. Use
-[this repository's review task](workflow/review.md) as the template. Add
-repository-specific instructions only if they agree with the template and
-the generated merge policy. Updating the wrapper pin doesn't update the
-caller's task: copy policy changes into the caller's file, and don't replace
-it with local additions alone. Runtime sharing needs a policy job that
-budgets the whole rendered task and supplies the same artifact to the agent
-and detector.
+review submission. Keep `workflow/review.toml` and
+`workflow/review-command.toml` on the caller's trusted base. Update the wrapper
+pin in the same PR that adds a nonblank `workflow/review-additions.md`.
+Put the caller's merge policy and repository-specific checks in the additions;
+see [this repository's additions](workflow/review-additions.md). Policy fetches
+[tracker's pinned `workflow/review.md`](https://github.com/cgwalters-forge/tracker/blob/b56f9b0bf873ef671411aed3a0ae94a9178b1a2d/workflow/review.md)
+and appends the additions; if they are missing or blank, policy fails. The pin
+is in the reviewed wrapper code. Update the dispatch wrapper pin as well if
+the caller dispatches reviews, before dropping `workflow/review.md`.
 
 Automatic reviews admit non-draft owner/member/collaborator PRs, preserving
 upstream's association rule for all authors. Otherwise-unassociated bots wait
@@ -457,13 +457,6 @@ Only admitted agent jobs enter per-PR concurrency; new automatic events
 cancel the old agent, comments do not. The head is data inside the sandbox,
 never executed by a privileged step. Each review is bounded to 150 requests,
 500 AIC and 75 agent minutes.
-
-The agent keeps the read-only job token; it has no organization Projects
-credential. To avoid false missing-board blockers, the shared template
-requires visibility of the exact Project and a complete membership query
-before reporting an item absent. Hidden, denied or ambiguous membership is
-reported as "membership could not be verified", not as missing. Copy this
-guidance into existing callers' tasks even if they keep custom instructions.
 
 `AGENT_REAL_REVIEWS=true` opts into checked APPROVE/REQUEST_CHANGES
 submission with the job token, at the admitted head. Leaving it unset keeps this off. Enable
@@ -481,8 +474,8 @@ them into the verdict comment. The policy call requests them with
 more, as [this repository's](workflow/review.toml) do; with older bounds the
 policy job refuses every review. `REVIEW_HISTORY=true` gives the agent the
 pull request's earlier reviews as untrusted data
-([upstream](https://github.com/cgwalters-forge/agentic-job/blob/00a246d79f3ef01cc3be1f22b7b330801965c50f/docs/review.md#review-history));
-copy this repository's `workflow/review.md` guidance for both.
+([upstream](https://github.com/cgwalters-forge/agentic-job/blob/00a246d79f3ef01cc3be1f22b7b330801965c50f/docs/review.md#review-history)).
+The shared task describes both inline findings and review history.
 
 Keep approval requirements separate from workflow completion. Do not enroll
 this review as an organization-required workflow: a run can succeed when
@@ -677,8 +670,9 @@ approval. Review dispatch therefore has a closed contract:
   **no AGENT/AGENT_MODEL/AGENT_CONFIG fallback**, nor dispatched agent,
   model, runner, config, endpoint, budget or task override for reviews.
 - The trusted dispatched default-branch SHA owns `workflow/review.toml`,
-  `workflow/review-command.toml`, `workflow/review.md`, merge guidance and
-  the selected config. Review always uses those fixed bounds/task paths.
+  `workflow/review-command.toml`, `workflow/review-additions.md` and the
+  selected config. Policy appends the additions to the same pinned shared
+  task as event reviews.
   Admission accepts the shipped TOML subset: one-line JSON string arrays
   for `hosts`, `repos`, `bases` and trigger lists; a boolean `forks`;
   no duplicate admission keys or unknown trigger keys. Other policy/output
